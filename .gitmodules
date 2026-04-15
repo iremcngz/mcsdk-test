@@ -1,0 +1,3 @@
+[submodule "MCSDK"]
+	path = MCSDK
+	url = https://github.com/keyazici/sdk.git
