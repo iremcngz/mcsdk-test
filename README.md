@@ -155,15 +155,47 @@ The `MCSDK/` folder is retained solely as a source reference and to support the 
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-### iOS (Ready — Not Yet Active)
+### iOS (Active)
 
-The TypeScript layer is identical on both platforms. Only the native bridge differs:
+The TypeScript layer is identical on both platforms. The native bridge uses an XCFramework (pre-built static library) instead of a `.so` shared library:
 
 ```
-NativeMcSdk.ts  (same spec)
-  └─▶ TurboModuleRegistry
-        └─▶ McSdkModule.mm  (ObjC++ TurboModule)
-              └─▶ McSdk.xcframework
+┌──────────────────────────────────────────────────────────────────────┐
+│                        React Native (JavaScript)                      │
+│  (identical to Android — same NativeMcSdk.ts Codegen spec)           │
+│                                                                      │
+│  App.tsx → McSdk (index.ts) → NativeMcSdk.ts                        │
+│              └─▶ TurboModuleRegistry.getEnforcing('McSdk')           │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │  JSI (synchronous, no bridge serialization)
+┌─────────────────────────────▼────────────────────────────────────────┐
+│                     iOS Native  (ObjC++)                              │
+│                                                                      │
+│  McSdkBridge.podspec                                                 │
+│    └─▶ McSdkModule.mm  RCTEventEmitter <RCTBridgeModule>             │
+│          ├─ RCT_EXPORT_MODULE(McSdk)                                 │
+│          ├─ RCT_EXPORT_METHOD(setParams:(NSString*)paramsJson)       │
+│          ├─ RCT_EXPORT_METHOD(init:resolve:reject:)  ← async        │
+│          ├─ <McSdkListener>  protocol conformance                    │
+│          ├─ <McSdkLogListener>  protocol conformance                 │
+│          └─ <McSdkAlarmListener>  protocol conformance               │
+│                                                                      │
+│  Static globals (process-level):                                     │
+│    gSdk            : McSdk*    (ObjC wrapper around C++ Sdk)         │
+│    gSdkInitialized : BOOL                                            │
+│    gSdkInitializing: BOOL      (concurrent init guard)               │
+└─────────────────────────────┬────────────────────────────────────────┘
+                              │  ObjC → C++ (direct call, no JNI layer)
+┌─────────────────────────────▼────────────────────────────────────────┐
+│                    McSdk.xcframework  (C++ + ObjC)                    │
+│                                                                      │
+│  ios-arm64/libmcsdk-merged.a          (physical device)              │
+│  ios-arm64_x86_64-simulator/libmcsdk-merged.a  (simulator)           │
+│                                                                      │
+│  Statically merged:                                                  │
+│    McSdk (ObjC wrapper) · C++ Sdk core · SipAgent · HttpAgent        │
+│    pjsip · OpenSSL · tinyxml2 · prometheus-cpp · nlohmann/json       │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -357,22 +389,9 @@ fun create() {
 }
 
 @ReactMethod
-fun setListener() {
-    // Explicit listener binding step. Emits a verification log event to JS
-    // so the caller can confirm the binding succeeded.
-    sdk?.setListener(this)
-    sdk?.setAlarmListener(this)
-    sdk?.setLogListener(this)
-    emit(EVENT_LOG, Arguments.createMap().apply {
-        putInt("level", 2)
-        putString("log", "Listeners bound: SdkListener + AlarmListener + LogListener")
-    })
-}
-
-@ReactMethod
 fun destroy() {
-    // Do NOT call nativeDestroy(). The C++ singleton agents cannot be re-initialized
-    // after destruction (see §7). Only reset the JS-visible guard flag.
+    sdk?.destroy()           // Calls nativeDestroy() → gSdk.reset() in C++
+    sdk = null               // Release the Java wrapper
     sdkInitialized = false
 }
 
@@ -422,7 +441,147 @@ PackageList(this).packages.apply {
 
 ---
 
-### 5.5 TypeScript TurboModule Spec (`NativeMcSdk.ts`)
+### 5.5 iOS Platform Bridge (`McSdkModule.mm`)
+
+**Location:** `ios/McSdkBridge/McSdkModule.mm`  
+**Build scope:** `McSdkBridge.podspec` — `s.source_files = 'ios/McSdkBridge/**/*.{h,m,mm}'` + `s.vendored_frameworks = 'ios/McSdk.xcframework'`
+
+Unlike Android, which loads C++ via JNI from a `.so` shared library, iOS links the XCFramework statically at compile time. There is no JNI layer; ObjC++ calls directly into C++ with zero overhead.
+
+#### 5.5.1 XCFramework Structure
+
+```
+ios/McSdk.xcframework/
+├── Info.plist
+├── ios-arm64/                          ← physical device slice
+│   ├── libmcsdk-merged.a               (C++ core + pjsip + OpenSSL, ~21 MB)
+│   └── Headers/                        ← ObjC wrapper headers
+│       ├── McSdk.h                     ← Main facade
+│       ├── McSdkParams.h               ← McSdkParams + sub-param structs
+│       ├── McSdkListener.h             ← @protocol McSdkListener
+│       ├── McSdkLogListener.h          ← @protocol McSdkLogListener
+│       └── McSdkAlarmListener.h        ← @protocol McSdkAlarmListener
+└── ios-arm64_x86_64-simulator/         ← simulator slice (device + Intel)
+    ├── libmcsdk-merged.a
+    └── Headers/
+```
+
+`libmcsdk-merged.a` is a fat static archive that contains the compiled ObjC wrapper (`McSdk`) and the full C++ core (`Sdk`, `SipAgent`, `HttpAgent`, all modules, pjsip, OpenSSL) merged into a single `.a` file via `libtool -static`. Xcode selects the correct slice automatically based on the build target.
+
+#### 5.5.2 ObjC++ Bridge (`McSdkModule.mm`)
+
+`McSdkModule` is an `RCTEventEmitter` subclass that also conforms to all three listener protocols:
+
+```objc
+@interface McSdkModule () <McSdkListener, McSdkLogListener, McSdkAlarmListener>
+@end
+
+@implementation McSdkModule
+RCT_EXPORT_MODULE(McSdk)  // Registers as "McSdk" in TurboModuleRegistry
+```
+
+Because `McSdkModule` itself implements the listener protocols, it passes `self` as all three listener targets. No separate adapter objects are needed (compare to Android's `JniSdkListener` / `JniLogListener` / `JniAlarmListener` adapter classes).
+
+**Process-level state:**
+
+```objc
+static McSdk *gSdk           = nil;
+static BOOL   gSdkInitialized  = NO;
+static BOOL   gSdkInitializing = NO;  // concurrent init guard
+```
+
+These are `static` file-scope variables — iOS has the same process-level singleton constraint as Android. Once `SipAgent` is initialized (inside the XCFramework's C++ core), it cannot be re-initialized within the same process.
+
+#### 5.5.3 The `setParams` JSON Fix
+
+**Problem.** In the React Native New Architecture (`TurboModules` + JSI), interop between JS and ObjC through `RCT_EXPORT_METHOD` with a large number of mixed-type arguments is broken. A method with >13 parameters where `NSString*` and `double` parameters are interleaved causes the New Arch interop layer to:
+
+1. Drop all `NSString*` parameters silently (arrive as `null`)
+2. Zero out all `double` parameters that follow an `NSString*` parameter
+
+Diagnostic evidence: an 18-argument `setParams` method — params 1–13 (`double`) arrived correctly, params 14–16 (`NSString*`) arrived as `null`, params 17–18 (`double` after `NSString*`) arrived as `0.0`.
+
+**Solution.** All 18 configuration fields are encoded as a single JSON string in JavaScript and decoded with `NSJSONSerialization` in ObjC:
+
+```objc
+RCT_EXPORT_METHOD(setParams:(NSString *)paramsJson) {
+  NSData *data = [paramsJson dataUsingEncoding:NSUTF8StringEncoding];
+  NSDictionary *d = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
+
+  McSdkThreadingParams *threading = [[McSdkThreadingParams alloc] init];
+  // Clamp to ≥1: pjsip debug build assertion requires async_cnt > 0
+  threading.sipRxThreadCount    = MAX(1, [d[@"sipRxThreads"] integerValue]);
+  threading.sipWorkerThreadCount= MAX(1, [d[@"sipWorkerThreads"] integerValue]);
+  // … all other params extracted similarly
+  [gSdk setParams:params];
+}
+```
+
+The `MAX(1, ...)` guard also prevents a `___assert_rtn` crash in pjsip's debug build: `assert(pool_factory->factory.create_pool != NULL)` is reached when `async_cnt == 0` is passed to the PJSUA transport creation.
+
+#### 5.5.4 Async `init` and Concurrency Guard
+
+`initSdk` is a blocking call (starts pjsip and the HTTP server). It runs on a background GCD queue so it does not freeze the JS thread:
+
+```objc
+RCT_EXPORT_METHOD(init:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject) {
+  if (gSdkInitializing) {
+    reject(@"INIT_IN_PROGRESS", @"SDK initialisation is already in progress", nil);
+    return;
+  }
+  gSdkInitializing = YES;
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    BOOL result = [gSdk initSdk];
+    if (result) gSdkInitialized = YES;
+    gSdkInitializing = NO;
+    resolve(@(result));
+  });
+}
+```
+
+The `gSdkInitializing` flag prevents a second `init()` call from starting while the first is still running — a real risk when the UI is tapped quickly.
+
+#### 5.5.5 Event Emission
+
+SDK listener callbacks originate from native (pjsip / HTTP) threads. They are dispatched to the main queue before being sent to JavaScript to comply with `RCTEventEmitter`'s main-thread requirement:
+
+```objc
+- (void)emitEvent:(NSString *)name body:(NSDictionary *)body {
+  if (!self.hasListeners) return;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.hasListeners) {
+      [self sendEventWithName:name body:body];
+    }
+  });
+}
+
+#pragma mark - McSdkLogListener
+- (void)onLog:(NSInteger)level log:(NSString *)log {
+  [self emitEvent:@"McSdkLog" body:@{@"level": @(level), @"log": log}];
+}
+```
+
+**Events emitted:** `McSdkLog`, `McSdkAlarm`, `McSdkFetchDocument`, `McSdkSdsSent`, `McSdkSdsReceived`, `McSdkSdsError`.
+
+#### 5.5.6 iOS vs Android Bridge Comparison
+
+| Aspect | Android | iOS |
+|---|---|---|
+| C++ distribution | `libmcsdk.so` (shared, JNI) | `libmcsdk-merged.a` in XCFramework (static) |
+| Bridge language | Kotlin TurboModule | ObjC++ `RCTEventEmitter` |
+| SDK wrapper | `McSdk.java` (JNI stub class) | `McSdk` ObjC class (inside XCFramework) |
+| C++ call mechanism | JNI (`Java_com_aselsan_*` symbols) | Direct ObjC → C++ call (no JNI) |
+| Listener pattern | Separate `JniSdkListener`, `JniLogListener`, `JniAlarmListener` adapter classes | Single `McSdkModule` conforms to all three protocols |
+| Thread attachment | `gJvm->AttachCurrentThread` needed for each callback thread | Not needed — ObjC runtime handles thread context |
+| `init` execution | Background coroutine via `Executors.newSingleThreadExecutor()` | Background GCD queue `dispatch_async` |
+| Event emission | `emit(name, params)` via React DeviceEventManagerModule | `sendEventWithName:body:` via main queue `dispatch_async` |
+| Hot-reload guard | `companion object` — `sdk` survives module re-instantiation | `static` globals — survive React module recreation |
+| Build integration | `build.gradle`: `jniLibs/`, Java sources in `src/main/java/` | `McSdkBridge.podspec`: `source_files` + `vendored_frameworks` |
+
+---
+
+### 5.6 TypeScript TurboModule Spec (`NativeMcSdk.ts`)
 
 **Location:** `src/mcsdk/NativeMcSdk.ts`
 
@@ -431,36 +590,38 @@ In the New Architecture, every native module requires a **Codegen spec file**. T
 ```typescript
 export interface Spec extends TurboModule {
     create(): void;
-    setListener(): void;
     destroy(): void;
 
-    // Parameters are primitives — Codegen cannot map nested TypeScript interfaces
-    // directly to native types. The McSdk class in index.ts performs the flattening.
-    setParams(
-        logEnabled: boolean, logLevel: number,
-        pjLogEnabled: boolean, pjLogLevel: number, rxTxEnabled: boolean,
-        httpPort: number,
-        sipUdpPort: number, sipTcpEnabled: boolean, sipTcpPort: number,
-        sipTlsEnabled: boolean, sipTlsPort: number, sipIpv6Enabled: boolean,
-        mTlsEnabled: boolean, certPath: string, privKeyPath: string, caListPath: string,
-        sipRxThreads: number, sipWorkerThreads: number,
-    ): void;
+    // All SDK configuration is encoded as a single JSON string.
+    // This bypasses a New Architecture (iOS) interop limitation where
+    // RCT_EXPORT_METHOD with mixed NSString*/double parameters silently
+    // drops strings and zeros subsequent numeric values.
+    setParams(paramsJson: string): void;
 
-    init(): boolean;   // Synchronous — backed by isBlockingSynchronousMethod = true
+    init(): Promise<boolean>;   // Async — returns a JS Promise
+
+    raiseAlarm(name: string, info: string, severity: number): void;
+    resolveAlarm(name: string): void;
+    listAlarms(): string;
+
+    listMetrics(): string;
 
     // Required by the RCTEventEmitter protocol (NativeEventEmitter interop)
     addListener(eventName: string): void;
     removeListeners(count: number): void;
+
+    // … DAO, messaging methods omitted for brevity
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('McSdk');
 //                                               ^^^^^^
-//             Must exactly match getName() = "McSdk" in McSdkModule.kt
+//   Must exactly match getName() = "McSdk" in McSdkModule.kt (Android)
+//   and RCT_EXPORT_MODULE(McSdk) in McSdkModule.mm (iOS)
 ```
 
 ---
 
-### 5.6 TypeScript User API (`McSdk` class)
+### 5.7 TypeScript User API (`McSdk` class)
 
 **Location:** `src/mcsdk/index.ts`
 
@@ -483,11 +644,19 @@ export class McSdk {
     setListener(): void { NativeMcSdk.setListener(); }
 
     setParams(params: McSdkParams = {}): void {
-        // Deep-merge caller-supplied partial config with defaults,
-        // then flatten all 18 fields into primitives for the TurboModule spec.
+        // 1. Deep-merge caller-supplied partial config with defaults.
+        // 2. Flatten all 18 fields into a plain object.
+        // 3. Serialize to JSON — avoids New Architecture iOS interop bug with
+        //    mixed NSString*/double argument lists in RCT_EXPORT_METHOD.
         const p = { ...DEFAULT_PARAMS, ...params };
-        const L = { ...DEFAULT_PARAMS.Logging!, ...p.Logging };
-        NativeMcSdk.setParams(L.enabled!, L.level!, /* … all 18 args */);
+        const flat = {
+            logEnabled: L.enabled ? 1 : 0,
+            logLevel: L.level,
+            /* … all 18 fields … */
+            sipRxThreads: Th.sipRxThreadCount,
+            sipWorkerThreads: Th.sipWorkerThreadCount,
+        };
+        NativeMcSdk.setParams(JSON.stringify(flat));
     }
 
     init(): boolean { return NativeMcSdk.init(); }
@@ -502,7 +671,7 @@ export class McSdk {
 
 ---
 
-### 5.7 React Native UI Layer (`App.tsx`)
+### 5.8 React Native UI Layer (`App.tsx`)
 
 **Location:** `App.tsx`
 
@@ -510,10 +679,10 @@ The test interface enforces the mandatory four-step initialization sequence. Eac
 
 | Step | Button | Action |
 |---|---|---|
-| 1 | **Create** | `new McSdk()` → `create()` → `nativeCreate()` → `gSdk = make_unique<Sdk>()` |
+| 1 | **Create** | `new McSdk()` → `create()` → Android: `nativeCreate()` → `gSdk = make_unique<Sdk>()` / iOS: `[[McSdk alloc] init]` |
 | 2 | **Set Listener** | `sdk.setListener()` → binds all three listeners; verification log confirms binding |
-| 3 | **Set Parameters** | `sdk.setParams({})` → merges defaults → `nativeSetParams(18 args)` → `gSdk->SetParams(p)` |
-| 4 | **Initialize** | `sdk.init()` → `nativeInit()` → `SipAgent::Get().Init()` + `HttpAgent::Get().Init()` → `true` / `false` |
+| 3 | **Set Parameters** | `sdk.setParams({})` → merges defaults → `JSON.stringify(flat)` → `setParams(paramsJson)` → `gSdk->SetParams(p)` |
+| 4 | **Initialize** | `sdk.init()` → async → `SipAgent::Get().Init()` + `HttpAgent::Get().Init()` → `true` / `false` |
 
 A real-time log console below the buttons displays SDK events color-coded by source and log level.
 
@@ -521,35 +690,66 @@ A real-time log console below the buttons displays SDK events color-coded by sou
 
 ## 6. Data Flow Diagrams
 
-### JS → C++ (Synchronous call — `setParams` example)
+### JS → C++ (Android — `setParams` example)
 
 ```
 App.tsx
   sdk.setParams({ Sip: { udpPort: 5060 } })
-    │  src/mcsdk/index.ts — merge with defaults, flatten to 18 primitives
-  NativeMcSdk.setParams(true, 1, false, 1, false, 8008, 5060, …)
-    │  JSI — direct C++ function pointer call (no JSON serialization)
-  McSdkModule.setParams(logEnabled=true, …, sipUdpPort=5060)    [Kotlin]
-    │  Construct SdkParams, resolve LogLevel.fromValue(1) → DEBUG
-  sdk!!.setParams(p)                                             [Java McSdk]
+    │  src/mcsdk/index.ts — merge with defaults, flatten to 18 fields, JSON.stringify
+  NativeMcSdk.setParams('{"sipUdpPort":5060,…}')
+    │  JSI — direct C++ function pointer call (no Bridge serialization)
+  McSdkModule.setParams(paramsJson: String)             [Kotlin]
+    │  JSON.parse, construct SdkParams, resolve LogLevel.fromValue(1) → DEBUG
+  sdk!!.setParams(p)                                    [Java McSdk]
     │  nativeSetParams(true, 1, …, 5060, …)
-  Java_com_aselsan_mcsdk_McSdk_nativeSetParams(JNIEnv*, jobject, …)  [C++ JNI]
+  Java_com_aselsan_mcsdk_McSdk_nativeSetParams(…)       [C++ JNI]
     │  SdkParams p; p.Sip.udpPort = 5060; …
   gSdk->SetParams(p)  →  Params::Set(params)
 ```
 
-### C++ → JS (Asynchronous callback — `onLog` example)
+### JS → C++ (iOS — `setParams` example)
+
+```
+App.tsx
+  sdk.setParams({ Sip: { udpPort: 5060 } })
+    │  src/mcsdk/index.ts — merge with defaults, flatten to 18 fields, JSON.stringify
+  NativeMcSdk.setParams('{"sipUdpPort":5060,…}')
+    │  JSI — direct ObjC function call (no Bridge, no JNI)
+  McSdkModule.setParams:(NSString*)paramsJson            [ObjC++]
+    │  NSJSONSerialization parse → NSDictionary
+    │  McSdkSipParams.udpPort = 5060; …
+    │  MAX(1, [d[@"sipRxThreads"] integerValue]) ← pjsip guard
+  [gSdk setParams:params]                               [ObjC McSdk in XCFramework]
+    │  direct C++ call (no JNI layer)
+  Sdk::SetParams(p)  →  Params::Set(params)             [C++ inside libmcsdk-merged.a]
+```
+
+### C++ → JS (Android — `onLog` callback)
 
 ```
 Sdk::Init() (running on pjsip worker thread)
   LOGI("Sdk ready")  →  Logger::Log(level=2, "Sdk ready")
     │  Sdk::GetLogListener()->onLog(2, "Sdk ready")
-  JniLogListener::onLog(2, "Sdk ready")                     [pjsip native thread]
-    │  getEnv(&attached) → gJvm->AttachCurrentThread  (first call on this thread)
+  JniLogListener::onLog(2, "Sdk ready")                 [pjsip native thread]
+    │  getEnv(&attached) → gJvm->AttachCurrentThread
   env->CallVoidMethod(javaObj, midOnLog, 2, jstring("Sdk ready"))
-    │  McSdkModule.onLog(level=2, log="Sdk ready")          [Kotlin — now on JVM]
+    │  McSdkModule.onLog(level=2, log="Sdk ready")      [Kotlin — JVM thread]
   emit("McSdkLog", { level: 2, log: "Sdk ready" })
     │  DeviceEventManagerModule → JS event queue
+  NativeEventEmitter.emit("McSdkLog", …)
+    │  App.tsx sdk.onLog() subscription handler
+  addLog("[SDK INFO] Sdk ready", 'sdk')  →  blue row in log console
+```
+
+### C++ → JS (iOS — `onLog` callback)
+
+```
+Sdk::Init() (running on pjsip worker thread / GCD background queue)
+  Logger::Log(level=2, "Sdk ready")
+    │  [McSdkModule onLog:2 log:@"Sdk ready"]            [pjsip / GCD thread]
+      (McSdkModule conforms to <McSdkLogListener> directly — no adapter object)
+    │  dispatch_async(dispatch_get_main_queue(), ^{ sendEventWithName:body: })
+  RCTEventEmitter → JS event queue                       [main thread]
   NativeEventEmitter.emit("McSdkLog", …)
     │  App.tsx sdk.onLog() subscription handler
   addLog("[SDK INFO] Sdk ready", 'sdk')  →  blue row in log console
@@ -561,38 +761,34 @@ Sdk::Init() (running on pjsip worker thread)
 
 ### The Problem
 
-`SipAgent::Get()` and `HttpAgent::Get()` inside `Sdk::Init()` are **Meyers process-level singletons**. When `nativeDestroy()` is called and `gSdk` is reset, the `Sdk` C++ object is destroyed — but the SIP and HTTP agents retain their internal `initialized` state. Creating a new `Sdk` and calling `Init()` again causes the agents to detect they are already initialized and refuse to re-bind the SIP port, silently returning `false`.
+`SipAgent::Get()` and `HttpAgent::Get()` inside `Sdk::Init()` are **Meyers process-level singletons**. They are alive for the entire process lifetime. Calling `nativeDestroy()` resets `gSdk` (the C++ `Sdk` instance), but those agents retain their internal initialized state. If a new `Sdk` is created and `Init()` is called again within the same process, the agents refuse to re-bind the SIP port and return `false` silently.
 
-### The Solution
+### Current Behavior
+
+`destroy()` performs a **full, real destroy** of the SDK:
 
 ```kotlin
-companion object {
-    private var sdk: McSdk? = null      // Created once — survives module re-instantiation
-    private var sdkInitialized = false  // JS-visible guard flag
-}
-
-fun create() {
-    if (sdk == null) sdk = McSdk()  // nativeCreate() called only once per process
-    sdk!!.setListener(this)         // Rebind on every create() — hot-reload safe
-    sdk!!.setAlarmListener(this)
-    sdk!!.setLogListener(this)
-}
-
 fun destroy() {
-    sdkInitialized = false          // Reset the JS guard; do NOT call nativeDestroy()
-}
-
-fun init(): Boolean {
-    if (sdkInitialized) return true // Short-circuit: skip redundant C++ Init()
-    val result = sdk?.init() ?: false
-    sdkInitialized = result
-    return result
+    sdk?.destroy()    // → nativeDestroy() → gSdk.reset() — C++ Sdk instance is released
+    sdk = null        // Java wrapper released; GC-eligible
+    sdkInitialized = false
 }
 ```
 
-### Hot Reload Behavior
+The `companion object` exists only to survive **hot reload** (JS bundle reload without a process restart). On hot reload, Android keeps the process alive and creates a new `McSdkModule` instance — the `companion object` lets `sdk` persist across that module re-instantiation so that a hot-reload-triggered re-create does not needlessly repeat `nativeCreate()`.
 
-During a React Native hot reload the JS bundle is re-evaluated and a new `McSdkModule` instance is created by the framework — but the Android process remains alive. The `companion object` ensures `sdk` and the underlying C++ singletons are unaffected. The subsequent `create()` call finds `sdk != null` and only rebinds listeners.
+```kotlin
+fun create() {
+    if (sdk == null) sdk = McSdk()  // nativeCreate() skipped if still alive (hot reload)
+    sdk!!.setListener(this)         // Always rebind to the current module instance
+    sdk!!.setAlarmListener(this)
+    sdk!!.setLogListener(this)
+}
+```
+
+### Re-initialization After Destroy
+
+After a real `destroy()`, pressing **Create → Set Parameters → Initialize** again within the **same process** will likely result in `init()` returning `false` because the Meyers singleton agents already consumed their one-time initialization window. A **full app restart** (process kill) is required to reinitialize the SDK after it has been destroyed.
 
 ---
 
@@ -602,10 +798,16 @@ During a React Native hot reload the JS bundle is re-evaluated and a new `McSdkM
 testAAR/
 ├── App.tsx                              ← Test UI (4-step lifecycle)
 ├── src/
-│   └── mcsdk/                          ← TypeScript bridge layer
-│       ├── NativeMcSdk.ts              ← TurboModule Codegen spec
-│       ├── index.ts                    ← McSdk class (user-facing API)
-│       └── types.ts                    ← McSdkParams, event payload types
+│   ├── mcsdk/                          ← TypeScript bridge layer
+│   │   ├── NativeMcSdk.ts              ← TurboModule Codegen spec
+│   │   ├── index.ts                    ← McSdk class (user-facing API)
+│   │   └── types.ts                    ← McSdkParams, event payload types
+│   └── utils/
+│       └── parsePrometheus.ts          ← Prometheus text format parser (extracted utility)
+│
+├── __tests__/
+│   ├── App.test.tsx                    ← 57 integration tests (RNTL)
+│   └── parsePrometheus.test.ts         ← 24 pure unit tests
 │
 ├── android/
 │   └── app/
@@ -629,19 +831,33 @@ testAAR/
 │               ├── AlarmSeverity.java
 │               ├── LogLevel.java
 │               └── rn/
-│                   ├── McSdkModule.kt  ← React Native TurboModule (adapted)
+│                   ├── McSdkModule.kt  ← React Native TurboModule
 │                   └── McSdkPackage.kt ← Package registration
 │
 ├── android/app/libs/
 │   └── mc-sdk-android.aar              ← Reference archive only; not a build dependency
 │
-└── MCSDK/                              ← SDK source tree (not required at runtime or build time)
-    ├── core/                           ← C++ core (compiled into libmcsdk.so)
+├── ios/
+│   ├── McSdkBridge/
+│   │   ├── McSdkModule.h               ← @interface McSdkModule : RCTEventEmitter
+│   │   └── McSdkModule.mm              ← ObjC++ bridge implementation
+│   └── McSdk.xcframework/              ← Pre-built XCFramework
+│       ├── ios-arm64/
+│       │   ├── libmcsdk-merged.a       ← device slice (~21 MB)
+│       │   └── Headers/                ← McSdk.h, McSdkParams.h, listener protocols
+│       └── ios-arm64_x86_64-simulator/
+│           ├── libmcsdk-merged.a       ← simulator slice (arm64 + x86_64)
+│           └── Headers/
+│
+├── McSdkBridge.podspec                 ← CocoaPods spec (source_files + vendored_frameworks)
+│
+└── MCSDK/                              ← SDK source tree (reference only, not compiled)
+    ├── core/                           ← C++ core (compiled into libmcsdk.so / libmcsdk-merged.a)
     ├── platform/
     │   ├── android/                    ← Java/JNI sources (copied into this project)
-    │   ├── ios/                        ← iOS ObjC++ bridge (future integration)
-    │   └── react-native/               ← TS + Kotlin + ObjC++ bridge (copied & adapted)
-    └── dep/                            ← pjsip, OpenSSL (statically linked into libmcsdk.so)
+    │   ├── ios/                        ← iOS ObjC++ bridge source reference
+    │   └── react-native/               ← TS + Kotlin + ObjC++ bridge reference
+    └── dep/                            ← pjsip, OpenSSL (statically linked)
 ```
 
 ---
@@ -654,6 +870,8 @@ testAAR/
 - JDK 17
 - Android Studio with NDK 27 and Build Tools 35
 - Connected Android device or emulator (API 24+)
+- **iOS:** Xcode 15+, CocoaPods, macOS (Ventura or later recommended)
+- **iOS:** Physical device or Simulator (iOS 13+)
 
 ### Commands
 
@@ -705,3 +923,117 @@ npx react-native log-android
 | `init()` returns `false` consistently | Listener or params not set before `init()` | Follow the mandatory sequence: Create → Set Listener → Set Parameters → Initialize |
 | `init()` returns `false` after Destroy → Create | C++ process-level singletons cannot re-initialize | Expected behavior is mitigated by the `companion object` pattern; `destroy()` only resets the JS flag, not the C++ state. If the process is restarted the issue disappears. |
 | Duplicate class errors at compile time | Both AAR and Java sources in the build | Remove `implementation files('libs/mc-sdk-android.aar')` from `build.gradle` |
+| iOS: `TurboModuleRegistry: 'McSdk' could not be found` | `McSdkBridge` pod not installed | Run `cd ios && pod install`, then rebuild in Xcode |
+| iOS: `SIGABRT — assertion failed: async_cnt > 0` | pjsip debug assertion; zero passed for `sipRxThreadCount` | JSON parsing correct; `MAX(1, ...)` guard in `setParams:` prevents this |
+| iOS: `SIGABRT — pool_factory null` | `initSdk` called before `setParams` | Follow the mandatory sequence; call `Set Parameters` before `Initialize` |
+| iOS: params arrive as defaults after `setParams` | Old JS bundle cached; Metro not running | Start Metro (`npx react-native start`) and reload the app |
+| iOS: build fails with `duplicate symbol` in XCFramework | Multiple copies of McSdkBridge pod linked | Clean build folder in Xcode (`Product → Clean Build Folder`) |
+
+---
+
+## 10. Testing
+
+### Test Infrastructure
+
+The project uses `@testing-library/react-native` (RNTL) on top of the Jest runner that ships with `@react-native/jest-preset`.
+
+```bash
+# Run all tests
+npx jest
+
+# Run with coverage report
+npx jest --coverage
+
+# Run a single test file
+npx jest __tests__/parsePrometheus.test.ts
+```
+
+**Configuration (`jest.config.js`):**
+
+```js
+module.exports = {
+    preset: '@react-native/jest-preset',
+    transformIgnorePatterns: [
+        'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@testing-library/react-native)/)',
+    ],
+};
+```
+
+The `transformIgnorePatterns` override is required because RNTL and React Native ship ES module source that Jest (which runs in CommonJS) cannot parse without Babel transformation.
+
+### Test Files
+
+| File | Tests | Type | Scope |
+|---|---|---|---|
+| `__tests__/parsePrometheus.test.ts` | 24 | Pure unit | `parsePrometheus()` utility function |
+| `__tests__/App.test.tsx` | 57 | Integration | Full `App` component via RNTL |
+| **Total** | **81** | | |
+
+### SDK Mock Pattern
+
+The `McSdk` TurboModule is not available in the Node.js test environment (no native runtime). All tests mock it at the module boundary:
+
+```typescript
+// __tests__/App.test.tsx
+
+const mockCreate    = jest.fn();
+const mockDestroy   = jest.fn();
+const mockSetParams = jest.fn();
+const mockInit      = jest.fn();
+// … other mocks
+
+// Factory creates an isolated mock instance per test
+function makeSdkInstance() {
+    return {
+        create:    mockCreate,
+        destroy:   mockDestroy,
+        setParams: mockSetParams,
+        init:      mockInit,
+        onLog:     jest.fn().mockReturnValue({ remove: jest.fn() }),
+        onAlarm:   jest.fn().mockReturnValue({ remove: jest.fn() }),
+        // … other methods
+    };
+}
+
+jest.mock('../src/mcsdk', () => ({
+    McSdk: jest.fn(),
+    McSdkEvents: { Log: 'McSdkLog', Alarm: 'McSdkAlarm' },
+}));
+
+const MockMcSdk = McSdk as jest.MockedClass<typeof McSdk>;
+
+beforeEach(() => {
+    jest.clearAllMocks();
+    MockMcSdk.mockImplementation(() => makeSdkInstance() as any);
+});
+```
+
+This pattern has two key properties:
+1. **Isolation** — `mockImplementation` in `beforeEach` gives each test a fresh mock with call counts reset to zero.
+2. **Verify behavior, not implementation** — tests assert on `mockInit.mock.calls.length`, rendered text, and disabled/enabled button state rather than on internal state variables.
+
+### Test Categories
+
+**`parsePrometheus.test.ts` — Pure Unit Tests**
+
+These tests have zero dependencies on React or the SDK. They verify the Prometheus text format parser in complete isolation:
+
+- Empty and trivial input
+- Single metric family (COUNTER, GAUGE, HISTOGRAM, UNTYPED)
+- Labels (quoted strings, escaped characters, multiple labels)
+- Multiple families in one response
+- Histogram `_sum` / `_count` / `_bucket` grouping
+- Malformed lines (robustness)
+
+**`App.test.tsx` — Integration Tests (8 groups)**
+
+| Group | Focus | Key assertions |
+|---|---|---|
+| Initial render | First paint | Create button enabled, others disabled, no SDK called |
+| `handleCreate` | Step 1 | `MockMcSdk` constructor called; success resets state; error logs |
+| `handleSetParams` | Step 3 | `mockSetParams` called; button disabled before Create; error path |
+| `handleInit` | Step 4 | `mockInit` resolves `true`/`false`; disabled until setParams done |
+| `handleDestroy` | Destroy | `mockDestroy` called; state reset to pre-Create; re-Create works |
+| Log console | Events | Log entries appear with correct colors; auto-scroll fires |
+| Tab navigation | Metrics tab | Tab renders MetricsScreen before/after init |
+| MetricsScreen | Metrics page | Prometheus parsing, empty state, error state, refresh button |

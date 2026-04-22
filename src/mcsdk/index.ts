@@ -53,10 +53,6 @@ export class McSdk {
         NativeMcSdk.create();
     }
 
-    setListener(): void {
-        NativeMcSdk.setListener();
-    }
-
     setParams(params: McSdkParams = {}): void {
         const p = { ...DEFAULT_PARAMS, ...params };
         const L = { ...DEFAULT_PARAMS.Logging!, ...p.Logging };
@@ -65,29 +61,33 @@ export class McSdk {
         const T = { ...DEFAULT_PARAMS.Tls!, ...p.Tls };
         const Th = { ...DEFAULT_PARAMS.Threading!, ...p.Threading };
 
-        NativeMcSdk.setParams(
-            L.enabled!,
-            L.level!,
-            L.pjEnabled!,
-            L.pjLevel!,
-            L.rxTxEnabled!,
-            H.port!,
-            S.udpPort!,
-            S.tcpEnabled!,
-            S.tcpPort!,
-            S.tlsEnabled!,
-            S.tlsPort!,
-            S.ipv6Enabled!,
-            T.mTlsEnabled!,
-            T.certPath!,
-            T.privKeyPath!,
-            T.caListPath!,
-            Th.sipRxThreadCount!,
-            Th.sipWorkerThreadCount!,
-        );
+        const flat = {
+            logEnabled:     L.enabled!     ? 1 : 0,
+            logLevel:       L.level!,
+            pjLogEnabled:   L.pjEnabled!   ? 1 : 0,
+            pjLogLevel:     L.pjLevel!,
+            rxTxEnabled:    L.rxTxEnabled! ? 1 : 0,
+            httpPort:       H.port!,
+            sipUdpPort:     S.udpPort!,
+            sipTcpEnabled:  S.tcpEnabled!  ? 1 : 0,
+            sipTcpPort:     S.tcpPort!,
+            sipTlsEnabled:  S.tlsEnabled!  ? 1 : 0,
+            sipTlsPort:     S.tlsPort!,
+            sipIpv6Enabled: S.ipv6Enabled! ? 1 : 0,
+            mTlsEnabled:    T.mTlsEnabled! ? 1 : 0,
+            certPath:       T.certPath!,
+            privKeyPath:    T.privKeyPath!,
+            caListPath:     T.caListPath!,
+            sipRxThreads:   Th.sipRxThreadCount!,
+            sipWorkerThreads: Th.sipWorkerThreadCount!,
+        };
+
+        console.log('[McSdk] setParams JSON: sipRxThreads=', flat.sipRxThreads, 'sipWorkerThreads=', flat.sipWorkerThreads);
+
+        NativeMcSdk.setParams(JSON.stringify(flat));
     }
 
-    init(): boolean {
+    async init(): Promise<boolean> {
         return NativeMcSdk.init();
     }
 

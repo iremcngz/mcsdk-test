@@ -69,26 +69,10 @@ class McSdkModule(
         sdk!!.setLogListener(this)
     }
 
-    // Explicit listener binding step — called from JS after create().
-    // Binds SdkListener, AlarmListener and LogListener to this module and
-    // emits a synthetic log event so the JS console can confirm receipt.
-    @ReactMethod
-    fun setListener() {
-        val s = sdk ?: return
-        s.setListener(this)
-        s.setAlarmListener(this)
-        s.setLogListener(this)
-        emit(EVENT_LOG, Arguments.createMap().apply {
-            putInt("level", 2) // Info
-            putString("log", "Listeners bound: SdkListener + AlarmListener + LogListener")
-        })
-    }
-
     @ReactMethod
     fun destroy() {
-        // Do NOT call sdk.destroy() — the C++ singleton agents can't reinit.
-        // Just reset JS-visible state so the next create→setParams→init cycle
-        // looks fresh to the JS side.
+        sdk?.destroy()
+        sdk = null
         sdkInitialized = false
     }
 
@@ -128,12 +112,15 @@ class McSdkModule(
         sdk?.setParams(p)
     }
 
-    @ReactMethod(isBlockingSynchronousMethod = true)
-    fun init(): Boolean {
-        if (sdkInitialized) return true
+    @ReactMethod
+    fun init(promise: com.facebook.react.bridge.Promise) {
+        if (sdkInitialized) {
+            promise.resolve(true)
+            return
+        }
         val result = sdk?.init() ?: false
         sdkInitialized = result
-        return result
+        promise.resolve(result)
     }
 
     // ── Alarm ─────────────────────────────────────────────────────────────────

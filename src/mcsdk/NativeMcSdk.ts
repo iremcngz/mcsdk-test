@@ -7,32 +7,13 @@ import { TurboModuleRegistry } from 'react-native';
 export interface Spec extends TurboModule {
     // Lifecycle
     create(): void;
-    setListener(): void;
     destroy(): void;
 
-    // Configuration
-    setParams(
-        logEnabled: boolean,
-        logLevel: number,
-        pjLogEnabled: boolean,
-        pjLogLevel: number,
-        rxTxEnabled: boolean,
-        httpPort: number,
-        sipUdpPort: number,
-        sipTcpEnabled: boolean,
-        sipTcpPort: number,
-        sipTlsEnabled: boolean,
-        sipTlsPort: number,
-        sipIpv6Enabled: boolean,
-        mTlsEnabled: boolean,
-        certPath: string,
-        privKeyPath: string,
-        caListPath: string,
-        sipRxThreads: number,
-        sipWorkerThreads: number,
-    ): void;
+    // Configuration — all params encoded as JSON to avoid New Architecture
+    // interop issues with mixed NSString*/double argument lists.
+    setParams(paramsJson: string): void;
 
-    init(): boolean;
+    init(): Promise<boolean>;
 
     // Alarm
     raiseAlarm(name: string, info: string, severity: number): void;

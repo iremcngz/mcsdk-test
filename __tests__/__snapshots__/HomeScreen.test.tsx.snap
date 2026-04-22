@@ -1,0 +1,1534 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Home screen — snapshot initial render matches snapshot 1`] = `
+<View
+  style={
+    [
+      {
+        "backgroundColor": "#1a1a2e",
+        "flex": 1,
+      },
+      {
+        "paddingTop": 0,
+      },
+    ]
+  }
+>
+  <View
+    style={
+      {
+        "alignItems": "center",
+        "backgroundColor": "#16213e",
+        "borderBottomColor": "#0f3460",
+        "borderBottomWidth": 1,
+        "flexDirection": "row",
+        "justifyContent": "space-between",
+        "paddingHorizontal": 16,
+        "paddingVertical": 12,
+      }
+    }
+  >
+    <Text
+      style={
+        {
+          "color": "#e94560",
+          "fontSize": 20,
+          "fontWeight": "700",
+        }
+      }
+    >
+      MCSDK Test
+    </Text>
+    <View
+      style={
+        [
+          {
+            "borderRadius": 12,
+            "paddingHorizontal": 10,
+            "paddingVertical": 4,
+          },
+          {
+            "backgroundColor": "#F44336",
+          },
+        ]
+      }
+      testID="status-badge"
+    >
+      <Text
+        style={
+          {
+            "color": "#fff",
+            "fontSize": 11,
+            "fontWeight": "700",
+          }
+        }
+        testID="status-badge-text"
+      >
+        NOT CREATED
+      </Text>
+    </View>
+  </View>
+  <View
+    style={
+      {
+        "backgroundColor": "#16213e",
+        "borderBottomColor": "#0f3460",
+        "borderBottomWidth": 1,
+        "flexDirection": "row",
+      }
+    }
+  >
+    <View
+      accessibilityState={
+        {
+          "busy": undefined,
+          "checked": undefined,
+          "disabled": undefined,
+          "expanded": undefined,
+          "selected": undefined,
+        }
+      }
+      accessibilityValue={
+        {
+          "max": undefined,
+          "min": undefined,
+          "now": undefined,
+          "text": undefined,
+        }
+      }
+      accessible={true}
+      collapsable={false}
+      focusable={true}
+      onClick={[Function]}
+      onResponderGrant={[Function]}
+      onResponderMove={[Function]}
+      onResponderRelease={[Function]}
+      onResponderTerminate={[Function]}
+      onResponderTerminationRequest={[Function]}
+      onStartShouldSetResponder={[Function]}
+      style={
+        {
+          "alignItems": "center",
+          "borderBottomColor": "#e94560",
+          "borderBottomWidth": 2,
+          "flex": 1,
+          "opacity": 1,
+          "paddingVertical": 11,
+        }
+      }
+      testID="tab-home"
+    >
+      <Text
+        style={
+          [
+            {
+              "color": "#555",
+              "fontSize": 13,
+              "fontWeight": "600",
+            },
+            {
+              "color": "#e94560",
+            },
+          ]
+        }
+      >
+        Home
+      </Text>
+    </View>
+    <View
+      accessibilityState={
+        {
+          "busy": undefined,
+          "checked": undefined,
+          "disabled": undefined,
+          "expanded": undefined,
+          "selected": undefined,
+        }
+      }
+      accessibilityValue={
+        {
+          "max": undefined,
+          "min": undefined,
+          "now": undefined,
+          "text": undefined,
+        }
+      }
+      accessible={true}
+      collapsable={false}
+      focusable={true}
+      onClick={[Function]}
+      onResponderGrant={[Function]}
+      onResponderMove={[Function]}
+      onResponderRelease={[Function]}
+      onResponderTerminate={[Function]}
+      onResponderTerminationRequest={[Function]}
+      onStartShouldSetResponder={[Function]}
+      style={
+        {
+          "alignItems": "center",
+          "borderBottomColor": "transparent",
+          "borderBottomWidth": 2,
+          "flex": 1,
+          "opacity": 1,
+          "paddingVertical": 11,
+        }
+      }
+      testID="tab-metrics"
+    >
+      <Text
+        style={
+          [
+            {
+              "color": "#555",
+              "fontSize": 13,
+              "fontWeight": "600",
+            },
+            false,
+          ]
+        }
+      >
+        Metrics
+      </Text>
+    </View>
+  </View>
+  <RCTScrollView
+    contentContainerStyle={
+      {
+        "padding": 16,
+      }
+    }
+    style={
+      {
+        "flex": 1,
+      }
+    }
+  >
+    <View>
+      <Text
+        style={
+          {
+            "color": "#e0e0e0",
+            "fontSize": 15,
+            "fontWeight": "700",
+            "marginBottom": 8,
+            "marginTop": 12,
+          }
+        }
+      >
+        SDK Lifecycle
+      </Text>
+      <View
+        style={
+          {
+            "flexDirection": "row",
+            "justifyContent": "space-between",
+            "marginBottom": 12,
+          }
+        }
+      >
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flex": 1,
+            }
+          }
+        >
+          <View
+            style={
+              [
+                {
+                  "alignItems": "center",
+                  "backgroundColor": "#0f3460",
+                  "borderRadius": 14,
+                  "height": 28,
+                  "justifyContent": "center",
+                  "marginBottom": 4,
+                  "width": 28,
+                },
+                false,
+              ]
+            }
+          >
+            <Text
+              style={
+                {
+                  "color": "#fff",
+                  "fontSize": 11,
+                  "fontWeight": "700",
+                }
+              }
+            >
+              1
+            </Text>
+          </View>
+          <Text
+            style={
+              [
+                {
+                  "color": "#555",
+                  "fontSize": 10,
+                },
+                false,
+              ]
+            }
+          >
+            Create
+          </Text>
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flex": 1,
+            }
+          }
+        >
+          <View
+            style={
+              [
+                {
+                  "alignItems": "center",
+                  "backgroundColor": "#0f3460",
+                  "borderRadius": 14,
+                  "height": 28,
+                  "justifyContent": "center",
+                  "marginBottom": 4,
+                  "width": 28,
+                },
+                false,
+              ]
+            }
+          >
+            <Text
+              style={
+                {
+                  "color": "#fff",
+                  "fontSize": 11,
+                  "fontWeight": "700",
+                }
+              }
+            >
+              2
+            </Text>
+          </View>
+          <Text
+            style={
+              [
+                {
+                  "color": "#555",
+                  "fontSize": 10,
+                },
+                false,
+              ]
+            }
+          >
+            SetParams
+          </Text>
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flex": 1,
+            }
+          }
+        >
+          <View
+            style={
+              [
+                {
+                  "alignItems": "center",
+                  "backgroundColor": "#0f3460",
+                  "borderRadius": 14,
+                  "height": 28,
+                  "justifyContent": "center",
+                  "marginBottom": 4,
+                  "width": 28,
+                },
+                false,
+              ]
+            }
+          >
+            <Text
+              style={
+                {
+                  "color": "#fff",
+                  "fontSize": 11,
+                  "fontWeight": "700",
+                }
+              }
+            >
+              3
+            </Text>
+          </View>
+          <Text
+            style={
+              [
+                {
+                  "color": "#555",
+                  "fontSize": 10,
+                },
+                false,
+              ]
+            }
+          >
+            Init
+          </Text>
+        </View>
+      </View>
+      <View
+        style={
+          {
+            "flexDirection": "row",
+            "gap": 10,
+            "marginVertical": 8,
+          }
+        }
+      >
+        <View
+          accessibilityState={
+            {
+              "busy": undefined,
+              "checked": undefined,
+              "disabled": false,
+              "expanded": undefined,
+              "selected": undefined,
+            }
+          }
+          accessibilityValue={
+            {
+              "max": undefined,
+              "min": undefined,
+              "now": undefined,
+              "text": undefined,
+            }
+          }
+          accessible={true}
+          collapsable={false}
+          focusable={true}
+          onClick={[Function]}
+          onResponderGrant={[Function]}
+          onResponderMove={[Function]}
+          onResponderRelease={[Function]}
+          onResponderTerminate={[Function]}
+          onResponderTerminationRequest={[Function]}
+          onStartShouldSetResponder={[Function]}
+          style={
+            {
+              "alignItems": "center",
+              "backgroundColor": "#4CAF50",
+              "borderRadius": 8,
+              "flex": 1,
+              "opacity": 1,
+              "paddingVertical": 12,
+            }
+          }
+          testID="btn-create"
+        >
+          <Text
+            style={
+              {
+                "color": "#fff",
+                "fontSize": 13,
+                "fontWeight": "700",
+              }
+            }
+          >
+            ① Create
+          </Text>
+        </View>
+        <View
+          accessibilityState={
+            {
+              "busy": undefined,
+              "checked": undefined,
+              "disabled": true,
+              "expanded": undefined,
+              "selected": undefined,
+            }
+          }
+          accessibilityValue={
+            {
+              "max": undefined,
+              "min": undefined,
+              "now": undefined,
+              "text": undefined,
+            }
+          }
+          accessible={true}
+          collapsable={false}
+          focusable={false}
+          onClick={[Function]}
+          onResponderGrant={[Function]}
+          onResponderMove={[Function]}
+          onResponderRelease={[Function]}
+          onResponderTerminate={[Function]}
+          onResponderTerminationRequest={[Function]}
+          onStartShouldSetResponder={[Function]}
+          style={
+            {
+              "alignItems": "center",
+              "backgroundColor": "#F44336",
+              "borderRadius": 8,
+              "flex": 1,
+              "opacity": 0.4,
+              "paddingVertical": 12,
+            }
+          }
+          testID="btn-destroy"
+        >
+          <Text
+            style={
+              {
+                "color": "#fff",
+                "fontSize": 13,
+                "fontWeight": "700",
+              }
+            }
+          >
+            Destroy
+          </Text>
+        </View>
+      </View>
+      <Text
+        style={
+          {
+            "color": "#e0e0e0",
+            "fontSize": 15,
+            "fontWeight": "700",
+            "marginBottom": 8,
+            "marginTop": 12,
+          }
+        }
+      >
+        Parameters
+      </Text>
+      <View
+        style={
+          {
+            "backgroundColor": "#16213e",
+            "borderColor": "#0f3460",
+            "borderRadius": 10,
+            "borderWidth": 1,
+            "marginBottom": 10,
+            "padding": 12,
+          }
+        }
+      >
+        <Text
+          style={
+            {
+              "color": "#e94560",
+              "fontSize": 13,
+              "fontWeight": "600",
+              "marginBottom": 8,
+            }
+          }
+        >
+          Logging
+        </Text>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "fontSize": 13,
+              }
+            }
+          >
+            Enabled
+          </Text>
+          <RCTSwitch
+            accessibilityRole="switch"
+            onChange={[Function]}
+            onResponderTerminationRequest={[Function]}
+            onStartShouldSetResponder={[Function]}
+            onTintColor="#4CAF50"
+            style={
+              {
+                "alignSelf": "flex-start",
+              }
+            }
+            value={true}
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            Level (0-5)
+          </Text>
+          <TextInput
+            keyboardType="numeric"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="0"
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "fontSize": 13,
+              }
+            }
+          >
+            PJ Enabled
+          </Text>
+          <RCTSwitch
+            accessibilityRole="switch"
+            onChange={[Function]}
+            onResponderTerminationRequest={[Function]}
+            onStartShouldSetResponder={[Function]}
+            onTintColor="#4CAF50"
+            style={
+              {
+                "alignSelf": "flex-start",
+              }
+            }
+            value={true}
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            PJ Level
+          </Text>
+          <TextInput
+            keyboardType="numeric"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="0"
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "fontSize": 13,
+              }
+            }
+          >
+            RxTx Enabled
+          </Text>
+          <RCTSwitch
+            accessibilityRole="switch"
+            onChange={[Function]}
+            onResponderTerminationRequest={[Function]}
+            onStartShouldSetResponder={[Function]}
+            onTintColor="#4CAF50"
+            style={
+              {
+                "alignSelf": "flex-start",
+              }
+            }
+            value={true}
+          />
+        </View>
+      </View>
+      <View
+        style={
+          {
+            "backgroundColor": "#16213e",
+            "borderColor": "#0f3460",
+            "borderRadius": 10,
+            "borderWidth": 1,
+            "marginBottom": 10,
+            "padding": 12,
+          }
+        }
+      >
+        <Text
+          style={
+            {
+              "color": "#e94560",
+              "fontSize": 13,
+              "fontWeight": "600",
+              "marginBottom": 8,
+            }
+          }
+        >
+          HTTP
+        </Text>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            Port
+          </Text>
+          <TextInput
+            keyboardType="numeric"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="8008"
+          />
+        </View>
+      </View>
+      <View
+        style={
+          {
+            "backgroundColor": "#16213e",
+            "borderColor": "#0f3460",
+            "borderRadius": 10,
+            "borderWidth": 1,
+            "marginBottom": 10,
+            "padding": 12,
+          }
+        }
+      >
+        <Text
+          style={
+            {
+              "color": "#e94560",
+              "fontSize": 13,
+              "fontWeight": "600",
+              "marginBottom": 8,
+            }
+          }
+        >
+          SIP
+        </Text>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            UDP Port
+          </Text>
+          <TextInput
+            keyboardType="numeric"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="5060"
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "fontSize": 13,
+              }
+            }
+          >
+            TCP Enabled
+          </Text>
+          <RCTSwitch
+            accessibilityRole="switch"
+            onChange={[Function]}
+            onResponderTerminationRequest={[Function]}
+            onStartShouldSetResponder={[Function]}
+            onTintColor="#4CAF50"
+            style={
+              {
+                "alignSelf": "flex-start",
+              }
+            }
+            value={false}
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            TCP Port
+          </Text>
+          <TextInput
+            keyboardType="numeric"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="5060"
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "fontSize": 13,
+              }
+            }
+          >
+            TLS Enabled
+          </Text>
+          <RCTSwitch
+            accessibilityRole="switch"
+            onChange={[Function]}
+            onResponderTerminationRequest={[Function]}
+            onStartShouldSetResponder={[Function]}
+            onTintColor="#4CAF50"
+            style={
+              {
+                "alignSelf": "flex-start",
+              }
+            }
+            value={false}
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            TLS Port
+          </Text>
+          <TextInput
+            keyboardType="numeric"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="5061"
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "fontSize": 13,
+              }
+            }
+          >
+            IPv6 Enabled
+          </Text>
+          <RCTSwitch
+            accessibilityRole="switch"
+            onChange={[Function]}
+            onResponderTerminationRequest={[Function]}
+            onStartShouldSetResponder={[Function]}
+            onTintColor="#4CAF50"
+            style={
+              {
+                "alignSelf": "flex-start",
+              }
+            }
+            value={false}
+          />
+        </View>
+      </View>
+      <View
+        style={
+          {
+            "backgroundColor": "#16213e",
+            "borderColor": "#0f3460",
+            "borderRadius": 10,
+            "borderWidth": 1,
+            "marginBottom": 10,
+            "padding": 12,
+          }
+        }
+      >
+        <Text
+          style={
+            {
+              "color": "#e94560",
+              "fontSize": 13,
+              "fontWeight": "600",
+              "marginBottom": 8,
+            }
+          }
+        >
+          TLS
+        </Text>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "fontSize": 13,
+              }
+            }
+          >
+            mTLS Enabled
+          </Text>
+          <RCTSwitch
+            accessibilityRole="switch"
+            onChange={[Function]}
+            onResponderTerminationRequest={[Function]}
+            onStartShouldSetResponder={[Function]}
+            onTintColor="#4CAF50"
+            style={
+              {
+                "alignSelf": "flex-start",
+              }
+            }
+            value={false}
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            Cert Path
+          </Text>
+          <TextInput
+            keyboardType="default"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="cert/client.crt"
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            Private Key Path
+          </Text>
+          <TextInput
+            keyboardType="default"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="cert/client.key"
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            CA List Path
+          </Text>
+          <TextInput
+            keyboardType="default"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="cert/ca.pem"
+          />
+        </View>
+      </View>
+      <View
+        style={
+          {
+            "backgroundColor": "#16213e",
+            "borderColor": "#0f3460",
+            "borderRadius": 10,
+            "borderWidth": 1,
+            "marginBottom": 10,
+            "padding": 12,
+          }
+        }
+      >
+        <Text
+          style={
+            {
+              "color": "#e94560",
+              "fontSize": 13,
+              "fontWeight": "600",
+              "marginBottom": 8,
+            }
+          }
+        >
+          Threading
+        </Text>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            SIP Rx Threads
+          </Text>
+          <TextInput
+            keyboardType="numeric"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="1"
+          />
+        </View>
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+              "paddingVertical": 4,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#ccc",
+                "flex": 1,
+                "fontSize": 13,
+              }
+            }
+          >
+            SIP Worker Threads
+          </Text>
+          <TextInput
+            keyboardType="numeric"
+            onChangeText={[Function]}
+            placeholderTextColor="#666"
+            style={
+              {
+                "backgroundColor": "#0f3460",
+                "borderRadius": 6,
+                "color": "#fff",
+                "fontSize": 13,
+                "minWidth": 100,
+                "paddingHorizontal": 10,
+                "paddingVertical": 8,
+                "textAlign": "right",
+              }
+            }
+            value="1"
+          />
+        </View>
+      </View>
+      <View
+        style={
+          {
+            "flexDirection": "row",
+            "gap": 10,
+            "marginVertical": 8,
+          }
+        }
+      >
+        <View
+          accessibilityState={
+            {
+              "busy": undefined,
+              "checked": undefined,
+              "disabled": true,
+              "expanded": undefined,
+              "selected": undefined,
+            }
+          }
+          accessibilityValue={
+            {
+              "max": undefined,
+              "min": undefined,
+              "now": undefined,
+              "text": undefined,
+            }
+          }
+          accessible={true}
+          collapsable={false}
+          focusable={false}
+          onClick={[Function]}
+          onResponderGrant={[Function]}
+          onResponderMove={[Function]}
+          onResponderRelease={[Function]}
+          onResponderTerminate={[Function]}
+          onResponderTerminationRequest={[Function]}
+          onStartShouldSetResponder={[Function]}
+          style={
+            {
+              "alignItems": "center",
+              "backgroundColor": "#2196F3",
+              "borderRadius": 8,
+              "flex": 1,
+              "opacity": 0.4,
+              "paddingVertical": 12,
+            }
+          }
+          testID="btn-set-params"
+        >
+          <Text
+            style={
+              {
+                "color": "#fff",
+                "fontSize": 13,
+                "fontWeight": "700",
+              }
+            }
+          >
+            ② Set Parameters
+          </Text>
+        </View>
+        <View
+          accessibilityState={
+            {
+              "busy": undefined,
+              "checked": undefined,
+              "disabled": true,
+              "expanded": undefined,
+              "selected": undefined,
+            }
+          }
+          accessibilityValue={
+            {
+              "max": undefined,
+              "min": undefined,
+              "now": undefined,
+              "text": undefined,
+            }
+          }
+          accessible={true}
+          collapsable={false}
+          focusable={false}
+          onClick={[Function]}
+          onResponderGrant={[Function]}
+          onResponderMove={[Function]}
+          onResponderRelease={[Function]}
+          onResponderTerminate={[Function]}
+          onResponderTerminationRequest={[Function]}
+          onStartShouldSetResponder={[Function]}
+          style={
+            {
+              "alignItems": "center",
+              "backgroundColor": "#FF9800",
+              "borderRadius": 8,
+              "flex": 1,
+              "opacity": 0.4,
+              "paddingVertical": 12,
+            }
+          }
+          testID="btn-init"
+        >
+          <Text
+            style={
+              {
+                "color": "#fff",
+                "fontSize": 13,
+                "fontWeight": "700",
+              }
+            }
+          >
+            ③ Initialize SDK
+          </Text>
+        </View>
+      </View>
+      <View
+        style={
+          {
+            "alignItems": "center",
+            "flexDirection": "row",
+            "justifyContent": "space-between",
+          }
+        }
+      >
+        <Text
+          style={
+            {
+              "color": "#e0e0e0",
+              "fontSize": 15,
+              "fontWeight": "700",
+              "marginBottom": 8,
+              "marginTop": 12,
+            }
+          }
+        >
+          Log Console
+        </Text>
+        <View
+          accessibilityState={
+            {
+              "busy": undefined,
+              "checked": undefined,
+              "disabled": undefined,
+              "expanded": undefined,
+              "selected": undefined,
+            }
+          }
+          accessibilityValue={
+            {
+              "max": undefined,
+              "min": undefined,
+              "now": undefined,
+              "text": undefined,
+            }
+          }
+          accessible={true}
+          collapsable={false}
+          focusable={true}
+          onClick={[Function]}
+          onResponderGrant={[Function]}
+          onResponderMove={[Function]}
+          onResponderRelease={[Function]}
+          onResponderTerminate={[Function]}
+          onResponderTerminationRequest={[Function]}
+          onStartShouldSetResponder={[Function]}
+          style={
+            {
+              "opacity": 1,
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#e94560",
+                "fontSize": 13,
+                "fontWeight": "600",
+              }
+            }
+          >
+            Clear
+          </Text>
+        </View>
+      </View>
+      <View
+        style={
+          {
+            "backgroundColor": "#0d1117",
+            "borderColor": "#0f3460",
+            "borderRadius": 8,
+            "borderWidth": 1,
+            "height": 200,
+            "padding": 10,
+          }
+        }
+      >
+        <RCTScrollView
+          nestedScrollEnabled={true}
+        >
+          <View>
+            <Text
+              style={
+                {
+                  "color": "#555",
+                  "fontSize": 12,
+                  "fontStyle": "italic",
+                }
+              }
+              testID="log-placeholder"
+            >
+              Logs will appear here…
+            </Text>
+          </View>
+        </RCTScrollView>
+      </View>
+      <View
+        style={
+          {
+            "height": 20,
+          }
+        }
+      />
+    </View>
+  </RCTScrollView>
+</View>
+`;
