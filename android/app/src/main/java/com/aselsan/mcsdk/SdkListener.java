@@ -8,6 +8,7 @@ package com.aselsan.mcsdk;
  * — do not update the UI directly from these methods.
  */
 public interface SdkListener {
+    void onReady();
     void onFetchDocument(String url, String content);
     void onSdsSent(String target, String body);
     void onSdsReceived(String sender, String body);

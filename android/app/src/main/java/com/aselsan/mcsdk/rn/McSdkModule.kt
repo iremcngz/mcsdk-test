@@ -10,10 +10,11 @@ import com.aselsan.mcsdk.SdkError
 import com.aselsan.mcsdk.SdkListener
 import com.aselsan.mcsdk.SdkParams
 import com.facebook.react.bridge.Arguments
+import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import com.facebook.react.modules.core.DeviceEventManagerModule
+import org.json.JSONObject
 
 // Event name constants (must match src/index.ts McSdkEvents)
 private const val EVENT_FETCH_DOCUMENT = "McSdkFetchDocument"
@@ -50,9 +51,8 @@ class McSdkModule(
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun emit(event: String, body: com.facebook.react.bridge.WritableMap) {
-        context
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit(event, body)
+        Log.d("McSdkBridge", "emit: event=$event hasActiveInstance=${context.hasActiveReactInstance()}")
+        context.emitDeviceEvent(event, body)
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -79,35 +79,27 @@ class McSdkModule(
     // ── Configuration ─────────────────────────────────────────────────────────
 
     @ReactMethod
-    fun setParams(
-        logEnabled: Boolean,  logLevel: Int,
-        pjLogEnabled: Boolean, pjLogLevel: Int,
-        rxTxEnabled: Boolean,
-        httpPort: Int,
-        sipUdpPort: Int, sipTcpEnabled: Boolean, sipTcpPort: Int,
-        sipTlsEnabled: Boolean, sipTlsPort: Int, sipIpv6Enabled: Boolean,
-        mTlsEnabled: Boolean, certPath: String, privKeyPath: String, caListPath: String,
-        sipRxThreads: Int, sipWorkerThreads: Int,
-    ) {
+    fun setParams(paramsJson: String) {
+        val d = JSONObject(paramsJson)
         val p = SdkParams().apply {
-            Logging.enabled     = logEnabled
-            Logging.level       = LogLevel.fromValue(logLevel)
-            Logging.pjEnabled   = pjLogEnabled
-            Logging.pjLevel     = LogLevel.fromValue(pjLogLevel)
-            Logging.rxTxEnabled = rxTxEnabled
-            Http.port           = httpPort
-            Sip.udpPort         = sipUdpPort
-            Sip.tcpEnabled      = sipTcpEnabled
-            Sip.tcpPort         = sipTcpPort
-            Sip.tlsEnabled      = sipTlsEnabled
-            Sip.tlsPort         = sipTlsPort
-            Sip.ipv6Enabled     = sipIpv6Enabled
-            Tls.mTlsEnabled     = mTlsEnabled
-            Tls.certPath        = certPath
-            Tls.privKeyPath     = privKeyPath
-            Tls.caListPath      = caListPath
-            Threading.sipRxThreadCount     = sipRxThreads
-            Threading.sipWorkerThreadCount = sipWorkerThreads
+            Logging.enabled     = d.optInt("logEnabled", 1) != 0
+            Logging.level       = LogLevel.fromValue(d.optInt("logLevel", 1))
+            Logging.pjEnabled   = d.optInt("pjLogEnabled", 0) != 0
+            Logging.pjLevel     = LogLevel.fromValue(d.optInt("pjLogLevel", 1))
+            Logging.rxTxEnabled = d.optInt("rxTxEnabled", 0) != 0
+            Http.port           = d.optInt("httpPort", 8008)
+            Sip.udpPort         = d.optInt("sipUdpPort", 5060)
+            Sip.tcpEnabled      = d.optInt("sipTcpEnabled", 0) != 0
+            Sip.tcpPort         = d.optInt("sipTcpPort", 5060)
+            Sip.tlsEnabled      = d.optInt("sipTlsEnabled", 0) != 0
+            Sip.tlsPort         = d.optInt("sipTlsPort", 5061)
+            Sip.ipv6Enabled     = d.optInt("sipIpv6Enabled", 0) != 0
+            Tls.mTlsEnabled     = d.optInt("mTlsEnabled", 0) != 0
+            Tls.certPath        = d.optString("certPath", "cert/client.crt")
+            Tls.privKeyPath     = d.optString("privKeyPath", "cert/client.key")
+            Tls.caListPath      = d.optString("caListPath", "cert/ca.pem")
+            Threading.sipRxThreadCount     = maxOf(1, d.optInt("sipRxThreads", 1))
+            Threading.sipWorkerThreadCount = maxOf(1, d.optInt("sipWorkerThreads", 1))
         }
         sdk?.setParams(p)
     }
@@ -170,6 +162,11 @@ class McSdkModule(
 
     // ── SdkListener ───────────────────────────────────────────────────────────
 
+    override fun onReady() {
+        // SDK init complete — mark as initialized
+        sdkInitialized = true
+    }
+
     override fun onFetchDocument(url: String, content: String) {
         emit(EVENT_FETCH_DOCUMENT, Arguments.createMap().apply {
             putString("url", url)
@@ -209,6 +206,7 @@ class McSdkModule(
     // ── LogListener ───────────────────────────────────────────────────────────
 
     override fun onLog(level: Int, log: String) {
+        Log.d("McSdkBridge", "onLog: level=$level log=${log.take(80)}")
         emit(EVENT_LOG, Arguments.createMap().apply {
             putInt("level", level)
             putString("log", log)

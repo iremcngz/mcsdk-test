@@ -802,12 +802,19 @@ testAAR/
 │   │   ├── NativeMcSdk.ts              ← TurboModule Codegen spec
 │   │   ├── index.ts                    ← McSdk class (user-facing API)
 │   │   └── types.ts                    ← McSdkParams, event payload types
+│   ├── core/
+│   │   ├── settings.ts                 ← MMKV-backed persistent settings
+│   │   └── logger.ts                   ← react-native-file-logger wrapper
 │   └── utils/
 │       └── parsePrometheus.ts          ← Prometheus text format parser (extracted utility)
 │
 ├── __tests__/
 │   ├── App.test.tsx                    ← 57 integration tests (RNTL)
 │   └── parsePrometheus.test.ts         ← 24 pure unit tests
+│
+├── __mocks__/
+│   ├── react-native-mmkv.js            ← In-memory MMKV mock for Jest
+│   └── react-native-file-logger.js     ← No-op FileLogger mock for Jest
 │
 ├── android/
 │   └── app/
@@ -931,7 +938,95 @@ npx react-native log-android
 
 ---
 
-## 10. Testing
+## 10. Persistent Settings & File Logging
+
+### 10.1 Settings — `react-native-mmkv`
+
+**Library:** `react-native-mmkv` v3 (JSI-based, synchronous reads)  
+**Source:** `src/core/settings.ts`
+
+All reads are synchronous — no `await` required. Values survive app restarts on both platforms.
+
+```
+Android: /data/data/<package>/files/mmkv/app-settings
+iOS:     <sandbox>/Library/Application Support/<bundle_id>/mmkv/app-settings
+```
+
+**Three setting groups:**
+
+| Group | Keys | Persistence trigger |
+|---|---|---|
+| `AppSettings` | `app.theme`, `app.language` | Immediate — written on every change in the Settings tab |
+| `SdkSettings` | `sdk.*` (18 fields) | Written when "② Set Parameters" is tapped successfully |
+| `LogRotationSettings` | `log.maxFileSize`, `log.maxFiles` | Immediate — written on every change in the Settings tab |
+
+**Load on startup:**  
+SDK parameter state is initialised directly from `SdkSettings.load()` in the `useState` initialisers — the fields are populated before the first render, so no flash or re-render occurs.
+
+**Theme and language** are stored and reloaded on next launch. The Settings tab provides Dark / Light and TR / EN toggles. (Full i18n/theming wiring is left for future feature work; the stored values are ready to consume.)
+
+### 10.2 File Logging — `react-native-file-logger`
+
+**Library:** `react-native-file-logger` v0.7  
+**Source:** `src/core/logger.ts`
+
+`configureLogger()` is called once inside a `useEffect` at app startup. It reads `LogRotationSettings` from MMKV and configures the logger accordingly.
+
+**Log file locations:**
+
+```
+Android: /data/data/<package>/files/logs/app_0.log
+iOS:     <sandbox>/Library/Caches/Logs/app_0.log
+```
+
+> **iOS — Dosyaya ulaşmak:** Xcode → Window → Devices and Simulators → cihazı seçin → testAAR → Download Container. Açılan `.xcappdata` paketinde `AppData/Library/Caches/Logs/app_0.log` yoluna bakın.
+> **Kesin path:** Uygulama → Ayarlar sekmesi → Log Files bölümü tam yolu otomatik gösterir. Metro console'da da uygulama açılışında basılır.
+
+**Rotation behaviour:**
+
+| Setting | Default | Description |
+|---|---|---|
+| `maximumFileSize` | 2 MB | New file started when current file exceeds this size |
+| `maximumNumberOfFiles` | 3 | Oldest file deleted when limit is reached |
+
+Both values are configurable at runtime from the **Settings → Log Rotation** section. Changes take effect after the next app restart (FileLogger is configured once during startup).
+
+**Two log streams:**
+
+| Stream | Trigger | File tag | Log level mapping |
+|---|---|---|---|
+| `AppLogger` | Every `addLog()` call in `App.tsx` | `[APP]` | `info/warn/error` → `FileLogger.info/warn/error` |
+| `SdkLogger` | Every `McSdkLog` native event | `[SDK/<LEVEL>]` | pjsip level 0–1 → debug, 2 → info, 3 → warn, 4–5 → error |
+
+Example log file content:
+```
+[2026-04-27 14:32:05.123] [INFO ] [APP] McSdk() → nativeCreate() OK
+[2026-04-27 14:32:06.441] [INFO ] [APP] init() returned: true
+[2026-04-27 14:32:06.450] [INFO ] [SDK/INFO] Sdk ready
+[2026-04-27 14:32:06.512] [DEBUG] [SDK/DEBUG] transport_udp created port=5060
+```
+
+**SDK Logs tab:**  
+In addition to file writing, every `McSdkLog` event is also appended to the `sdkLogs` in-memory list, which is displayed live in the **SDK Logs** tab. The tab shows the SDK level (VERBOSE / DEBUG / INFO / WARN / ERROR / FATAL) colour-coded, with timestamps.
+
+**Log file management (Settings tab):**  
+- **Show paths** — calls `FileLogger.getLogFilePaths()` and displays the absolute paths
+- **Delete all** — calls `FileLogger.deleteLogFiles()` after a confirmation dialog
+
+### 10.3 Jest Mocks
+
+`react-native-mmkv` and `react-native-file-logger` are native modules; they do not run in the Node.js test environment. Two manual mocks are registered via `moduleNameMapper` in `jest.config.js`:
+
+| File | What it does |
+|---|---|
+| `__mocks__/react-native-mmkv.js` | In-memory `Map`-backed `MMKV` class — full API, zero native calls |
+| `__mocks__/react-native-file-logger.js` | `jest.fn()` stubs for all `FileLogger` methods |
+
+All 81 existing tests continue to pass unchanged.
+
+---
+
+## 11. Testing
 
 ### Test Infrastructure
 
