@@ -118,6 +118,22 @@ export interface Translations {
   contactsAlertClearTitle: string;
   contactsAlertClearMessage: string;
   contactAdded: string;
+
+  // ── Network / IP monitor
+  ipLabel: (ip: string | null) => string;
+  ipChanged: (prev: string | null, curr: string | null) => string;
+
+  // ── Auth / Login
+  loginTitle: string;
+  inputUsername: string;
+  inputPassword: string;
+  btnLogin: string;
+  loginError: string;
+
+  // ── Account (Settings)
+  sectionAccount: string;
+  cardStayLoggedIn: string;
+  btnLogout: string;
 }
 
 const tr: Translations = {
@@ -219,6 +235,19 @@ const tr: Translations = {
   contactsAlertClearTitle:   'Tüm kişileri sil',
   contactsAlertClearMessage: 'Adres defterindeki tüm kayıtlar silinecek. Devam edilsin mi?',
   contactAdded:            'Kişi eklendi',
+
+  ipLabel:   ip => ip ? `IP: ${ip}` : 'Ağ yok',
+  ipChanged: (p, c) => `[NET] IP değişti: ${p ?? '?'} → ${c ?? '?'}`,
+
+  loginTitle:       'Giriş Yap',
+  inputUsername:    'Kullanıcı Adı',
+  inputPassword:    'Şifre',
+  btnLogin:         'Giriş',
+  loginError:       'Kullanıcı adı veya şifre hatalı',
+
+  sectionAccount:   'Hesap',
+  cardStayLoggedIn: 'Oturumu Açık Tut',
+  btnLogout:        'Çıkış Yap',
 };
 
 const en: Translations = {
@@ -320,6 +349,19 @@ const en: Translations = {
   contactsAlertClearTitle:   'Delete all contacts',
   contactsAlertClearMessage: 'All contacts will be deleted. Continue?',
   contactAdded:            'Contact added',
+
+  ipLabel:   ip => ip ? `IP: ${ip}` : 'No network',
+  ipChanged: (p, c) => `[NET] IP changed: ${p ?? '?'} → ${c ?? '?'}`,
+
+  loginTitle:       'Sign In',
+  inputUsername:    'Username',
+  inputPassword:    'Password',
+  btnLogin:         'Login',
+  loginError:       'Invalid username or password',
+
+  sectionAccount:   'Account',
+  cardStayLoggedIn: 'Stay Logged In',
+  btnLogout:        'Log Out',
 };
 
 export function getTranslation(language: AppLanguage): Translations {

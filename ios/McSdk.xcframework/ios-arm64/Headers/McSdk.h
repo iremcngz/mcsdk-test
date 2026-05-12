@@ -5,6 +5,7 @@
 #import "McSdkAlarm.h"
 #import "McSdkAlarmListener.h"
 #import "McSdkError.h"
+#import "McSdkIdentity.h"
 #import "McSdkListener.h"
 #import "McSdkLogListener.h"
 #import "McSdkParams.h"
@@ -45,7 +46,14 @@
 // Releases all native resources. Must be called when finished with the SDK.
 - (void)destroy;
 
-// ── Alarm ────────────────────────────────────────────────────────────────────
+// ── Session ───────────────────────────────────────────────────────────────────
+- (void)setIdentity:(McSdkIdentity*)identity;
+
+// ── Registration ─────────────────────────────────────────────────────────────
+- (void)register;
+- (void)unregister;
+
+// ── Alarm ─────────────────────────────────────────────────────────────────────
 - (void)raiseAlarm:(McSdkAlarm*)alarm;
 - (void)resolveAlarmByName:(NSString*)alarmName;
 - (NSString*)listAlarms;

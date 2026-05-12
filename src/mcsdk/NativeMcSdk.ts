@@ -35,6 +35,11 @@ export interface Spec extends TurboModule {
     fetchDocument(url: string): void;
     sendSds(target: string, body: string): void;
 
+    // Identity and registration
+    setIdentity(mcId: string, password: string, clientId: string): void;
+    register(): void;
+    unregister(): void;
+
     // Adds a native event listener (required by RCTEventEmitter protocol on iOS)
     addListener(eventName: string): void;
     removeListeners(count: number): void;

@@ -25,12 +25,18 @@ export interface ThemePalette {
   textMuted: string;
   /** Text rendered on accent-coloured backgrounds */
   textOnAccent: string;
+  /** Primary action blue */
+  primary: string;
+  /** Secondary action purple */
+  secondary: string;
   /** Success green */
   success: string;
-  /** Warning orange */
+  /** Warning / pending orange */
   warn: string;
   /** Error red */
   error: string;
+  /** Offline / neutral grey */
+  presenceOffline: string;
   /** SDK log blue */
   sdkLog: string;
   /** Metric value tint */
@@ -56,9 +62,12 @@ const dark: ThemePalette = {
   textSecondary: '#ccc',
   textMuted:     '#555',
   textOnAccent:  '#fff',
-  success:       '#4CAF50',
-  warn:          '#d29922',
-  error:         '#f85149',
+  primary:        '#2196F3',
+  secondary:      '#9C27B0',
+  success:        '#4CAF50',
+  warn:           '#FF9800',
+  error:          '#f85149',
+  presenceOffline:'#9E9E9E',
   sdkLog:        '#58a6ff',
   valueText:     '#ffd54f',
   tableRowBg:    '#0d1b30',
@@ -78,9 +87,12 @@ const light: ThemePalette = {
   textSecondary: '#444',
   textMuted:     '#999',
   textOnAccent:  '#fff',
-  success:       '#2e7d32',
-  warn:          '#e65100',
-  error:         '#c62828',
+  primary:        '#1565c0',
+  secondary:      '#7B1FA2',
+  success:        '#2e7d32',
+  warn:           '#F57C00',
+  error:          '#c62828',
+  presenceOffline:'#757575',
   sdkLog:        '#1565c0',
   valueText:     '#bf360c',
   tableRowBg:    '#ffffff',

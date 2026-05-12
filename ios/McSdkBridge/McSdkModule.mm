@@ -7,6 +7,9 @@
 #import "McSdkAlarm.h"
 #import "McSdkAlarmSeverity.h"
 #import "McSdkError.h"
+#import "McSdkIdentity.h"
+#import "McSdkRegistrationPhase.h"
+#import "McSdkRegistrationState.h"
 
 static McSdk *gSdk = nil;
 static BOOL gSdkInitialized = NO;
@@ -14,6 +17,9 @@ static BOOL gSdkInitializing = NO;  // prevents concurrent init calls
 
 @interface McSdkModule () <McSdkListener, McSdkLogListener, McSdkAlarmListener>
 @property (nonatomic, assign) BOOL hasListeners;
+// Stored promise callbacks — resolved by onReady / onSdkError (initSdk is async)
+@property (nonatomic, copy) RCTPromiseResolveBlock initResolve;
+@property (nonatomic, copy) RCTPromiseRejectBlock  initReject;
 @end
 
 @implementation McSdkModule
@@ -31,7 +37,8 @@ RCT_EXPORT_MODULE(McSdk)
     @"McSdkSdsReceived",
     @"McSdkSdsError",
     @"McSdkAlarm",
-    @"McSdkLog"
+    @"McSdkLog",
+    @"McSdkRegistration"
   ];
 }
 
@@ -113,11 +120,11 @@ RCT_EXPORT_METHOD(setParams:(NSString *)paramsJson) {
 
   McSdkThreadingParams *threading = [[McSdkThreadingParams alloc] init];
   // Clamp to minimum 1: pjsip debug asserts that async_cnt > 0.
-  threading.sipRxThreadCount = MAX(1, [d[@"sipRxThreads"] integerValue]);
-  threading.sipWorkerThreadCount = MAX(1, [d[@"sipWorkerThreads"] integerValue]);
+  threading.sipRxThreadCount    = MAX(1, [d[@"sipRxThreads"] integerValue]);
+  threading.sdkWorkerThreadCount = MAX(1, [d[@"sipWorkerThreads"] integerValue]);
 
-  NSLog(@"[McSdk] threading: sipRxThreadCount=%ld sipWorkerThreadCount=%ld",
-        (long)threading.sipRxThreadCount, (long)threading.sipWorkerThreadCount);
+  NSLog(@"[McSdk] threading: sipRxThreadCount=%ld sdkWorkerThreadCount=%ld",
+        (long)threading.sipRxThreadCount, (long)threading.sdkWorkerThreadCount);
 
   McSdkParams *params = [[McSdkParams alloc] init];
   params.Logging = logging;
@@ -144,13 +151,10 @@ RCT_EXPORT_METHOD(init:(RCTPromiseResolveBlock)resolve
     return;
   }
   gSdkInitializing = YES;
+  self.initResolve = resolve;
+  self.initReject  = reject;
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-    BOOL result = [gSdk initSdk];
-    if (result) {
-      gSdkInitialized = YES;
-    }
-    gSdkInitializing = NO;
-    resolve(@(result));
+    [gSdk initSdk];  // void — result delivered via onReady / onSdkError
   });
 }
 
@@ -178,17 +182,120 @@ RCT_EXPORT_METHOD(resolveAlarm:(NSString *)name) {
 }
 
 RCT_EXPORT_METHOD(sendSds:(NSString *)target body:(NSString *)body) {
-  // No sendSds method in ObjC API — placeholder for compatibility
+  if (gSdk == nil) return;
+  [gSdk sendSds:target body:body];
 }
 
-RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(getDaoData) {
-  return @"";
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(getData:(NSString *)key) {
+  if (gSdk == nil) return @"";
+  NSString *result = [gSdk getData:key];
+  return result ? result : @"";
+}
+
+RCT_EXPORT_METHOD(createData:(NSString *)key value:(NSString *)value) {
+  if (gSdk == nil) return;
+  [gSdk createData:key value:value];
+}
+
+RCT_EXPORT_METHOD(updateData:(NSString *)key value:(NSString *)value) {
+  if (gSdk == nil) return;
+  [gSdk updateData:key value:value];
+}
+
+RCT_EXPORT_METHOD(deleteData:(NSString *)key) {
+  if (gSdk == nil) return;
+  [gSdk deleteData:key];
+}
+
+RCT_EXPORT_METHOD(importData:(NSString *)data) {
+  if (gSdk == nil) return;
+  [gSdk importData:data];
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(exportData) {
+  if (gSdk == nil) return @"";
+  NSString *result = [gSdk exportData];
+  return result ? result : @"";
+}
+
+RCT_EXPORT_METHOD(fetchDocument:(NSString *)url) {
+  if (gSdk == nil) return;
+  [gSdk fetchDocument:url];
+}
+
+RCT_EXPORT_METHOD(setIdentity:(NSString *)mcId
+                  password:(NSString *)password
+                  clientId:(NSString *)clientId) {
+  if (gSdk == nil) return;
+  McSdkIdentity *identity = [[McSdkIdentity alloc] init];
+  identity.mcId     = mcId;
+  identity.password = password;
+  identity.clientId = clientId;
+  [gSdk setIdentity:identity];
+}
+
+RCT_EXPORT_METHOD(register) {
+  if (gSdk == nil) return;
+  [gSdk register];
+}
+
+RCT_EXPORT_METHOD(unregister) {
+  if (gSdk == nil) return;
+  [gSdk unregister];
+}
+
+// Required by New Architecture TurboModule spec — RCTEventEmitter handles the
+// actual subscription management internally; these stubs ensure startObserving
+// and stopObserving are triggered so hasListeners is set correctly.
+RCT_EXPORT_METHOD(addListener:(NSString *)eventName) {
+  [super addListener:eventName];
+}
+RCT_EXPORT_METHOD(removeListeners:(double)count) {
+  [super removeListeners:(NSInteger)count];
 }
 
 #pragma mark - McSdkListener
 
 - (void)onReady {
-  [self emitEvent:@"McSdkLog" body:@{@"level": @(3), @"log": @"SDK ready"}];
+  gSdkInitialized = YES;
+  gSdkInitializing = NO;
+  if (self.initResolve) {
+    self.initResolve(@(YES));
+    self.initResolve = nil;
+    self.initReject  = nil;
+  }
+  [self emitEvent:@"McSdkLog" body:@{@"level": @(2), @"log": @"SDK ready"}];
+}
+
+- (void)onTerminated {
+  [self emitEvent:@"McSdkLog" body:@{@"level": @(2), @"log": @"SDK terminated"}];
+}
+
+- (void)onSdkError:(McSdkError)error {
+  gSdkInitializing = NO;
+  if (self.initReject) {
+    self.initReject(@"SDK_ERROR", [NSString stringWithFormat:@"SDK error: %ld", (long)error], nil);
+    self.initResolve = nil;
+    self.initReject  = nil;
+  }
+}
+
+- (void)onRegistrationProgress:(McSdkRegistrationState)state
+                         phase:(McSdkRegistrationPhase)phase
+                      progress:(NSInteger)progress {
+  [self emitEvent:@"McSdkRegistration" body:@{
+    @"state":    @(state),
+    @"phase":    @(phase),
+    @"progress": @(progress)
+  }];
+}
+
+- (void)onRegistered {
+  [self emitEvent:@"McSdkRegistration" body:@{
+    @"state":    @(McSdkRegistrationStateRegistered),
+    @"phase":    @(McSdkRegistrationPhaseDone),
+    @"progress": @(100)
+  }];
 }
 
 - (void)onFetchDocument:(NSString *)url content:(NSString *)content {

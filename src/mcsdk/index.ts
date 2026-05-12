@@ -11,6 +11,7 @@ import type {
     SdsErrorEvent,
     AlarmEvent,
     LogEvent,
+    RegistrationEvent,
 } from './types';
 
 export * from './types';
@@ -24,6 +25,7 @@ export const McSdkEvents = {
     SdsError: 'McSdkSdsError',
     Alarm: 'McSdkAlarm',
     Log: 'McSdkLog',
+    Registration: 'McSdkRegistration',
 } as const;
 
 // ── Emitter (singleton, lazily created) ───────────────────────────────────────
@@ -62,28 +64,25 @@ export class McSdk {
         const Th = { ...DEFAULT_PARAMS.Threading!, ...p.Threading };
 
         const flat = {
-            logEnabled:     L.enabled!     ? 1 : 0,
-            logLevel:       L.level!,
-            pjLogEnabled:   L.pjEnabled!   ? 1 : 0,
-            pjLogLevel:     L.pjLevel!,
-            rxTxEnabled:    L.rxTxEnabled! ? 1 : 0,
-            httpPort:       H.port!,
-            sipUdpPort:     S.udpPort!,
-            sipTcpEnabled:  S.tcpEnabled!  ? 1 : 0,
-            sipTcpPort:     S.tcpPort!,
-            sipTlsEnabled:  S.tlsEnabled!  ? 1 : 0,
-            sipTlsPort:     S.tlsPort!,
-            sipIpv6Enabled: S.ipv6Enabled! ? 1 : 0,
-            mTlsEnabled:    T.mTlsEnabled! ? 1 : 0,
-            certPath:       T.certPath!,
-            privKeyPath:    T.privKeyPath!,
-            caListPath:     T.caListPath!,
-            sipRxThreads:   Th.sipRxThreadCount!,
+            logEnabled:      L.enabled!     ? 1 : 0,
+            logLevel:        L.level!,
+            pjLogEnabled:    L.pjEnabled!   ? 1 : 0,
+            pjLogLevel:      L.pjLevel!,
+            rxTxEnabled:     L.rxTxEnabled! ? 1 : 0,
+            httpPort:        H.port!,
+            sipUdpPort:      S.udpPort!,
+            sipTcpEnabled:   S.tcpEnabled!  ? 1 : 0,
+            sipTcpPort:      S.tcpPort!,
+            sipTlsEnabled:   S.tlsEnabled!  ? 1 : 0,
+            sipTlsPort:      S.tlsPort!,
+            sipIpv6Enabled:  S.ipv6Enabled! ? 1 : 0,
+            mTlsEnabled:     T.mTlsEnabled! ? 1 : 0,
+            certPath:        T.certPath!,
+            privKeyPath:     T.privKeyPath!,
+            caListPath:      T.caListPath!,
+            sipRxThreads:    Th.sipRxThreadCount!,
             sipWorkerThreads: Th.sipWorkerThreadCount!,
         };
-
-        console.log('[McSdk] setParams JSON: sipRxThreads=', flat.sipRxThreads, 'sipWorkerThreads=', flat.sipWorkerThreads);
-
         NativeMcSdk.setParams(JSON.stringify(flat));
     }
 
@@ -134,6 +133,13 @@ export class McSdk {
         NativeMcSdk.sendSds(target, body);
     }
 
+    setIdentity(mcId: string, password: string, clientId: string = ''): void {
+        NativeMcSdk.setIdentity(mcId, password, clientId);
+    }
+
+    register(): void { NativeMcSdk.register(); }
+    unregister(): void { NativeMcSdk.unregister(); }
+
     // ── Event subscriptions ────────────────────────────────────────────────────
 
     onFetchDocument(handler: (e: FetchDocumentEvent) => void) {
@@ -158,5 +164,9 @@ export class McSdk {
 
     onLog(handler: (e: LogEvent) => void) {
         return emitter().addListener(McSdkEvents.Log, handler);
+    }
+
+    onRegistration(handler: (e: RegistrationEvent) => void) {
+        return emitter().addListener(McSdkEvents.Registration, handler);
     }
 }

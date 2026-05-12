@@ -114,6 +114,15 @@ public class McSdk {
     public void fetchDocument(String url)              { nativeFetchDocument(url); }
     public void sendSds(String target, String body)    { nativeSendSds(target, body); }
 
+    // ─── Identity & Registration ──────────────────────────────────────────────
+
+    public void setIdentity(Identity identity) {
+        nativeSetIdentity(identity.mcId, identity.password, identity.clientId);
+    }
+
+    public void register() { nativeRegister(); }
+    public void unregister() { nativeUnregister(); }
+
     // ─── Native declarations ─────────────────────────────────────────────────
 
     private native void nativeCreate();
@@ -145,4 +154,7 @@ public class McSdk {
     private native String  nativeExportData();
     private native void    nativeFetchDocument(String url);
     private native void    nativeSendSds(String target, String body);
+    private native void    nativeSetIdentity(String mcId, String password, String clientId);
+    private native void    nativeRegister();
+    private native void    nativeUnregister();
 }

@@ -9,6 +9,10 @@ package com.aselsan.mcsdk;
  */
 public interface SdkListener {
     void onReady();
+    void onTerminated();
+    void onSdkError(SdkError error);
+    void onRegistrationProgress(RegistrationState state, RegistrationPhase phase, int progress);
+    void onRegistered();
     void onFetchDocument(String url, String content);
     void onSdsSent(String target, String body);
     void onSdsReceived(String sender, String body);

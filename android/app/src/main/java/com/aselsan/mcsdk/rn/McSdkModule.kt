@@ -3,9 +3,12 @@ package com.aselsan.mcsdk.rn
 import com.aselsan.mcsdk.Alarm
 import com.aselsan.mcsdk.AlarmListener
 import com.aselsan.mcsdk.AlarmSeverity
+import com.aselsan.mcsdk.Identity
 import com.aselsan.mcsdk.LogLevel
 import com.aselsan.mcsdk.LogListener
 import com.aselsan.mcsdk.McSdk
+import com.aselsan.mcsdk.RegistrationPhase
+import com.aselsan.mcsdk.RegistrationState
 import com.aselsan.mcsdk.SdkError
 import com.aselsan.mcsdk.SdkListener
 import com.aselsan.mcsdk.SdkParams
@@ -23,6 +26,7 @@ private const val EVENT_SDS_RECEIVED   = "McSdkSdsReceived"
 private const val EVENT_SDS_ERROR      = "McSdkSdsError"
 private const val EVENT_ALARM          = "McSdkAlarm"
 private const val EVENT_LOG            = "McSdkLog"
+private const val EVENT_REGISTRATION   = "McSdkRegistration"
 
 class McSdkModule(
     private val context: ReactApplicationContext,
@@ -155,6 +159,24 @@ class McSdkModule(
     @ReactMethod
     fun sendSds(target: String, body: String) { sdk?.sendSds(target, body) }
 
+    // ── Identity & Registration ───────────────────────────────────────────────
+
+    @ReactMethod
+    fun setIdentity(mcId: String, password: String, clientId: String) {
+        val identity = Identity().apply {
+            this.mcId = mcId
+            this.password = password
+            this.clientId = clientId
+        }
+        sdk?.setIdentity(identity)
+    }
+
+    @ReactMethod
+    fun register() { sdk?.register() }
+
+    @ReactMethod
+    fun unregister() { sdk?.unregister() }
+
     // ── Required by RCTEventEmitter protocol (JS side calls addListener) ──────
 
     @ReactMethod fun addListener(eventName: String) {}
@@ -163,8 +185,27 @@ class McSdkModule(
     // ── SdkListener ───────────────────────────────────────────────────────────
 
     override fun onReady() {
-        // SDK init complete — mark as initialized
         sdkInitialized = true
+    }
+
+    override fun onTerminated() {}
+
+    override fun onSdkError(error: SdkError) {}
+
+    override fun onRegistrationProgress(state: RegistrationState, phase: RegistrationPhase, progress: Int) {
+        emit(EVENT_REGISTRATION, Arguments.createMap().apply {
+            putString("state", state.name)
+            putString("phase", phase.name)
+            putInt("progress", progress)
+        })
+    }
+
+    override fun onRegistered() {
+        emit(EVENT_REGISTRATION, Arguments.createMap().apply {
+            putString("state", "REGISTERED")
+            putString("phase", "DONE")
+            putInt("progress", 100)
+        })
     }
 
     override fun onFetchDocument(url: String, content: String) {

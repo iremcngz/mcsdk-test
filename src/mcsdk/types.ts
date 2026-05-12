@@ -87,3 +87,10 @@ export interface LogEvent {
     level: McSdkLogLevel;
     log: string;
 }
+
+export interface RegistrationEvent {
+    // iOS sends numbers (enum ordinals), Android sends strings
+    state: number | string;
+    phase: number | string;
+    progress: number;
+}
