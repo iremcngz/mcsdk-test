@@ -39,6 +39,7 @@ import {
 } from '@testing-library/react-native';
 import App from '../App';
 import { McSdk } from '../src/mcsdk';
+import { AuthSettings } from '../src/core/settings';
 
 // ── Mock: react-native-safe-area-context ──────────────────────────────────────
 // SafeAreaProvider / useSafeAreaInsets depend on native modules unavailable
@@ -46,6 +47,7 @@ import { McSdk } from '../src/mcsdk';
 
 jest.mock('react-native-safe-area-context', () => ({
   SafeAreaProvider: ({ children }: { children: React.ReactNode }) => children,
+  SafeAreaView:     ({ children }: { children: React.ReactNode }) => children,
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
@@ -68,6 +70,7 @@ jest.mock('../src/mcsdk', () => ({
     SdsError:      'McSdkSdsError',
     Alarm:         'McSdkAlarm',
     Log:           'McSdkLog',
+    Registration:  'McSdkRegistration',
   },
 }));
 
@@ -80,22 +83,32 @@ const MockMcSdk = McSdk as jest.MockedClass<typeof McSdk>;
  * or override them with mockResolvedValueOnce / mockRejectedValueOnce.
  */
 const makeSdkInstance = () => ({
-  setParams:     jest.fn(),
-  init:          jest.fn().mockResolvedValue(true),
-  destroy:       jest.fn(),
-  listMetrics:   jest.fn().mockReturnValue(''),
-  listAlarms:    jest.fn().mockReturnValue(''),
-  onLog:         jest.fn(),
-  onAlarm:       jest.fn(),
-  raiseAlarm:    jest.fn(),
-  resolveAlarm:  jest.fn(),
-  fetchDocument: jest.fn(),
-  sendSds:       jest.fn(),
+  setParams:      jest.fn(),
+  init:           jest.fn().mockResolvedValue(true),
+  destroy:        jest.fn(),
+  listMetrics:    jest.fn().mockReturnValue(''),
+  listAlarms:     jest.fn().mockReturnValue(''),
+  onLog:          jest.fn(),
+  onAlarm:        jest.fn(),
+  onRegistration: jest.fn(),
+  raiseAlarm:     jest.fn(),
+  resolveAlarm:   jest.fn(),
+  fetchDocument:  jest.fn(),
+  sendSds:        jest.fn(),
+  setIdentity:    jest.fn(),
+  register:       jest.fn(),
+  unregister:     jest.fn(),
 });
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
+  // Bypass the login gate — App renders LoginScreen when isLoggedIn=false.
+  // Set auth flags in the in-memory MMKV mock so AppContextProvider sees the
+  // user as already authenticated before every test.
+  AuthSettings.setStayLoggedIn(true);
+  AuthSettings.setIsLoggedIn(true);
+
   // Clear call history between tests, then install a fresh mock implementation.
   // This ensures tests don't bleed state into each other.
   MockMcSdk.mockClear();
@@ -699,6 +712,142 @@ describe('MetricsScreen', () => {
       fireEvent.press(screen.getByText('Fetch'));
     });
     expect(screen.getByText(/No metrics yet/)).toBeTruthy();
+  });
+});
+
+// =============================================================================
+// 9. Registration progress bar
+// =============================================================================
+
+describe('Registration progress bar', () => {
+  /**
+   * WHAT: Tests the registration card that appears in HomeScreen after init.
+   * WHY:  Registration is the last step of the SDK lifecycle (Create →
+   *       SetParams → Init → Register). The progress bar and phase/state
+   *       labels give real-time feedback during a long async process.
+   *       These tests verify:
+   *         - The card is hidden until init completes successfully.
+   *         - sdk.register() is called exactly once after a successful init.
+   *         - The onRegistration callback updates progress, phase, and state.
+   */
+
+  it('registration card is NOT rendered before init', async () => {
+    // After Create + SetParams the card should still be hidden
+    await renderCreateAndSetParams();
+    expect(screen.queryByText('Registration')).toBeNull();
+  });
+
+  it('registration card IS rendered after successful init', async () => {
+    const sdk = await renderCreateAndSetParams();
+    sdk.init.mockResolvedValueOnce(true);
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Registration')).toBeTruthy();
+    });
+  });
+
+  it('register() is called exactly once after init resolves true', async () => {
+    const sdk = await renderCreateAndSetParams();
+    sdk.init.mockResolvedValueOnce(true);
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(screen.getByText('INITIALIZED')).toBeTruthy());
+    expect(sdk.register).toHaveBeenCalledTimes(1);
+  });
+
+  it('register() is NOT called when init resolves false', async () => {
+    const sdk = await renderCreateAndSetParams();
+    sdk.init.mockResolvedValueOnce(false);
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/init\(\) returned: false/)).toBeTruthy();
+    });
+    expect(sdk.register).not.toHaveBeenCalled();
+  });
+
+  it('onRegistration callback is registered exactly once during handleCreate', async () => {
+    const sdk = await renderAndCreate();
+    expect(sdk.onRegistration).toHaveBeenCalledTimes(1);
+  });
+
+  it('simulated registration event updates progress percentage', async () => {
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(screen.getByText('Registration')).toBeTruthy());
+
+    // Retrieve the callback registered via sdk.onRegistration(cb) and call it
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => {
+      registrationCb({ progress: 50, phase: 4, state: 1 });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('50%')).toBeTruthy();
+    });
+  });
+
+  it('phase 6 renders Done label', async () => {
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(screen.getByText('Registration')).toBeTruthy());
+
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => {
+      registrationCb({ progress: 100, phase: 6, state: 2 });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Done/)).toBeTruthy();
+    });
+  });
+
+  it('state 2 renders Registered label', async () => {
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(screen.getByText('Registration')).toBeTruthy());
+
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => {
+      registrationCb({ progress: 100, phase: 6, state: 2 });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Registered/)).toBeTruthy();
+    });
+  });
+
+  it('phase 0 renders Idle label', async () => {
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(screen.getByText('Registration')).toBeTruthy());
+
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => {
+      registrationCb({ progress: 0, phase: 0, state: 0 });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Idle/)).toBeTruthy();
+    });
+  });
+
+  it('shows 0% progress initially after init (before any registration event)', async () => {
+    const sdk = await renderCreateAndSetParams();
+    sdk.init.mockResolvedValueOnce(true);
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(screen.getByText('Registration')).toBeTruthy());
+    expect(screen.getByText('0%')).toBeTruthy();
   });
 });
 

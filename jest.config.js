@@ -18,5 +18,7 @@ module.exports = {
     '@op-engineering/op-sqlite': '<rootDir>/__mocks__/@op-engineering/op-sqlite.js',
     // react-native-get-random-values: polyfill — no-op in Node.js (already has crypto)
     'react-native-get-random-values': '<rootDir>/__mocks__/react-native-get-random-values.js',
+    // @react-native-community/netinfo: native module — replaced with a static mock
+    '@react-native-community/netinfo': '<rootDir>/__mocks__/@react-native-community/netinfo.js',
   },
 };

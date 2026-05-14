@@ -48,7 +48,8 @@ public class McSdk {
             p.Sip.udpPort, p.Sip.tcpEnabled, p.Sip.tcpPort,
             p.Sip.tlsEnabled, p.Sip.tlsPort, p.Sip.ipv6Enabled,
             p.Tls.mTlsEnabled, p.Tls.certPath, p.Tls.privKeyPath, p.Tls.caListPath,
-            p.Threading.sipRxThreadCount, p.Threading.sipWorkerThreadCount
+            p.Threading.sipRxThreadCount, p.Threading.sipWorkerThreadCount,
+            p.Mcx.idmsUrl, p.Mcx.bmsUrl, p.Mcx.cmsUrl
         );
     }
 
@@ -72,10 +73,10 @@ public class McSdk {
 
     /**
      * Initialises the SDK. Call once after {@link #setParams} and {@link #setListener}.
-     * @return {@code true} on success.
+     * Success is signalled via {@link SdkListener#onReady()}.
      */
-    public boolean init() {
-        return nativeInit();
+    public void init() {
+        nativeInit();
     }
 
     // ─── Alarm ───────────────────────────────────────────────────────────────
@@ -136,12 +137,14 @@ public class McSdk {
         int sipUdpPort, boolean sipTcpEnabled, int sipTcpPort,
         boolean sipTlsEnabled, int sipTlsPort, boolean sipIpv6Enabled,
         boolean mTlsEnabled, String certPath, String privKeyPath, String caListPath,
-        int sipRxThreads, int sipWorkerThreads);
+        int sipRxThreads, int sipWorkerThreads,
+        String idmsUrl, String bmsUrl, String cmsUrl);
 
     private native void    nativeSetListener(SdkListener listener);
     private native void    nativeSetLogListener(LogListener listener);
     private native void    nativeSetAlarmListener(AlarmListener listener);
-    private native boolean nativeInit();
+    private native void    nativeInit();
+    private native void    nativeTerminate();
     private native void    nativeRaiseAlarm(String name, String info, int severity);
     private native void    nativeResolveAlarmByName(String alarmName);
     private native String  nativeListAlarms();

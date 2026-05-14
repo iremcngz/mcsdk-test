@@ -63,14 +63,19 @@ class McSdkModule(
 
     @ReactMethod
     fun create() {
-        if (sdk == null) {
-            sdk = McSdk()
+        try {
+            if (sdk == null) {
+                sdk = McSdk()
+            }
+            // On hot-reload the module instance is replaced; re-bind listeners so
+            // events still reach the active JS bridge.
+            sdk!!.setListener(this)
+            sdk!!.setAlarmListener(this)
+            sdk!!.setLogListener(this)
+        } catch (t: Throwable) {
+            Log.e("McSdkBridge", "create() failed: ${t.message}", t)
+            throw RuntimeException("McSdk.create() failed: ${t.message}", t)
         }
-        // On hot-reload the module instance is replaced; re-bind listeners so
-        // events still reach the active JS bridge.
-        sdk!!.setListener(this)
-        sdk!!.setAlarmListener(this)
-        sdk!!.setLogListener(this)
     }
 
     @ReactMethod
@@ -104,9 +109,15 @@ class McSdkModule(
             Tls.caListPath      = d.optString("caListPath", "cert/ca.pem")
             Threading.sipRxThreadCount     = maxOf(1, d.optInt("sipRxThreads", 1))
             Threading.sipWorkerThreadCount = maxOf(1, d.optInt("sipWorkerThreads", 1))
+            Mcx.idmsUrl = d.optString("idmsUrl", "")
+            Mcx.bmsUrl  = d.optString("bmsUrl",  "")
+            Mcx.cmsUrl  = d.optString("cmsUrl",  "")
         }
         sdk?.setParams(p)
     }
+
+    // Promise stored so onReady() callback can resolve it
+    private var initPromise: com.facebook.react.bridge.Promise? = null
 
     @ReactMethod
     fun init(promise: com.facebook.react.bridge.Promise) {
@@ -114,9 +125,14 @@ class McSdkModule(
             promise.resolve(true)
             return
         }
-        val result = sdk?.init() ?: false
-        sdkInitialized = result
-        promise.resolve(result)
+        initPromise = promise
+        try {
+            sdk?.init()
+            // Result comes via onReady() callback
+        } catch (t: Throwable) {
+            initPromise = null
+            promise.reject("INIT_ERROR", t.message, t)
+        }
     }
 
     // ── Alarm ─────────────────────────────────────────────────────────────────
@@ -186,6 +202,8 @@ class McSdkModule(
 
     override fun onReady() {
         sdkInitialized = true
+        initPromise?.resolve(true)
+        initPromise = null
     }
 
     override fun onTerminated() {}

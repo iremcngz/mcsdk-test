@@ -14,6 +14,7 @@ public class SdkParams {
     public final SipParams       Sip       = new SipParams();
     public final TlsParams       Tls       = new TlsParams();
     public final ThreadingParams Threading = new ThreadingParams();
+    public final McxParams       Mcx       = new McxParams();
 
     public static class LoggingParams {
         public boolean  enabled      = true;
@@ -46,5 +47,11 @@ public class SdkParams {
     public static class ThreadingParams {
         public int sipRxThreadCount     = 1;
         public int sipWorkerThreadCount = 1;
+    }
+
+    public static class McxParams {
+        public String idmsUrl = "";
+        public String bmsUrl  = "";
+        public String cmsUrl  = "";
     }
 }
