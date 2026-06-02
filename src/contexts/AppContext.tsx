@@ -18,7 +18,8 @@ import {
   type AppLanguage,
 } from '../core/settings';
 import { configureLogger } from '../core/logger';
-import { initDb } from '../core/db';
+import { initDb, getAllDocuments } from '../core/db';
+import type { McSdkDocument } from '../mcsdk/types';
 import { getThemePalette, type ThemePalette } from '../core/theme';
 import { getTranslation, type Translations } from '../core/i18n';
 import { saveCredentials, touchLogin } from '../core/auth';
@@ -38,6 +39,12 @@ interface AppContextValue {
   setLanguage: (l: AppLanguage) => void;
   setMaxFileSize: (v: number) => void;
   setMaxFiles: (v: number) => void;
+
+  // ── Documents cache (pre-loaded at startup for all users)
+  /** All cached BMS documents keyed by mcId. Available before login. */
+  cachedDocsMap: Map<string, McSdkDocument[]>;
+  /** Updates the in-memory cache for a single mcId after onDocumentsUpdated. */
+  updateCachedDocs: (mcId: string, docs: McSdkDocument[]) => void;
 
   // ── Auth
   isLoggedIn: boolean;
@@ -79,17 +86,23 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     () => AuthSettings.getStayLoggedIn() && AuthSettings.getIsLoggedIn(),
   );
 
+  const [cachedDocsMap, setCachedDocsMap] = useState<Map<string, McSdkDocument[]>>(
+    () => new Map(),
+  );
+
   const c  = useMemo(() => getThemePalette(theme), [theme]);
   const tr = useMemo(() => getTranslation(language), [language]);
 
-  // Initialise FileLogger and SQLite DB once on mount.
+  // Initialise FileLogger and SQLite DB once on mount; then pre-load all
+  // cached BMS documents so they're available before the user logs in.
   useEffect(() => {
     configureLogger().catch(e =>
       console.warn('[AppContext] configureLogger failed:', e),
     );
-    initDb().catch(e =>
-      console.warn('[AppContext] initDb failed:', e),
-    );
+    initDb()
+      .then(() => getAllDocuments())
+      .then(map => setCachedDocsMap(map))
+      .catch(e => console.warn('[AppContext] DB init/load failed:', e));
   }, []);
 
   const setTheme = useCallback((t: AppTheme) => {
@@ -148,15 +161,21 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
   }, []);
 
+  const updateCachedDocs = useCallback((mcId: string, docs: McSdkDocument[]) => {
+    setCachedDocsMap(prev => new Map(prev).set(mcId, docs));
+  }, []);
+
   const value: AppContextValue = useMemo(() => ({
     theme, language, c, tr,
     maxFileSize, maxFiles,
     setTheme, setLanguage, setMaxFileSize, setMaxFiles,
+    cachedDocsMap, updateCachedDocs,
     isLoggedIn, stayLoggedIn, login, logout, setStayLoggedIn,
   }), [
     theme, language, c, tr,
     maxFileSize, maxFiles,
     setTheme, setLanguage, setMaxFileSize, setMaxFiles,
+    cachedDocsMap, updateCachedDocs,
     isLoggedIn, stayLoggedIn, login, logout, setStayLoggedIn,
   ]);
 

@@ -14,13 +14,14 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { McSdk, type McSdkParams, type LogEvent, type RegistrationEvent } from '../mcsdk';
+import { McSdk, type McSdkParams, type LogEvent, type RegistrationEvent, type StoreDocumentsEvent } from '../mcsdk';
 import { SdkSettings } from '../core/settings';
 import { AppLogger, SdkLogger } from '../core/logger';
 import { useIpMonitor, type IpInfo } from '../core/netMonitor';
 import { useAppContext } from './AppContext';
 import { getCredentials } from '../core/auth';
 import { AuthSettings } from '../core/settings';
+import { saveDocuments } from '../core/db';
 import type { LogEntry, SdkLogEntry } from '../shared/types';
 
 // ── Module-level counters (reset across hot-reloads intentionally) ─────────────
@@ -114,6 +115,11 @@ export interface SdkContextValue {
   caListPath:       string;   setCaListPath:       (v: string)  => void;
   sipRxThreads:     string;   setSipRxThreads:     (v: string)  => void;
   sipWorkerThreads: string;   setSipWorkerThreads: (v: string)  => void;
+  idmsUrl: string; setIdmsUrl: (v: string)  => void;
+  bmsUrl:  string; setBmsUrl:  (v: string)  => void;
+  cmsUrl:  string; setCmsUrl:  (v: string)  => void;
+  gmsUrl:  string; setGmsUrl:  (v: string)  => void;
+  mcxMock: boolean; setMcxMock: (v: boolean) => void;
 }
 
 const SdkContext = React.createContext<SdkContextValue | null>(null);
@@ -131,9 +137,11 @@ export function useSdkContext(): SdkContextValue {
 // ── Provider ───────────────────────────────────────────────────────────────────
 
 export function SdkContextProvider({ children }: { children: React.ReactNode }) {
-  const { tr } = useAppContext();
+  const { tr, cachedDocsMap, updateCachedDocs } = useAppContext();
 
   const sdkRef = useRef<McSdk | null>(null);
+  // Tracks the currently authenticated mcId so documents can be scoped per user
+  const currentMcIdRef = useRef<string | null>(null);
 
   // ── Lifecycle flags ────────────────────────────────────────────────────────
   const [created,     setCreated]     = useState(false);
@@ -165,6 +173,11 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   const [caListPath,       setCaListPath]       = useState(_init.caListPath);
   const [sipRxThreads,     setSipRxThreads]     = useState(_init.sipRxThreads);
   const [sipWorkerThreads, setSipWorkerThreads] = useState(_init.sipWorkerThreads);
+  const [idmsUrl, setIdmsUrl] = useState(_init.idmsUrl);
+  const [bmsUrl,  setBmsUrl]  = useState(_init.bmsUrl);
+  const [cmsUrl,  setCmsUrl]  = useState(_init.cmsUrl);
+  const [gmsUrl,  setGmsUrl]  = useState(_init.gmsUrl);
+  const [mcxMock, setMcxMock] = useState(_init.mock);
 
   // ── Log buffers ────────────────────────────────────────────────────────────
   const [logs,    setLogs]    = useState<LogEntry[]>([]);
@@ -215,6 +228,22 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         setRegistrationState(stateLabel(e.state));
       });
 
+      // Subscribe to BMS document cache events.
+      // When the SDK fetches documents from the BMS server it fires
+      // onDocumentsUpdated; we persist them and update the in-memory cache
+      // so they can be restored on the next session via setDocuments().
+      sdkRef.current.onStoreDocuments(async (e: StoreDocumentsEvent) => {
+        const mcId = currentMcIdRef.current;
+        if (!mcId) return;
+        try {
+          await saveDocuments(mcId, e.docs);
+          updateCachedDocs(mcId, e.docs);
+          addLog(`onDocumentsUpdated: saved ${e.docs.length} doc(s) for ${mcId}`);
+        } catch (err: any) {
+          addLog(`onDocumentsUpdated: save failed — ${err.message}`, 'error');
+        }
+      });
+
       // Automatically set identity from stored credentials
       const lastUser = AuthSettings.getLastUsername();
       if (lastUser) {
@@ -222,12 +251,13 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         if (creds) {
           sdkRef.current.setIdentity(creds.username, creds.password);
           addLog(`setIdentity(${creds.username}) called`);
+          currentMcIdRef.current = creds.username;
         }
       }
     } catch (err: any) {
       addLog(`Create failed: ${err.message}`, 'error');
     }
-  }, [addLog]);
+  }, [addLog, updateCachedDocs]);
 
   const handleSetParams = useCallback(() => {
     if (!sdkRef.current) {
@@ -257,6 +287,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
           sipRxThreadCount:     Number(sipRxThreads),
           sipWorkerThreadCount: Number(sipWorkerThreads),
         },
+        Mcx: { idmsUrl, bmsUrl, cmsUrl, gmsUrl, mock: mcxMock },
       };
       sdkRef.current.setParams(params);
       setParamsSet(true);
@@ -269,6 +300,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         httpPort, sipUdpPort, sipTcpEnabled, sipTcpPort, sipTlsEnabled,
         sipTlsPort, sipIpv6Enabled, mTlsEnabled, certPath, privKeyPath,
         caListPath, sipRxThreads, sipWorkerThreads,
+        idmsUrl, bmsUrl, cmsUrl, gmsUrl, mock: mcxMock,
       });
     } catch (err: any) {
       addLog(`setParams() failed: ${err.message}`, 'error');
@@ -277,7 +309,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     addLog, logEnabled, logLevel, pjLogEnabled, pjLogLevel, rxTxEnabled,
     httpPort, sipUdpPort, sipTcpEnabled, sipTcpPort, sipTlsEnabled, sipTlsPort,
     sipIpv6Enabled, mTlsEnabled, certPath, privKeyPath, caListPath,
-    sipRxThreads, sipWorkerThreads,
+    sipRxThreads, sipWorkerThreads, idmsUrl, bmsUrl, cmsUrl, gmsUrl, mcxMock,
   ]);
 
   const handleInit = useCallback(async () => {
@@ -293,13 +325,27 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
       setInitialized(result);
       addLog(`init() returned: ${result}`, result ? 'info' : 'error');
       if (result) {
+        // Restore cached BMS documents before registration (FIFO queue —
+        // setDocuments is processed by the engine before Register()).
+        const mcId = currentMcIdRef.current;
+        if (mcId) {
+          try {
+            const docs = cachedDocsMap.get(mcId) ?? [];
+            if (docs.length > 0) {
+              sdkRef.current.setDocuments(docs);
+              addLog(`setDocuments(): ${docs.length} cached doc(s) provided to SDK`);
+            }
+          } catch (err: any) {
+            addLog(`setDocuments() cache read failed — ${err.message}`, 'warn');
+          }
+        }
         sdkRef.current.register();
         addLog('register() called → waiting for registration callbacks...');
       }
     } catch (err: any) {
       addLog(`init() threw: ${err.message}`, 'error');
     }
-  }, [addLog, paramsSet]);
+  }, [addLog, cachedDocsMap, paramsSet]);
 
   const handleDestroy = useCallback(() => {
     if (!sdkRef.current) {
@@ -344,6 +390,11 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     caListPath,       setCaListPath,
     sipRxThreads,     setSipRxThreads,
     sipWorkerThreads, setSipWorkerThreads,
+    idmsUrl, setIdmsUrl,
+    bmsUrl,  setBmsUrl,
+    cmsUrl,  setCmsUrl,
+    gmsUrl,  setGmsUrl,
+    mcxMock, setMcxMock,
   }), [
     created, initialized, paramsSet,
     logs, sdkLogs, addLog, clearLogs, clearSdkLogs,
@@ -354,6 +405,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     httpPort, sipUdpPort, sipTcpEnabled, sipTcpPort, sipTlsEnabled,
     sipTlsPort, sipIpv6Enabled, mTlsEnabled, certPath, privKeyPath,
     caListPath, sipRxThreads, sipWorkerThreads,
+    idmsUrl, bmsUrl, cmsUrl, gmsUrl, mcxMock,
   ]);
 
   return <SdkContext.Provider value={value}>{children}</SdkContext.Provider>;

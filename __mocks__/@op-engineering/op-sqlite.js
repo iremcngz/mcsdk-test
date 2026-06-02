@@ -44,12 +44,30 @@ class MockDB {
       return { rows: { _array: [] }, insertId: undefined };
     }
 
-    // ── INSERT INTO <name> (cols…) VALUES (?) [ON CONFLICT(col) DO UPDATE SET …]
-    const insertMatch = s.match(/^INSERT INTO (\w+)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
+    // ── INSERT [OR REPLACE] INTO <name> (cols…) VALUES (?)
+    //    Also handles: INSERT INTO … ON CONFLICT(col) DO UPDATE SET …
+    const insertMatch = s.match(/^INSERT(?:\s+OR\s+REPLACE)?\s+INTO\s+(\w+)\s*\(([^)]+)\)\s+VALUES\s*\(([^)]+)\)/i);
     if (insertMatch) {
       const tableName = insertMatch[1].toLowerCase();
-      const cols = insertMatch[2].split(',').map(c => c.trim());
+      const cols = insertMatch[2].split(',').map(c => c.trim().toLowerCase());
       const table = this._ensureTable(tableName);
+
+      // INSERT OR REPLACE INTO — composite-key DELETE+INSERT (SQLite semantics)
+      const isOrReplace = /^INSERT\s+OR\s+REPLACE\s+INTO/i.test(s);
+      if (isOrReplace) {
+        // Match on first two columns as composite primary key (handles mcid+uri pattern)
+        if (cols.length >= 2) {
+          table.rows = table.rows.filter(r =>
+            !(String(r[cols[0]]) === String(params[0]) && String(r[cols[1]]) === String(params[1])),
+          );
+        } else {
+          table.rows = table.rows.filter(r => String(r[cols[0]]) !== String(params[0]));
+        }
+        const row = { id: table.nextId++ };
+        cols.forEach((col, i) => { row[col] = params[i]; });
+        table.rows.push(row);
+        return { rows: { _array: [] }, insertId: row.id };
+      }
 
       const isUpsert = /ON CONFLICT\s*\(\s*(\w+)\s*\)\s*DO UPDATE SET/i.test(s);
       if (isUpsert) {
@@ -77,7 +95,7 @@ class MockDB {
 
       // Regular insert
       const row = { id: table.nextId++ };
-      cols.forEach((col, i) => { row[col.toLowerCase()] = params[i]; });
+      cols.forEach((col, i) => { row[col] = params[i]; });
       table.rows.push(row);
       return { rows: { _array: [] }, insertId: row.id };
     }

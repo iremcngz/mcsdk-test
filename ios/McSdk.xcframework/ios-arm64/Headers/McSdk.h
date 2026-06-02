@@ -4,6 +4,7 @@
 
 #import "McSdkAlarm.h"
 #import "McSdkAlarmListener.h"
+#import "McSdkDocuments.h"
 #import "McSdkError.h"
 #import "McSdkIdentity.h"
 #import "McSdkListener.h"
@@ -16,18 +17,9 @@
 // constraint of the underlying C++ Sdk class). Call -destroy when the
 // SDK is no longer needed to release all native resources.
 //
-// Typical usage:
-//   McSdk *sdk = [[McSdk alloc] init];
-//   [sdk setParams:params];
-//   [sdk setListener:self];
-//   [sdk init];           // returns YES on success
-//   [sdk sendSds:@"sip:test@127.0.0.1" body:@"hello"];
-//   // ... use ...
-//   [sdk destroy];
-//
 @interface McSdk : NSObject
 
-// Configures the SDK. Must be called before -init.
+// Configures the SDK. Must be called before -initSdk.
 - (void)setParams:(McSdkParams*)params;
 
 // Registers the primary event listener. Must be set before -initSdk.
@@ -40,28 +32,35 @@
 - (void)setAlarmListener:(id<McSdkAlarmListener>)alarmListener;
 
 // Initialises the SDK. Call once after -setParams and -setListener.
-// Returns YES on success. Named initSdk to avoid collision with NSObject -init.
-- (BOOL)initSdk;
+// Result is delivered via onReady or onSdkError callbacks.
+// Named initSdk to avoid collision with NSObject -init.
+- (void)initSdk;
+
+// Terminates the SDK and releases all resources.
+- (void)terminate;
 
 // Releases all native resources. Must be called when finished with the SDK.
 - (void)destroy;
 
 // ── Session ───────────────────────────────────────────────────────────────────
 - (void)setIdentity:(McSdkIdentity*)identity;
+- (void)setDocuments:(McSdkDocuments*)documents;
 
-// ── Registration ─────────────────────────────────────────────────────────────
+// ── Registration ──────────────────────────────────────────────────────────────
 - (void)register;
 - (void)unregister;
+
+- (void)setNetworkAddress:(NSString*)ip;
 
 // ── Alarm ─────────────────────────────────────────────────────────────────────
 - (void)raiseAlarm:(McSdkAlarm*)alarm;
 - (void)resolveAlarmByName:(NSString*)alarmName;
 - (NSString*)listAlarms;
 
-// ── Metrics ──────────────────────────────────────────────────────────────────
+// ── Metrics ───────────────────────────────────────────────────────────────────
 - (NSString*)listMetrics;
 
-// ── DAO ──────────────────────────────────────────────────────────────────────
+// ── DAO ───────────────────────────────────────────────────────────────────────
 - (void)createData:(NSString*)key value:(NSString*)value;
 - (void)updateData:(NSString*)key value:(NSString*)value;
 - (void)deleteData:(NSString*)key;
@@ -69,7 +68,7 @@
 - (void)importData:(NSString*)data;
 - (NSString*)exportData;
 
-// ── Messaging ────────────────────────────────────────────────────────────────
+// ── Messaging ─────────────────────────────────────────────────────────────────
 - (void)fetchDocument:(NSString*)url;
 - (void)sendSds:(NSString*)target body:(NSString*)body;
 

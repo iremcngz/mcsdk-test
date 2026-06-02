@@ -12,6 +12,8 @@ import type {
     AlarmEvent,
     LogEvent,
     RegistrationEvent,
+    McSdkDocument,
+    StoreDocumentsEvent,
 } from './types';
 
 export * from './types';
@@ -19,13 +21,14 @@ export * from './types';
 // ── Event names ───────────────────────────────────────────────────────────────
 
 export const McSdkEvents = {
-    FetchDocument: 'McSdkFetchDocument',
-    SdsSent: 'McSdkSdsSent',
-    SdsReceived: 'McSdkSdsReceived',
-    SdsError: 'McSdkSdsError',
-    Alarm: 'McSdkAlarm',
-    Log: 'McSdkLog',
-    Registration: 'McSdkRegistration',
+    FetchDocument:   'McSdkFetchDocument',
+    SdsSent:         'McSdkSdsSent',
+    SdsReceived:     'McSdkSdsReceived',
+    SdsError:        'McSdkSdsError',
+    Alarm:           'McSdkAlarm',
+    Log:             'McSdkLog',
+    Registration:    'McSdkRegistration',
+    StoreDocuments:  'McSdkStoreDocuments',
 } as const;
 
 // ── Emitter (singleton, lazily created) ───────────────────────────────────────
@@ -62,6 +65,7 @@ export class McSdk {
         const S = { ...DEFAULT_PARAMS.Sip!, ...p.Sip };
         const T = { ...DEFAULT_PARAMS.Tls!, ...p.Tls };
         const Th = { ...DEFAULT_PARAMS.Threading!, ...p.Threading };
+        const M = p.Mcx ?? {};
 
         const flat = {
             logEnabled:      L.enabled!     ? 1 : 0,
@@ -82,6 +86,11 @@ export class McSdk {
             caListPath:      T.caListPath!,
             sipRxThreads:    Th.sipRxThreadCount!,
             sipWorkerThreads: Th.sipWorkerThreadCount!,
+            idmsUrl:         M.idmsUrl ?? '',
+            bmsUrl:          M.bmsUrl ?? '',
+            cmsUrl:          M.cmsUrl ?? '',
+            gmsUrl:          M.gmsUrl ?? '',
+            mock:            (M.mock ?? false) ? 1 : 0,
         };
         NativeMcSdk.setParams(JSON.stringify(flat));
     }
@@ -137,6 +146,17 @@ export class McSdk {
         NativeMcSdk.setIdentity(mcId, password, clientId);
     }
 
+    /**
+     * Provides cached BMS documents to the SDK before registration.
+     * Must be called after init() resolves and before register().
+     *
+     * Android: routed to nativeSetDocuments(docsJson) → JNI → C++ Sdk::SetDocuments
+     * iOS:     no-op until xcframework exposes -setDocuments: (McSdkModule.mm stub)
+     */
+    setDocuments(docs: McSdkDocument[]): void {
+        NativeMcSdk.setDocuments(JSON.stringify(docs));
+    }
+
     register(): void { NativeMcSdk.register(); }
     unregister(): void { NativeMcSdk.unregister(); }
 
@@ -168,5 +188,23 @@ export class McSdk {
 
     onRegistration(handler: (e: RegistrationEvent) => void) {
         return emitter().addListener(McSdkEvents.Registration, handler);
+    }
+
+    /**
+     * Subscribe to the StoreDocuments event.
+     * The SDK fires this after fetching BMS documents; the app should persist
+     * them via saveDocuments() so they can be restored on the next session.
+     */
+    onStoreDocuments(handler: (e: StoreDocumentsEvent) => void) {
+        return emitter().addListener(
+            McSdkEvents.StoreDocuments,
+            (raw: { docsJson: string }) => {
+                try {
+                    handler({ docs: JSON.parse(raw.docsJson) });
+                } catch {
+                    handler({ docs: [] });
+                }
+            },
+        );
     }
 }

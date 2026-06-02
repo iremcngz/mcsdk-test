@@ -46,6 +46,7 @@ export interface Translations {
   cardSip: string;
   cardTls: string;
   cardThreading: string;
+  cardMcx: string;
   cardTheme: string;
   cardLanguage: string;
   cardMaxFileSize: string;
@@ -59,6 +60,7 @@ export interface Translations {
   switchTlsEnabled: string;
   switchIpv6Enabled: string;
   switchMtlsEnabled: string;
+  switchMockEnabled: string;
 
   // ── Input row labels
   inputLevel: string;
@@ -72,6 +74,10 @@ export interface Translations {
   inputCaListPath: string;
   inputSipRxThreads: string;
   inputSipWorkerThreads: string;
+  inputIdmsUrl: string;
+  inputBmsUrl: string;
+  inputCmsUrl: string;
+  inputGmsUrl: string;
 
   // ── Log console
   logPlaceholder: string;
@@ -112,6 +118,35 @@ export interface Translations {
   inputSipUri: string;
   inputNotes: string;
   btnSaveContact: string;
+
+  // ── Talk screen
+  tabTalk: string;
+  talkGroupsTitle: string;
+  talkSelectedGroup: string;
+  talkButton: string;
+  talkButtonHold: string;
+  talkHoldHint: string;
+  talkNoCallHint: string;
+  talkSpeakerYou: string;
+  talkOccupiedBy: (speaker: string) => string;
+  talkStatusIdle: string;
+  talkStatusAccepted: string;
+  talkStatusOccupied: string;
+  talkStatusActive: string;
+  talkStatusTalking: string;
+  talkModeReceive: string;
+  talkModeTransmit: string;
+  talkModeMessages: string;
+  talkBtnStartCall: string;
+  talkBtnEndCall: string;
+  talkMockPanelTitle: string;
+  talkMockAccept: string;
+  talkMockOccupy: string;
+  talkMockReset: string;
+  talkMicEnable: string;
+  talkMicEnabled: string;
+  talkMicDenied: string;
+  talkMicDisabledHint: string;
   btnClearContacts: string;
   contactsEmpty: string;
   contactsCount: (n: number) => string;
@@ -134,6 +169,46 @@ export interface Translations {
   sectionAccount: string;
   cardStayLoggedIn: string;
   btnLogout: string;
+
+  // ── Calls tab
+  tabCalls: string;
+  callHistoryTitle: string;
+  callHistoryEmpty: string;
+  callHistoryCount: (n: number) => string;
+  btnEndCall: string;
+  btnRequestFloor: string;
+  btnReleaseFloor: string;
+  floorIdle: string;
+  floorGranted: string;
+  floorBusy: string;
+  commencementAuto: string;
+  commencementManual: string;
+  btnJoinCall: string;
+  callConnecting: string;
+  callActive: string;
+  callEnding: string;
+  callTypeHD: string;
+  callTypeFD: string;
+  callDirectionOut: string;
+  callDirectionIn: string;
+  callDuration: (s: number) => string;
+  btnClearHistory: string;
+  btnCallBack: string;
+  cardCommencement: string;
+
+  // ── Mock / test
+  callIncoming: string;
+  btnAcceptCall: string;
+  btnRejectCall: string;
+  mockPanelTitle: string;
+  mockIncomingHD: string;
+  mockIncomingFD: string;
+  mockOutgoingHD: string;
+  mockOutgoingFD: string;
+  mockFloorBusy: string;
+  mockFloorIdle: string;
+  mockFloorGranted: string;
+  mockRemoteHangup: string;
 }
 
 const tr: Translations = {
@@ -172,6 +247,7 @@ const tr: Translations = {
   cardSip:          'SIP',
   cardTls:          'TLS',
   cardThreading:    'Thread',
+  cardMcx:          'MCX Sunucu URL',
   cardTheme:        'Tema',
   cardLanguage:     'Dil',
   cardMaxFileSize:  'Maksimum Dosya Boyutu',
@@ -184,6 +260,7 @@ const tr: Translations = {
   switchTlsEnabled:  'TLS Etkin',
   switchIpv6Enabled: 'IPv6 Etkin',
   switchMtlsEnabled: 'mTLS Etkin',
+  switchMockEnabled:  'Mock Modu',
 
   inputLevel:          'Seviye (0-5)',
   inputPjLevel:        'PJ Seviye',
@@ -196,6 +273,10 @@ const tr: Translations = {
   inputCaListPath:     'CA Listesi Yolu',
   inputSipRxThreads:   'SIP Rx Thread',
   inputSipWorkerThreads: 'SIP Worker Thread',
+  inputIdmsUrl:        'IDMS URL',
+  inputBmsUrl:         'BMS URL',
+  inputCmsUrl:         'CMS URL',
+  inputGmsUrl:         'GMS URL',
 
   logPlaceholder:    'Loglar burada görünecek…',
   logSdkPlaceholder: 'SDK log olayları burada görünür\nOluştur → Başlat adımlarından sonra.',
@@ -230,7 +311,35 @@ const tr: Translations = {
   inputNotes:              'Notlar (isteğe bağlı)',
   btnSaveContact:          'Kişi Ekle',
   btnClearContacts:        'Tümünü Sil',
-  contactsEmpty:           'Henüz kişi yok. Yukarıdan ekle.',
+
+  tabTalk:               'Talk',
+  talkGroupsTitle:       'Gruplar',
+  talkSelectedGroup:     'Seçilen grup',
+  talkButton:            'Push to talk',
+  talkButtonHold:        'Hold to talk',
+  talkSpeakerYou:        'You',
+  talkHoldHint:          'Basılı tutarak konuşun',
+  talkNoCallHint:        'Çağrı başlatın, sonra push kullanın',
+  talkOccupiedBy:        speaker => `${speaker} konuşuyor`,
+  talkStatusIdle:        'Boşta',
+  talkStatusAccepted:    'Push kabul edildi',
+  talkStatusOccupied:    'Başka konuşuyor',
+  talkStatusActive:      'Çağrı aktif',
+  talkStatusTalking:     'Konuşuyorsunuz',
+  talkModeReceive:       'Receive',
+  talkModeTransmit:      'Transmit',
+  talkModeMessages:      'Messages',
+  talkBtnStartCall:      'Start Call',
+  talkBtnEndCall:        'End Call',
+  talkMockPanelTitle:    'Mock Kontrol',
+  talkMockAccept:        'Push accepted',
+  talkMockOccupy:        'Other talking',
+  talkMockReset:         'Reset',
+  talkMicEnable:         'Mikrofonu etkinleştir',
+  talkMicEnabled:        'Mikrofon etkin',
+  talkMicDenied:         'Mikrofon izni reddedildi',
+  talkMicDisabledHint:   'Ses göndermek için mikrofonu etkinleştirin',
+  contactsEmpty:         'Henüz kişi yok. Yukarıdan ekle.',
   contactsCount:           n => `${n} kişi`,
   contactsAlertClearTitle:   'Tüm kişileri sil',
   contactsAlertClearMessage: 'Adres defterindeki tüm kayıtlar silinecek. Devam edilsin mi?',
@@ -248,6 +357,51 @@ const tr: Translations = {
   sectionAccount:   'Hesap',
   cardStayLoggedIn: 'Oturumu Açık Tut',
   btnLogout:        'Çıkış Yap',
+
+  tabCalls:           'Aramalar',
+  callHistoryTitle:   'Arama Geçmişi',
+  callHistoryEmpty:   'Henüz tamamlanan arama yok.',
+  callHistoryCount:   n => `${n} arama`,
+  btnEndCall:         'Aramayı Bitir',
+  btnRequestFloor:    'Kat Al',
+  btnReleaseFloor:    'Katı Bırak',
+  floorIdle:          'Kat Al',
+  floorGranted:       'Konuşuluyor',
+  floorBusy:          'Hat Meşgul',
+  commencementAuto:   'OTOMATİK',
+  commencementManual: 'MANUEL',
+  btnJoinCall:        'Aramaya Katıl',
+  callConnecting:     'Bağlanıyor…',
+  callActive:         'Aktif',
+  callEnding:         'Kapatılıyor…',
+  callTypeHD:         'Yarı Dubleks',
+  callTypeFD:         'Tam Dubleks',
+  callDirectionOut:   'Giden',
+  callDirectionIn:    'Gelen',
+  callDuration:       s => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  },
+  btnClearHistory:    'Geçmişi Temizle',
+  btnCallBack:        'Geri Ara',
+  cardCommencement:   'Başlangıç Modu',
+
+  // mock
+  callIncoming:       'Gelen Arama',
+  btnAcceptCall:      'Kabul Et',
+  btnRejectCall:      'Reddet',
+  mockPanelTitle:     '🧪 Mock Kontrol',
+  mockIncomingHD:     'Gelen HD Arama',
+  mockIncomingFD:     'Gelen FD Arama',
+  mockOutgoingHD:     'Giden HD Arama',
+  mockOutgoingFD:     'Giden FD Arama',
+  mockFloorBusy:      'Floor Meşgul Yap',
+  mockFloorIdle:      'Floor Serbest Bırak',
+  mockFloorGranted:   'Floor Ver (Kendinize)',
+  mockRemoteHangup:   'Karşı Taraf Kapattı',
 };
 
 const en: Translations = {
@@ -286,6 +440,7 @@ const en: Translations = {
   cardSip:          'SIP',
   cardTls:          'TLS',
   cardThreading:    'Threading',
+  cardMcx:          'MCX Server URLs',
   cardTheme:        'Theme',
   cardLanguage:     'Language',
   cardMaxFileSize:  'Max file size',
@@ -298,6 +453,7 @@ const en: Translations = {
   switchTlsEnabled:  'TLS Enabled',
   switchIpv6Enabled: 'IPv6 Enabled',
   switchMtlsEnabled: 'mTLS Enabled',
+  switchMockEnabled:  'Mock Mode',
 
   inputLevel:           'Level (0-5)',
   inputPjLevel:         'PJ Level',
@@ -310,6 +466,10 @@ const en: Translations = {
   inputCaListPath:      'CA List Path',
   inputSipRxThreads:    'SIP Rx Threads',
   inputSipWorkerThreads: 'SIP Worker Threads',
+  inputIdmsUrl:         'IDMS URL',
+  inputBmsUrl:          'BMS URL',
+  inputCmsUrl:          'CMS URL',
+  inputGmsUrl:          'GMS URL',
 
   logPlaceholder:    'Logs will appear here…',
   logSdkPlaceholder: 'SDK log events appear here\nafter Create → Initialize.',
@@ -344,6 +504,34 @@ const en: Translations = {
   inputNotes:              'Notes (optional)',
   btnSaveContact:          'Add Contact',
   btnClearContacts:        'Clear All',
+
+  tabTalk:               'Talk',
+  talkGroupsTitle:       'Groups',
+  talkSelectedGroup:     'Selected group',
+  talkButton:            'Push to talk',
+  talkButtonHold:        'Hold to talk',
+  talkSpeakerYou:        'You',
+  talkHoldHint:          'Press and hold while speaking',
+  talkNoCallHint:        'Start call to enable push-to-talk',
+  talkOccupiedBy:        speaker => `${speaker} is speaking`,
+  talkStatusIdle:        'Idle',
+  talkStatusAccepted:    'Push granted',
+  talkStatusOccupied:    'Other speaking',
+  talkStatusActive:      'Call active',
+  talkStatusTalking:     'Talking',
+  talkModeReceive:       'Receive',
+  talkModeTransmit:      'Transmit',
+  talkModeMessages:      'Messages',
+  talkBtnStartCall:      'Start Call',
+  talkBtnEndCall:        'End Call',
+  talkMockPanelTitle:    'Mock Controls',
+  talkMockAccept:        'Grant push',
+  talkMockOccupy:        'Other talking',
+  talkMockReset:         'Reset',
+  talkMicEnable:         'Enable microphone',
+  talkMicEnabled:        'Microphone enabled',
+  talkMicDenied:         'Microphone permission denied',
+  talkMicDisabledHint:   'Enable microphone to send audio',
   contactsEmpty:           'No contacts yet. Add one above.',
   contactsCount:           n => `${n} contact${n === 1 ? '' : 's'}`,
   contactsAlertClearTitle:   'Delete all contacts',
@@ -362,6 +550,51 @@ const en: Translations = {
   sectionAccount:   'Account',
   cardStayLoggedIn: 'Stay Logged In',
   btnLogout:        'Log Out',
+
+  tabCalls:           'Calls',
+  callHistoryTitle:   'Call History',
+  callHistoryEmpty:   'No completed calls yet.',
+  callHistoryCount:   n => `${n} call${n === 1 ? '' : 's'}`,
+  btnEndCall:         'End Call',
+  btnRequestFloor:    'Request Floor',
+  btnReleaseFloor:    'Release Floor',
+  floorIdle:          'Request Floor',
+  floorGranted:       'Speaking',
+  floorBusy:          'Floor Busy',
+  commencementAuto:   'AUTO',
+  commencementManual: 'MANUAL',
+  btnJoinCall:        'Join Call',
+  callConnecting:     'Connecting…',
+  callActive:         'Active',
+  callEnding:         'Ending…',
+  callTypeHD:         'Half Duplex',
+  callTypeFD:         'Full Duplex',
+  callDirectionOut:   'Outgoing',
+  callDirectionIn:    'Incoming',
+  callDuration:       s => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  },
+  btnClearHistory:    'Clear History',
+  btnCallBack:        'Call Back',
+  cardCommencement:   'Commencement Mode',
+
+  // mock
+  callIncoming:       'Incoming Call',
+  btnAcceptCall:      'Accept',
+  btnRejectCall:      'Reject',
+  mockPanelTitle:     '🧪 Mock Controls',
+  mockIncomingHD:     'Incoming HD Call',
+  mockIncomingFD:     'Incoming FD Call',
+  mockOutgoingHD:     'Outgoing HD Call',
+  mockOutgoingFD:     'Outgoing FD Call',
+  mockFloorBusy:      'Make Floor Busy',
+  mockFloorIdle:      'Release Floor',
+  mockFloorGranted:   'Grant Floor (Self)',
+  mockRemoteHangup:   'Remote Hangup',
 };
 
 export function getTranslation(language: AppLanguage): Translations {

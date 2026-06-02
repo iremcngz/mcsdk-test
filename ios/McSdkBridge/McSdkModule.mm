@@ -1,5 +1,7 @@
 #import "McSdkModule.h"
 #import "McSdk.h"
+#import "McSdkDocument.h"
+#import "McSdkDocuments.h"
 #import "McSdkParams.h"
 #import "McSdkListener.h"
 #import "McSdkLogListener.h"
@@ -38,7 +40,8 @@ RCT_EXPORT_MODULE(McSdk)
     @"McSdkSdsError",
     @"McSdkAlarm",
     @"McSdkLog",
-    @"McSdkRegistration"
+    @"McSdkRegistration",
+    @"McSdkStoreDocuments"
   ];
 }
 
@@ -126,12 +129,23 @@ RCT_EXPORT_METHOD(setParams:(NSString *)paramsJson) {
   NSLog(@"[McSdk] threading: sipRxThreadCount=%ld sdkWorkerThreadCount=%ld",
         (long)threading.sipRxThreadCount, (long)threading.sdkWorkerThreadCount);
 
+  McSdkMcxParams *mcx = [[McSdkMcxParams alloc] init];
+  mcx.idmsUrl = d[@"idmsUrl"] ?: @"";
+  mcx.bmsUrl = d[@"bmsUrl"] ?: @"";
+  mcx.cmsUrl = d[@"cmsUrl"] ?: @"";
+  mcx.gmsUrl = d[@"gmsUrl"] ?: @"";
+  mcx.mock = [d[@"mock"] integerValue] != 0;
+
+  NSLog(@"[McSdk] mcx: idmsUrl=%@ bmsUrl=%@ cmsUrl=%@ gmsUrl=%@ mock=%d",
+        mcx.idmsUrl, mcx.bmsUrl, mcx.cmsUrl, mcx.gmsUrl, mcx.mock);
+
   McSdkParams *params = [[McSdkParams alloc] init];
   params.Logging = logging;
   params.Http = http;
   params.Sip = sip;
   params.Tls = tls;
   params.Threading = threading;
+  params.Mcx = mcx;
 
   [gSdk setParams:params];
 }
@@ -244,6 +258,27 @@ RCT_EXPORT_METHOD(unregister) {
   [gSdk unregister];
 }
 
+RCT_EXPORT_METHOD(setDocuments:(NSString *)docsJson) {
+  if (gSdk == nil) return;
+  NSData *data = [docsJson dataUsingEncoding:NSUTF8StringEncoding];
+  if (!data) return;
+  NSArray *arr = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+  if (!arr) return;
+  McSdkDocuments *documents = [[McSdkDocuments alloc] init];
+  NSMutableArray<McSdkDocument*> *docList = [NSMutableArray arrayWithCapacity:arr.count];
+  for (NSDictionary *obj in arr) {
+    McSdkDocument *d = [[McSdkDocument alloc] init];
+    d.uri      = obj[@"uri"] ?: @"";
+    d.etag     = obj[@"etag"] ?: @"";
+    d.content  = obj[@"content"] ?: @"";
+    d.type     = (McSdkDocumentType)[obj[@"type"] integerValue];
+    d.fetchedAt = [obj[@"fetchedAt"] longValue];
+    [docList addObject:d];
+  }
+  documents.documents = [docList copy];
+  [gSdk setDocuments:documents];
+}
+
 // Required by New Architecture TurboModule spec — RCTEventEmitter handles the
 // actual subscription management internally; these stubs ensure startObserving
 // and stopObserving are triggered so hasListeners is set correctly.
@@ -293,9 +328,35 @@ RCT_EXPORT_METHOD(removeListeners:(double)count) {
 - (void)onRegistered {
   [self emitEvent:@"McSdkRegistration" body:@{
     @"state":    @(McSdkRegistrationStateRegistered),
-    @"phase":    @(McSdkRegistrationPhaseDone),
+    @"phase":    @(McSdkRegistrationPhaseRegistered),
     @"progress": @(100)
   }];
+}
+
+- (void)onRegistrationFailed {
+  [self emitEvent:@"McSdkRegistration" body:@{
+    @"state":    @(McSdkRegistrationStateUnregistered),
+    @"phase":    @(McSdkRegistrationPhaseFailed),
+    @"progress": @(0)
+  }];
+}
+
+- (void)onDocumentsUpdated:(NSArray<McSdkDocument *> *)docs {
+  NSMutableArray *arr = [NSMutableArray arrayWithCapacity:docs.count];
+  for (McSdkDocument *doc in docs) {
+    [arr addObject:@{
+      @"uri":       doc.uri ?: @"",
+      @"etag":      doc.etag ?: @"",
+      @"content":   doc.content ?: @"",
+      @"type":      @(doc.type),
+      @"fetchedAt": @(doc.fetchedAt),
+    }];
+  }
+  NSError *err = nil;
+  NSData *jsonData = [NSJSONSerialization dataWithJSONObject:arr options:0 error:&err];
+  if (!jsonData) return;
+  NSString *docsJson = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+  [self emitEvent:@"McSdkStoreDocuments" body:@{@"docsJson": docsJson}];
 }
 
 - (void)onFetchDocument:(NSString *)url content:(NSString *)content {

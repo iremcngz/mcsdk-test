@@ -92,6 +92,11 @@ interface SdkSettingsSchema {
   caListPath:       string;
   sipRxThreads:     string;
   sipWorkerThreads: string;
+  idmsUrl: string;
+  bmsUrl:  string;
+  cmsUrl:  string;
+  gmsUrl:  string;
+  mock:    boolean;
 }
 
 export const SDK_DEFAULTS: SdkSettingsSchema = {
@@ -113,6 +118,11 @@ export const SDK_DEFAULTS: SdkSettingsSchema = {
   caListPath:       'cert/ca.pem',
   sipRxThreads:     '1',
   sipWorkerThreads: '1',
+  idmsUrl: '',
+  bmsUrl:  '',
+  cmsUrl:  '',
+  gmsUrl:  '',
+  mock:    false,
 };
 
 function sdkKey(k: keyof SdkSettingsSchema): string {
@@ -140,6 +150,11 @@ export const SdkSettings = {
       caListPath:       userStorage.getString(sdkKey('caListPath'))     ?? SDK_DEFAULTS.caListPath,
       sipRxThreads:     userStorage.getString(sdkKey('sipRxThreads'))   ?? SDK_DEFAULTS.sipRxThreads,
       sipWorkerThreads: userStorage.getString(sdkKey('sipWorkerThreads'))?? SDK_DEFAULTS.sipWorkerThreads,
+      idmsUrl:          userStorage.getString(sdkKey('idmsUrl'))        ?? SDK_DEFAULTS.idmsUrl,
+      bmsUrl:           userStorage.getString(sdkKey('bmsUrl'))         ?? SDK_DEFAULTS.bmsUrl,
+      cmsUrl:           userStorage.getString(sdkKey('cmsUrl'))         ?? SDK_DEFAULTS.cmsUrl,
+      gmsUrl:           userStorage.getString(sdkKey('gmsUrl'))         ?? SDK_DEFAULTS.gmsUrl,
+      mock:             userStorage.getBoolean(sdkKey('mock'))          ?? SDK_DEFAULTS.mock,
     };
   },
 
@@ -162,6 +177,11 @@ export const SdkSettings = {
     userStorage.set(sdkKey('caListPath'),       values.caListPath);
     userStorage.set(sdkKey('sipRxThreads'),     values.sipRxThreads);
     userStorage.set(sdkKey('sipWorkerThreads'), values.sipWorkerThreads);
+    userStorage.set(sdkKey('idmsUrl'),          values.idmsUrl);
+    userStorage.set(sdkKey('bmsUrl'),           values.bmsUrl);
+    userStorage.set(sdkKey('cmsUrl'),           values.cmsUrl);
+    userStorage.set(sdkKey('gmsUrl'),           values.gmsUrl);
+    userStorage.set(sdkKey('mock'),             values.mock);
   },
 
   reset(): void {

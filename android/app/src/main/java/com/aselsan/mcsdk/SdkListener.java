@@ -17,4 +17,11 @@ public interface SdkListener {
     void onSdsSent(String target, String body);
     void onSdsReceived(String sender, String body);
     void onSdsError(String target, SdkError error);
+
+    /**
+     * Called by the SDK when BMS documents have been fetched and should be
+     * persisted locally. Call {@link McSdk#setDocuments} with these documents
+     * on the next SDK session to pre-provision them before registration.
+     */
+    void onStoreDocuments(java.util.List<Document> docs);
 }

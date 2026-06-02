@@ -121,6 +121,30 @@ public class McSdk {
         nativeSetIdentity(identity.mcId, identity.password, identity.clientId);
     }
 
+    /**
+     * Provides cached BMS documents to the SDK before registration.
+     * Must be called after {@link #init()} resolves and before {@link #register()}.
+     * Serialises the list to JSON and forwards to the native layer.
+     */
+    public void setDocuments(java.util.List<Document> docs) {
+        try {
+            org.json.JSONArray arr = new org.json.JSONArray();
+            for (Document d : docs) {
+                org.json.JSONObject obj = new org.json.JSONObject();
+                obj.put("uri",       d.uri);
+                obj.put("timestamp", d.timestamp);
+                obj.put("etag",      d.etag);
+                obj.put("org",       d.org);
+                obj.put("content",   d.content);
+                obj.put("size",      d.size);
+                arr.put(obj);
+            }
+            nativeSetDocuments(arr.toString());
+        } catch (org.json.JSONException e) {
+            android.util.Log.e("McSdk", "setDocuments serialise error: " + e.getMessage(), e);
+        }
+    }
+
     public void register() { nativeRegister(); }
     public void unregister() { nativeUnregister(); }
 
@@ -158,6 +182,8 @@ public class McSdk {
     private native void    nativeFetchDocument(String url);
     private native void    nativeSendSds(String target, String body);
     private native void    nativeSetIdentity(String mcId, String password, String clientId);
+    /** JSON-encoded array of Document objects — parsed by the JNI layer. */
+    private native void    nativeSetDocuments(String docsJson);
     private native void    nativeRegister();
     private native void    nativeUnregister();
 }

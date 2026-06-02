@@ -3,6 +3,9 @@ package com.aselsan.mcsdk.rn
 import com.aselsan.mcsdk.Alarm
 import com.aselsan.mcsdk.AlarmListener
 import com.aselsan.mcsdk.AlarmSeverity
+import com.aselsan.mcsdk.Document
+import com.aselsan.mcsdk.DocumentType
+import com.aselsan.mcsdk.Documents
 import com.aselsan.mcsdk.Identity
 import com.aselsan.mcsdk.LogLevel
 import com.aselsan.mcsdk.LogListener
@@ -20,13 +23,14 @@ import com.facebook.react.bridge.ReactMethod
 import org.json.JSONObject
 
 // Event name constants (must match src/index.ts McSdkEvents)
-private const val EVENT_FETCH_DOCUMENT = "McSdkFetchDocument"
-private const val EVENT_SDS_SENT       = "McSdkSdsSent"
-private const val EVENT_SDS_RECEIVED   = "McSdkSdsReceived"
-private const val EVENT_SDS_ERROR      = "McSdkSdsError"
-private const val EVENT_ALARM          = "McSdkAlarm"
-private const val EVENT_LOG            = "McSdkLog"
-private const val EVENT_REGISTRATION   = "McSdkRegistration"
+private const val EVENT_FETCH_DOCUMENT  = "McSdkFetchDocument"
+private const val EVENT_SDS_SENT        = "McSdkSdsSent"
+private const val EVENT_SDS_RECEIVED    = "McSdkSdsReceived"
+private const val EVENT_SDS_ERROR       = "McSdkSdsError"
+private const val EVENT_ALARM           = "McSdkAlarm"
+private const val EVENT_LOG             = "McSdkLog"
+private const val EVENT_REGISTRATION    = "McSdkRegistration"
+private const val EVENT_STORE_DOCUMENTS = "McSdkStoreDocuments"
 
 class McSdkModule(
     private val context: ReactApplicationContext,
@@ -112,6 +116,8 @@ class McSdkModule(
             Mcx.idmsUrl = d.optString("idmsUrl", "")
             Mcx.bmsUrl  = d.optString("bmsUrl",  "")
             Mcx.cmsUrl  = d.optString("cmsUrl",  "")
+            Mcx.gmsUrl  = d.optString("gmsUrl",  "")
+            Mcx.mock    = d.optInt("mock", 0) != 0
         }
         sdk?.setParams(p)
     }
@@ -187,6 +193,36 @@ class McSdkModule(
         sdk?.setIdentity(identity)
     }
 
+    /**
+     * Receives a JSON array of Document objects from JS and forwards them
+     * to the native SDK.  Must be called after init() resolves and before
+     * register() so the engine can pre-provision BMS documents.
+     *
+     * JSON shape: [{uri,etag,content,type,fetchedAt}, ...]
+     */
+    @ReactMethod
+    fun setDocuments(docsJson: String) {
+        val sdk = sdk ?: return
+        try {
+            val arr = org.json.JSONArray(docsJson)
+            val docList = mutableListOf<Document>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                docList.add(Document().apply {
+                    uri       = obj.optString("uri")
+                    etag      = obj.optString("etag")
+                    content   = obj.optString("content")
+                    type      = DocumentType.fromOrdinal(obj.optInt("type", 0))
+                    fetchedAt = obj.optLong("fetchedAt", 0L)
+                })
+            }
+            val documents = Documents().apply { documents = docList }
+            sdk.setDocuments(documents)
+        } catch (e: Exception) {
+            Log.e("McSdkBridge", "setDocuments parse error: ${e.message}", e)
+        }
+    }
+
     @ReactMethod
     fun register() { sdk?.register() }
 
@@ -226,6 +262,8 @@ class McSdkModule(
         })
     }
 
+    override fun onRegistrationFailed() {}
+
     override fun onFetchDocument(url: String, content: String) {
         emit(EVENT_FETCH_DOCUMENT, Arguments.createMap().apply {
             putString("url", url)
@@ -252,6 +290,26 @@ class McSdkModule(
             putString("target", target)
             putString("error", error.name)
         })
+    }
+
+    override fun onDocumentsUpdated(docs: List<Document>) {
+        try {
+            val arr = org.json.JSONArray()
+            for (doc in docs) {
+                arr.put(org.json.JSONObject().apply {
+                    put("uri",       doc.uri)
+                    put("etag",      doc.etag)
+                    put("content",   doc.content)
+                    put("type",      doc.type.ordinal)
+                    put("fetchedAt", doc.fetchedAt)
+                })
+            }
+            emit(EVENT_STORE_DOCUMENTS, Arguments.createMap().apply {
+                putString("docsJson", arr.toString())
+            })
+        } catch (e: Exception) {
+            Log.e("McSdkBridge", "onDocumentsUpdated serialise error: ${e.message}", e)
+        }
     }
 
     // ── AlarmListener ─────────────────────────────────────────────────────────

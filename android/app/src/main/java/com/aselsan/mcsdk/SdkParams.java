@@ -50,8 +50,9 @@ public class SdkParams {
     }
 
     public static class McxParams {
-        public String idmsUrl = "";
-        public String bmsUrl  = "";
-        public String cmsUrl  = "";
+        public String  idmsUrl = "";
+        public String  bmsUrl  = "";
+        public String  cmsUrl  = "";
+        public boolean mock    = true;
     }
 }

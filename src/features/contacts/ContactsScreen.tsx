@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
+import { useCallContext } from '../../contexts/CallContext';
+import { useNavigation } from '../../contexts/NavigationContext';
 import type { ThemePalette } from '../../core/theme';
 import { initDb, getAllContacts, seedContacts, type Contact } from '../../core/db';
 import { makeContactsStyles } from './styles';
@@ -37,6 +39,8 @@ interface CallbackInfo {
 
 export function ContactsScreen() {
   const { c } = useAppContext();
+  const { startCall } = useCallContext();
+  const { setScreen } = useNavigation();
   const cs            = useMemo(() => makeContactsStyles(c), [c]);
   const PRESENCE_COLOR = useMemo(() => makePresenceColors(c), [c]);
   const insets        = useSafeAreaInsets();
@@ -102,10 +106,20 @@ export function ContactsScreen() {
 
             {/* MC Buttons */}
             <View style={cs.mcRow}>
-              <TouchableOpacity style={[cs.mcBtn, cs.mcHalf]}>
+              <TouchableOpacity
+                style={[cs.mcBtn, cs.mcHalf]}
+                onPress={() => {
+                  startCall(item.name, item.sip_uri, 'half_duplex');
+                  setScreen('calls');
+                }}>
                 <Text style={cs.mcBtnText}>Half Duplex MC</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[cs.mcBtn, cs.mcFull]}>
+              <TouchableOpacity
+                style={[cs.mcBtn, cs.mcFull]}
+                onPress={() => {
+                  startCall(item.name, item.sip_uri, 'full_duplex');
+                  setScreen('calls');
+                }}>
                 <Text style={cs.mcBtnText}>Full Duplex MC</Text>
               </TouchableOpacity>
             </View>

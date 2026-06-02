@@ -13,9 +13,16 @@
  *     — last_login_at records the Unix ms timestamp of the most recent login.
  *
  *   contacts(id, name, sip_uri, notes, created_at)
+ *
+ *   documents(mcid, uri, etag, content, type, fetched_at)
+ *     — BMS documents cached from the SDK's onDocumentsUpdated callback.
+ *     — PRIMARY KEY (mcid, uri) — unique per user per document URI.
+ *     — Index on mcid for fast per-user retrieval.
+ *     — Restored to the SDK via setDocuments() before registration.
  */
 
 import { open, type DB } from '@op-engineering/op-sqlite';
+import { DocumentType, type McSdkDocument } from '../mcsdk/types';
 
 // ── Singleton ─────────────────────────────────────────────────────────────────
 
@@ -85,6 +92,38 @@ export async function initDb(): Promise<void> {
       sip_uri    TEXT    NOT NULL,
       notes      TEXT    NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
+    )
+  `);
+  // documents table — BMS docs cached from SDK onDocumentsUpdated callback
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS documents (
+      mcid       TEXT    NOT NULL,
+      uri        TEXT    NOT NULL,
+      etag       TEXT    NOT NULL DEFAULT '',
+      content    TEXT    NOT NULL DEFAULT '',
+      type       INTEGER NOT NULL DEFAULT 0,
+      fetched_at INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (mcid, uri)
+    )
+  `);
+  // Migrate existing installations that predate type/fetched_at columns
+  try { await db.execute('ALTER TABLE documents ADD COLUMN type INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { await db.execute('ALTER TABLE documents ADD COLUMN fetched_at INTEGER NOT NULL DEFAULT 0'); } catch {}
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_documents_mcid ON documents(mcid)',
+  );
+  // call_history table — completed calls
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS call_history (
+      id                TEXT    PRIMARY KEY,
+      contact_name      TEXT    NOT NULL,
+      sip_uri           TEXT    NOT NULL,
+      direction         TEXT    NOT NULL,
+      call_type         TEXT    NOT NULL,
+      commencement_mode TEXT    NOT NULL DEFAULT 'auto',
+      started_at        INTEGER NOT NULL,
+      ended_at          INTEGER NOT NULL,
+      duration          INTEGER NOT NULL
     )
   `);
 }
@@ -179,4 +218,134 @@ export async function getUserByUsername(username: string): Promise<UserRow | nul
   );
   const rows = (result.rows?._array ?? []) as UserRow[];
   return rows[0] ?? null;
+}
+
+// ── Documents (BMS cache) ──────────────────────────────────────────────────────
+
+/**
+ * Upserts a list of BMS documents for a given mcid.
+ * Each (mcid, uri) pair is unique — rows are replaced on conflict.
+ * Called from SdkContext when the SDK fires onDocumentsUpdated.
+ */
+export async function saveDocuments(
+  mcid: string,
+  docs: McSdkDocument[],
+): Promise<void> {
+  if (docs.length === 0) return;
+  const db = getDb();
+  for (const doc of docs) {
+    await db.execute(
+      `INSERT OR REPLACE INTO documents
+         (mcid, uri, etag, content, type, fetched_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [mcid, doc.uri, doc.etag, doc.content, doc.type, doc.fetchedAt],
+    );
+  }
+}
+
+/**
+ * Returns all cached BMS documents for the given mcid, ordered by uri.
+ * Returns [] when no documents are stored for that user.
+ */
+export async function getDocumentsByMcId(mcid: string): Promise<McSdkDocument[]> {
+  const db = getDb();
+  const result = await db.execute(
+    'SELECT uri, etag, content, type, fetched_at FROM documents WHERE mcid = ? ORDER BY uri',
+    [mcid],
+  );
+  return ((result.rows?._array ?? []) as {
+    uri: string; etag: string; content: string; type: number; fetched_at: number;
+  }[]).map(row => ({
+    uri:       row.uri,
+    etag:      row.etag,
+    content:   row.content,
+    type:      row.type as DocumentType,
+    fetchedAt: row.fetched_at,
+  }));
+}
+
+/**
+ * Returns a Map of all cached BMS documents keyed by mcid.
+ * Used by AppContext on startup to pre-load docs for all users before login.
+ */
+export async function getAllDocuments(): Promise<Map<string, McSdkDocument[]>> {
+  const db = getDb();
+  const result = await db.execute(
+    'SELECT mcid, uri, etag, content, type, fetched_at FROM documents ORDER BY mcid, uri',
+  );
+  const rows = (result.rows?._array ?? []) as {
+    mcid: string; uri: string; etag: string; content: string; type: number; fetched_at: number;
+  }[];
+  const map = new Map<string, McSdkDocument[]>();
+  for (const row of rows) {
+    const doc: McSdkDocument = {
+      uri:       row.uri,
+      etag:      row.etag,
+      content:   row.content,
+      type:      row.type as DocumentType,
+      fetchedAt: row.fetched_at,
+    };
+    const existing = map.get(row.mcid) ?? [];
+    existing.push(doc);
+    map.set(row.mcid, existing);
+  }
+  return map;
+}
+
+/**
+ * Deletes all cached BMS documents for the given mcid.
+ * Useful on logout or when a fresh fetch is forced.
+ */
+export async function clearDocumentsByMcId(mcid: string): Promise<void> {
+  const db = getDb();
+  await db.execute('DELETE FROM documents WHERE mcid = ?', [mcid]);
+}
+
+// ── Call history ──────────────────────────────────────────────────────────────
+
+import type { CallRecord } from '../features/calls/types';
+
+export async function saveCallRecord(record: CallRecord): Promise<void> {
+  const db = getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO call_history
+       (id, contact_name, sip_uri, direction, call_type, commencement_mode,
+        started_at, ended_at, duration)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      record.id, record.contactName, record.sipUri,
+      record.direction, record.callType, record.commencementMode,
+      record.startedAt, record.endedAt, record.duration,
+    ],
+  );
+}
+
+export async function getCallHistory(): Promise<CallRecord[]> {
+  const db = getDb();
+  const result = await db.execute(
+    `SELECT id, contact_name, sip_uri, direction, call_type, commencement_mode,
+            started_at, ended_at, duration
+     FROM call_history
+     ORDER BY started_at DESC`,
+  );
+  return ((result.rows?._array ?? []) as {
+    id: string; contact_name: string; sip_uri: string;
+    direction: string; call_type: string; commencement_mode: string;
+    started_at: number; ended_at: number; duration: number;
+  }[]).map(r => ({
+    id:              r.id,
+    contactName:     r.contact_name,
+    sipUri:          r.sip_uri,
+    direction:       r.direction as CallRecord['direction'],
+    callType:        r.call_type as CallRecord['callType'],
+    commencementMode: r.commencement_mode as CallRecord['commencementMode'],
+    startedAt:       r.started_at,
+    endedAt:         r.ended_at,
+    duration:        r.duration,
+  }));
+}
+
+export async function clearCallHistory(): Promise<void> {
+  const db = getDb();
+  await db.execute('DELETE FROM call_history');
 }

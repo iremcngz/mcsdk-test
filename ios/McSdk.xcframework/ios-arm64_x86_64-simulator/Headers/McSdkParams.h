@@ -43,7 +43,15 @@ typedef NS_ENUM(NSInteger, McSdkLogLevel) {
 
 @interface McSdkThreadingParams : NSObject
 @property(nonatomic, assign) NSInteger sipRxThreadCount;
-@property(nonatomic, assign) NSInteger sipWorkerThreadCount;
+@property(nonatomic, assign) NSInteger sdkWorkerThreadCount;
+@end
+
+@interface McSdkMcxParams : NSObject
+@property(nonatomic, copy) NSString* idmsUrl;
+@property(nonatomic, copy) NSString* bmsUrl;
+@property(nonatomic, copy) NSString* cmsUrl;
+@property(nonatomic, copy) NSString* gmsUrl;
+@property(nonatomic, assign) BOOL mock;
 @end
 
 @interface McSdkParams : NSObject
@@ -52,4 +60,5 @@ typedef NS_ENUM(NSInteger, McSdkLogLevel) {
 @property(nonatomic, strong) McSdkSipParams* Sip;
 @property(nonatomic, strong) McSdkTlsParams* Tls;
 @property(nonatomic, strong) McSdkThreadingParams* Threading;
+@property(nonatomic, strong) McSdkMcxParams* Mcx;
 @end

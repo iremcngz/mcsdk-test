@@ -157,6 +157,15 @@ export function HomeScreen() {
         {renderInput(tr.inputSipWorkerThreads, sdk.sipWorkerThreads, sdk.setSipWorkerThreads)}
       </View>
 
+      <View style={s.card}>
+        <Text style={s.cardTitle}>{tr.cardMcx}</Text>
+        {renderInput(tr.inputIdmsUrl, sdk.idmsUrl, sdk.setIdmsUrl, 'default')}
+        {renderInput(tr.inputBmsUrl,  sdk.bmsUrl,  sdk.setBmsUrl,  'default')}
+        {renderInput(tr.inputCmsUrl,  sdk.cmsUrl,  sdk.setCmsUrl,  'default')}
+        {renderInput(tr.inputGmsUrl,  sdk.gmsUrl,  sdk.setGmsUrl,  'default')}
+        {renderSwitch(tr.switchMockEnabled, sdk.mcxMock, sdk.setMcxMock)}
+      </View>
+
       {/* ── Action Buttons ─────────────────────────────────────────────────── */}
       <View style={s.buttonRow}>
         <TouchableOpacity

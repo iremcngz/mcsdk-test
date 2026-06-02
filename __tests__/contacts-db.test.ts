@@ -251,3 +251,135 @@ describe('recordLogin', () => {
     });
   });
 });
+
+// =============================================================================
+// 5.  saveDocuments / getDocumentsByMcId / clearDocumentsByMcId
+// =============================================================================
+//
+// BMS documents are fetched by the SDK and delivered via onStoreDocuments.
+// The app caches them in the documents table (PRIMARY KEY: mcid + uri) and
+// restores them to the SDK via setDocuments() before each registration.
+//
+// Table schema:
+//   documents(mcid TEXT, uri TEXT, timestamp, etag, org, content, size)
+//   PRIMARY KEY (mcid, uri)  |  INDEX idx_documents_mcid ON documents(mcid)
+// =============================================================================
+
+const DOC_A = { uri: 'http://bms.example.com/doc/a', timestamp: '2024-01-01T00:00:00Z', etag: '"abc"', org: 'org-1', content: '<xml/>', size: '24' };
+const DOC_B = { uri: 'http://bms.example.com/doc/b', timestamp: '2024-01-02T00:00:00Z', etag: '"def"', org: 'org-2', content: '<xml2/>', size: '28' };
+
+describe('saveDocuments / getDocumentsByMcId / clearDocumentsByMcId', () => {
+  it('getDocumentsByMcId returns [] when no docs exist for mcid', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, getDocumentsByMcId } = require('../src/core/db');
+      await initDb();
+      const result = await getDocumentsByMcId('sip:alice@mc.example.com');
+      expect(result).toEqual([]);
+    });
+  });
+
+  it('saveDocuments stores docs and getDocumentsByMcId retrieves them', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, saveDocuments, getDocumentsByMcId } = require('../src/core/db');
+      await initDb();
+      await saveDocuments('sip:alice@mc.example.com', [DOC_A, DOC_B]);
+      const result = await getDocumentsByMcId('sip:alice@mc.example.com');
+      expect(result).toHaveLength(2);
+    });
+  });
+
+  it('getDocumentsByMcId returns docs for the correct mcid only', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, saveDocuments, getDocumentsByMcId } = require('../src/core/db');
+      await initDb();
+      await saveDocuments('sip:alice@mc.example.com', [DOC_A]);
+      await saveDocuments('sip:bob@mc.example.com',   [DOC_B]);
+      const alice = await getDocumentsByMcId('sip:alice@mc.example.com');
+      const bob   = await getDocumentsByMcId('sip:bob@mc.example.com');
+      expect(alice).toHaveLength(1);
+      expect(alice[0].uri).toBe(DOC_A.uri);
+      expect(bob).toHaveLength(1);
+      expect(bob[0].uri).toBe(DOC_B.uri);
+    });
+  });
+
+  it('saveDocuments is an upsert — same (mcid, uri) overwrites previous row', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, saveDocuments, getDocumentsByMcId } = require('../src/core/db');
+      await initDb();
+      await saveDocuments('sip:alice@mc.example.com', [DOC_A]);
+      await saveDocuments('sip:alice@mc.example.com', [{ ...DOC_A, etag: '"updated"' }]);
+      const result = await getDocumentsByMcId('sip:alice@mc.example.com');
+      expect(result).toHaveLength(1);
+      expect(result[0].etag).toBe('"updated"');
+    });
+  });
+
+  it('saveDocuments with empty array is a no-op', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, saveDocuments, getDocumentsByMcId } = require('../src/core/db');
+      await initDb();
+      await expect(saveDocuments('sip:alice@mc.example.com', [])).resolves.toBeUndefined();
+      const result = await getDocumentsByMcId('sip:alice@mc.example.com');
+      expect(result).toHaveLength(0);
+    });
+  });
+
+  it('returned docs contain all 6 fields', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, saveDocuments, getDocumentsByMcId } = require('../src/core/db');
+      await initDb();
+      await saveDocuments('sip:alice@mc.example.com', [DOC_A]);
+      const [doc] = await getDocumentsByMcId('sip:alice@mc.example.com');
+      expect(doc.uri).toBe(DOC_A.uri);
+      expect(doc.timestamp).toBe(DOC_A.timestamp);
+      expect(doc.etag).toBe(DOC_A.etag);
+      expect(doc.org).toBe(DOC_A.org);
+      expect(doc.content).toBe(DOC_A.content);
+      expect(doc.size).toBe(DOC_A.size);
+    });
+  });
+
+  it('clearDocumentsByMcId removes all docs for that mcid', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, saveDocuments, clearDocumentsByMcId, getDocumentsByMcId } = require('../src/core/db');
+      await initDb();
+      await saveDocuments('sip:alice@mc.example.com', [DOC_A, DOC_B]);
+      await clearDocumentsByMcId('sip:alice@mc.example.com');
+      const result = await getDocumentsByMcId('sip:alice@mc.example.com');
+      expect(result).toHaveLength(0);
+    });
+  });
+
+  it('clearDocumentsByMcId does not affect other users', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, saveDocuments, clearDocumentsByMcId, getDocumentsByMcId } = require('../src/core/db');
+      await initDb();
+      await saveDocuments('sip:alice@mc.example.com', [DOC_A]);
+      await saveDocuments('sip:bob@mc.example.com',   [DOC_B]);
+      await clearDocumentsByMcId('sip:alice@mc.example.com');
+      const bob = await getDocumentsByMcId('sip:bob@mc.example.com');
+      expect(bob).toHaveLength(1);
+    });
+  });
+
+  it('clearDocumentsByMcId is a no-op for unknown mcid (no throw)', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, clearDocumentsByMcId } = require('../src/core/db');
+      await initDb();
+      await expect(clearDocumentsByMcId('sip:nobody@mc.example.com')).resolves.toBeUndefined();
+    });
+  });
+
+  it('saveDocuments does not affect the contacts table', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, saveDocuments, insertContact, getAllContacts } = require('../src/core/db');
+      await initDb();
+      await insertContact('Alice', 'sip:alice@example.com', '');
+      await saveDocuments('sip:alice@mc.example.com', [DOC_A]);
+      const contacts = await getAllContacts();
+      expect(contacts).toHaveLength(1);
+    });
+  });
+});
+

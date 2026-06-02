@@ -7,6 +7,8 @@ import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppContextProvider, useAppContext } from './src/contexts/AppContext';
 import { SdkContextProvider } from './src/contexts/SdkContext';
+import { CallContextProvider } from './src/contexts/CallContext';
+import { NavigationContextProvider } from './src/contexts/NavigationContext';
 import { TabNavigator } from './src/navigation/TabNavigator';
 import LoginScreen from './src/features/auth/LoginScreen';
 
@@ -20,7 +22,11 @@ function AppGate() {
   }
   return (
     <SdkContextProvider>
-      <TabNavigator />
+      <CallContextProvider>
+        <NavigationContextProvider>
+          <TabNavigator />
+        </NavigationContextProvider>
+      </CallContextProvider>
     </SdkContextProvider>
   );
 }

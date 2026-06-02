@@ -51,6 +51,13 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
+// ── Mock: react-native-sound-level ────────────────────────────────────────────
+jest.mock('react-native-sound-level', () => ({
+  start: jest.fn(),
+  stop: jest.fn(),
+  onNewFrame: jest.fn(),
+}), { virtual: true });
+
 // ── Mock: McSdk ───────────────────────────────────────────────────────────────
 // McSdk wraps a TurboModule that calls native C++ code. We replace the entire
 // class with a jest mock so tests can:
@@ -64,15 +71,40 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('../src/mcsdk', () => ({
   McSdk: jest.fn(),
   McSdkEvents: {
-    FetchDocument: 'McSdkFetchDocument',
-    SdsSent:       'McSdkSdsSent',
-    SdsReceived:   'McSdkSdsReceived',
-    SdsError:      'McSdkSdsError',
-    Alarm:         'McSdkAlarm',
-    Log:           'McSdkLog',
-    Registration:  'McSdkRegistration',
+    FetchDocument:  'McSdkFetchDocument',
+    SdsSent:        'McSdkSdsSent',
+    SdsReceived:    'McSdkSdsReceived',
+    SdsError:       'McSdkSdsError',
+    Alarm:          'McSdkAlarm',
+    Log:            'McSdkLog',
+    Registration:   'McSdkRegistration',
+    StoreDocuments: 'McSdkStoreDocuments',
   },
 }));
+
+// ── Mock: src/core/db ─────────────────────────────────────────────────────────
+// Replace the SQLite-backed db module with simple stubs so tests run in
+// Node.js without a native SQLite driver.  getDocumentsByMcId defaults to []
+// (no docs cached) — individual setDocuments tests override this per-test.
+
+jest.mock('../src/core/db', () => ({
+  initDb:               jest.fn().mockResolvedValue(undefined),
+  seedContacts:         jest.fn().mockResolvedValue(undefined),
+  getAllContacts:        jest.fn().mockResolvedValue([]),
+  insertContact:        jest.fn().mockResolvedValue(1),
+  deleteContact:        jest.fn().mockResolvedValue(undefined),
+  clearContacts:        jest.fn().mockResolvedValue(undefined),
+  upsertUser:           jest.fn().mockResolvedValue(undefined),
+  getUserByUsername:    jest.fn().mockResolvedValue(null),
+  recordLogin:          jest.fn().mockResolvedValue(undefined),
+  getDocumentsByMcId:   jest.fn().mockResolvedValue([]),
+  saveDocuments:        jest.fn().mockResolvedValue(undefined),
+  clearDocumentsByMcId: jest.fn().mockResolvedValue(undefined),
+}));
+
+import { getDocumentsByMcId, getUserByUsername } from '../src/core/db';
+const MockGetDocsByMcId = getDocumentsByMcId as jest.MockedFunction<typeof getDocumentsByMcId>;
+const MockGetUserByUsername = getUserByUsername as jest.MockedFunction<typeof getUserByUsername>;
 
 /** Typed reference to the mocked McSdk constructor. */
 const MockMcSdk = McSdk as jest.MockedClass<typeof McSdk>;
@@ -95,8 +127,10 @@ const makeSdkInstance = () => ({
   resolveAlarm:   jest.fn(),
   fetchDocument:  jest.fn(),
   sendSds:        jest.fn(),
-  setIdentity:    jest.fn(),
-  register:       jest.fn(),
+  setIdentity:        jest.fn(),
+  setDocuments:       jest.fn(),   // Android: → JNI → C++  |  iOS: no-op bridge
+  onStoreDocuments:   jest.fn(),
+  register:           jest.fn(),
   unregister:     jest.fn(),
 });
 
@@ -850,4 +884,112 @@ describe('Registration progress bar', () => {
     expect(screen.getByText('0%')).toBeTruthy();
   });
 });
+
+// =============================================================================
+// 10. setDocuments — SdkContext integration
+// =============================================================================
+
+describe('setDocuments — SdkContext integration', () => {
+  /**
+   * WHAT: Tests that SdkContext calls setDocuments (when docs are cached)
+   *       between init() and register(), in that exact order.
+   *
+   * Platform context:
+   *   Android: setDocuments → nativeSetDocuments JNI → C++ Sdk::SetDocuments
+   *   iOS:     setDocuments → McSdkModule.mm no-op (xcframework has no API)
+   *   In both cases the JS call is identical; the bridge decides what to do.
+   *
+   * Timing requirement (FIFO engine queue):
+   *   init() resolves → getDocumentsByMcId() → setDocuments(docs) → register()
+   *   setDocuments must PRECEDE register so the engine processes docs first.
+   */
+
+  beforeEach(() => {
+    // Provide credentials so handleCreate sets currentMcIdRef.current,
+    // enabling handleInit to call getDocumentsByMcId(mcId).
+    AuthSettings.setLastUsername('sip:alice@mc.example.com');
+    MockGetUserByUsername.mockResolvedValue({
+      id: 1,
+      username: 'sip:alice@mc.example.com',
+      password: 'test-pass',
+      updated_at: 0,
+      last_login_at: 0,
+    } as any);
+    // Reset per-test doc cache to empty (default = no docs)
+    MockGetDocsByMcId.mockResolvedValue([]);
+  });
+
+  it('does NOT call setDocuments when document cache is empty', async () => {
+    MockGetDocsByMcId.mockResolvedValueOnce([]);
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(sdk.register).toHaveBeenCalled());
+    expect(sdk.setDocuments).not.toHaveBeenCalled();
+  });
+
+  it('calls setDocuments with cached docs array when docs exist', async () => {
+    const docs = [{ uri: 'http://bms.example.com/doc/a', timestamp: '2024-01-01T00:00:00Z', etag: '"abc"', org: 'org-1', content: '<xml/>', size: '24' }];
+    MockGetDocsByMcId.mockResolvedValueOnce(docs);
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(sdk.register).toHaveBeenCalled());
+    expect(sdk.setDocuments).toHaveBeenCalledWith(docs);
+  });
+
+  it('calls setDocuments BEFORE register (FIFO order requirement)', async () => {
+    const docs = [{ uri: 'http://bms.example.com/doc/a', timestamp: '', etag: '', org: '', content: '', size: '' }];
+    MockGetDocsByMcId.mockResolvedValueOnce(docs);
+    const callOrder: string[] = [];
+    const sdk = await renderCreateAndSetParams();
+    sdk.setDocuments.mockImplementation(() => { callOrder.push('setDocuments'); });
+    sdk.register.mockImplementation(() => { callOrder.push('register'); });
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(sdk.register).toHaveBeenCalled());
+    expect(callOrder).toEqual(['setDocuments', 'register']);
+  });
+
+  it('setDocuments receives a McSdkDocument array (not individual fields)', async () => {
+    const docs = [{ uri: 'uri-1', timestamp: 't', etag: 'e', org: 'o', content: 'c', size: 's' }];
+    MockGetDocsByMcId.mockResolvedValueOnce(docs);
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(sdk.setDocuments).toHaveBeenCalled());
+    const [arg] = sdk.setDocuments.mock.calls[0];
+    expect(Array.isArray(arg)).toBe(true);
+    expect(arg[0]).toMatchObject({ uri: 'uri-1' });
+  });
+
+  it('still calls register() even when setDocuments throws (error recovery)', async () => {
+    const docs = [{ uri: 'x', timestamp: '', etag: '', org: '', content: '', size: '' }];
+    MockGetDocsByMcId.mockResolvedValueOnce(docs);
+    const sdk = await renderCreateAndSetParams();
+    sdk.setDocuments.mockImplementation(() => { throw new Error('JNI error'); });
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(sdk.register).toHaveBeenCalled());
+  });
+
+  it('setDocuments is called exactly once per init() call', async () => {
+    const docs = [{ uri: 'u', timestamp: '', etag: '', org: '', content: '', size: '' }];
+    MockGetDocsByMcId.mockResolvedValueOnce(docs);
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(sdk.register).toHaveBeenCalled());
+    expect(sdk.setDocuments).toHaveBeenCalledTimes(1);
+  });
+});
+
 

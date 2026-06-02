@@ -37,6 +37,8 @@ export interface Spec extends TurboModule {
 
     // Identity and registration
     setIdentity(mcId: string, password: string, clientId: string): void;
+    // docsJson is a JSON-encoded McSdkDocument[] array (same pattern as setParams)
+    setDocuments(docsJson: string): void;
     register(): void;
     unregister(): void;
 
