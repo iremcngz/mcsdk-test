@@ -112,7 +112,7 @@ class McSdkModule(
             Tls.privKeyPath     = d.optString("privKeyPath", "cert/client.key")
             Tls.caListPath      = d.optString("caListPath", "cert/ca.pem")
             Threading.sipRxThreadCount     = maxOf(1, d.optInt("sipRxThreads", 1))
-            Threading.sipWorkerThreadCount = maxOf(1, d.optInt("sipWorkerThreads", 1))
+            Threading.sdkWorkerThreadCount = maxOf(1, d.optInt("sipWorkerThreads", 1))
             Mcx.idmsUrl = d.optString("idmsUrl", "")
             Mcx.bmsUrl  = d.optString("bmsUrl",  "")
             Mcx.cmsUrl  = d.optString("cmsUrl",  "")
@@ -264,28 +264,28 @@ class McSdkModule(
 
     override fun onRegistrationFailed() {}
 
-    override fun onFetchDocument(url: String, content: String) {
+    fun onFetchDocument(url: String, content: String) {
         emit(EVENT_FETCH_DOCUMENT, Arguments.createMap().apply {
             putString("url", url)
             putString("content", content)
         })
     }
 
-    override fun onSdsSent(target: String, body: String) {
+    fun onSdsSent(target: String, body: String) {
         emit(EVENT_SDS_SENT, Arguments.createMap().apply {
             putString("target", target)
             putString("body", body)
         })
     }
 
-    override fun onSdsReceived(sender: String, body: String) {
+    fun onSdsReceived(sender: String, body: String) {
         emit(EVENT_SDS_RECEIVED, Arguments.createMap().apply {
             putString("sender", sender)
             putString("body", body)
         })
     }
 
-    override fun onSdsError(target: String, error: SdkError) {
+    fun onSdsError(target: String, error: SdkError) {
         emit(EVENT_SDS_ERROR, Arguments.createMap().apply {
             putString("target", target)
             putString("error", error.name)

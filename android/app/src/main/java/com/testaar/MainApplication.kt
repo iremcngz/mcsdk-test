@@ -16,6 +16,7 @@ class MainApplication : Application(), ReactApplication {
       packageList =
         PackageList(this).packages.apply {
           add(McSdkPackage())
+          add(com.punarinta.RNSoundLevel.RNSoundLevel())
         },
     )
   }

@@ -121,4 +121,10 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // Local McSdk AAR
+    implementation(files("libs/mc-sdk-android.aar"))
+
+    // react-native-sound-level (manually linked, no auto-linking support)
+    implementation project(':react-native-sound-level')
 }

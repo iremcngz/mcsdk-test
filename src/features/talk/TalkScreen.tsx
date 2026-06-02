@@ -47,6 +47,7 @@ export function TalkScreen() {
   const [showMockPanel, setShowMockPanel] = useState(false);
   const spinAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const soundActiveRef = useRef(false);
 
   const BAR_COUNT = 7;
   const BAR_HEIGHTS = [0.3, 0.7, 0.5, 1.0, 0.55, 0.85, 0.35];
@@ -107,13 +108,21 @@ export function TalkScreen() {
       setVoiceLevel(mapped);
     };
 
+    soundActiveRef.current = true;
     SoundLevel.onNewFrame = handleSound;
 
     return () => {
       SoundLevel.onNewFrame = undefined;
-      SoundLevel.stop();
     };
   }, [soundMonitoring]);
+
+  useEffect(() => {
+    return () => {
+      if (soundActiveRef.current) {
+        SoundLevel.stop();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const activeCount = Math.floor((voiceLevel / 5) * BAR_COUNT);
