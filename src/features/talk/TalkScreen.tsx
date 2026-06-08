@@ -11,8 +11,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
-  PermissionsAndroid,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -22,12 +20,20 @@ import {
 import SoundLevel from 'react-native-sound-level';
 import { useAppContext } from '../../contexts/AppContext';
 import { makeTalkStyles } from './styles';
+import { MessagesScreen } from './MessagesScreen';
 
 const GROUPS = ['group1', 'group2', 'group3', 'group4', 'group5', 'group6', 'group7'];
+const DATA_GROUPS = new Set(['group3', 'group5', 'group7']);
 
 type TalkMode = 'receive' | 'transmit' | 'messages';
 
 type PushState = 'idle' | 'accepted' | 'occupied';
+
+interface GroupCallState {
+  callActive: boolean;
+  pushState: PushState;
+  isHolding: boolean;
+}
 
 export function TalkScreen() {
   const { c, tr } = useAppContext();
@@ -41,22 +47,27 @@ export function TalkScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [voiceLevel, setVoiceLevel] = useState(0);
   const [occupiedSpeaker, setOccupiedSpeaker] = useState('Another user');
-  const [micEnabled, setMicEnabled] = useState(false);
-  const [micError, setMicError] = useState<string | null>(null);
   const [soundMonitoring, setSoundMonitoring] = useState(false);
   const [showMockPanel, setShowMockPanel] = useState(false);
+  const [showGroupMenu, setShowGroupMenu] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [messagesGroup, setMessagesGroup] = useState<string | null>(null);
+  const [incomingCalls, setIncomingCalls] = useState<Set<string>>(new Set());
+  const [orderedGroups, setOrderedGroups] = useState<string[]>(() => [...GROUPS]);
+  const [groupCalls, setGroupCalls] = useState<Record<string, GroupCallState>>({});
   const spinAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const incomingPulse = useRef(new Animated.Value(1)).current;
   const soundActiveRef = useRef(false);
 
   const BAR_COUNT = 7;
-  const BAR_HEIGHTS = [0.3, 0.7, 0.5, 1.0, 0.55, 0.85, 0.35];
+  const BAR_HEIGHTS = [0.25, 0.4, 0.55, 0.7, 0.85, 1.0, 1.0];
   const BAR_COLORS = ['#4ade80', '#4ade80', '#facc15', '#facc15', '#fb923c', '#ef4444', '#ef4444'];
   const barAnims = useRef(
     Array.from({ length: BAR_COUNT }, () => new Animated.Value(0))
   ).current;
 
-  const talking = isHolding && callActive && pushState === 'accepted' && micEnabled;
+  const talking = isHolding && callActive && pushState === 'accepted';
   const buttonDisabled = !callActive || pushState === 'occupied';
 
   const pushButtonState = pushState === 'occupied'
@@ -69,13 +80,18 @@ export function TalkScreen() {
           ? 'active'
           : 'idle';
 
-  const pushButtonColor = pushButtonState === 'occupied'
-    ? c.error
-    : pushButtonState === 'accepted'
-      ? c.success
-      : pushButtonState === 'active'
-        ? c.primary
-        : c.border;
+  const pushButtonColor = callActive 
+  ? (pushState === 'occupied' ? '#1f2937' : '#0f172a') // Dark/Premium tonlar
+  : c.surface; // Çağrı yoksa sönük
+
+// 2. Dışarıdaki ince halkanın (Ring) rengini duruma göre yönetelim
+const ringColor = pushState === 'occupied'
+  ? c.error     // Meşgulse kırmızı halka
+  : talking
+    ? c.success // Konuşuyorsa yeşil halka
+    : callActive
+      ? c.accent  // Boşta ve aktifse mavi/accent halka
+      : c.border; // Çağrı yoksa gri halka
 
   const pushStatusLabel = talking
     ? tr.talkStatusTalking
@@ -91,11 +107,65 @@ export function TalkScreen() {
   const localSpeakerName = 'mcuser-222';
   const currentSpeakerName = pushState === 'occupied' ? occupiedSpeaker : localSpeakerName;
   const buttonStatusLabel = pushStatusLabel;
-  const buttonHint = !micEnabled
-    ? tr.talkMicDisabledHint
-    : callActive
-      ? tr.talkHoldHint
-      : tr.talkNoCallHint;
+  const buttonHint = callActive ? tr.talkHoldHint : tr.talkNoCallHint;
+
+  // Save current group state on every change
+  useEffect(() => {
+    setGroupCalls(prev => ({
+      ...prev,
+      [selectedGroup]: { callActive, pushState, isHolding },
+    }));
+  }, [callActive, pushState, isHolding, selectedGroup]);
+
+  // Auto-accept incoming calls after 3 seconds (simulates SDK call establishment)
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    incomingCalls.forEach(group => {
+      if (!groupCalls[group]?.callActive) {
+        const timer = setTimeout(() => {
+          if (group === selectedGroup) {
+            setCallActive(true);
+            setPushState('idle');
+            setIsHolding(false);
+          }
+          setGroupCalls(prev => ({
+            ...prev,
+            [group]: { callActive: true, pushState: 'idle', isHolding: false },
+          }));
+        }, 3000);
+        timers.push(timer);
+      }
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [incomingCalls]);
+
+  const handleSelectGroup = (group: string) => {
+    const gs = groupCalls[group];
+    setSelectedGroup(group);
+    if (gs) {
+      setCallActive(gs.callActive);
+      setPushState(gs.pushState);
+      setIsHolding(gs.isHolding);
+      setIsLoading(false);
+    } else {
+      setCallActive(false);
+      setPushState('idle');
+      setIsHolding(false);
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const frontCount = incomingCalls.size;
+    const alreadyFront = orderedGroups.slice(0, frontCount);
+    const newCalling = [...incomingCalls].filter(g => !alreadyFront.includes(g));
+
+    if (newCalling.length > 0) {
+      const existingCalling = [...incomingCalls].filter(g => !newCalling.includes(g));
+      const rest = orderedGroups.filter(g => !incomingCalls.has(g));
+      setOrderedGroups([...newCalling, ...existingCalling, ...rest]);
+    }
+  }, [incomingCalls]);
 
   useEffect(() => {
     if (!soundMonitoring) {
@@ -112,7 +182,7 @@ export function TalkScreen() {
     SoundLevel.onNewFrame = handleSound;
 
     return () => {
-      SoundLevel.onNewFrame = undefined;
+      SoundLevel.onNewFrame = () => {};
     };
   }, [soundMonitoring]);
 
@@ -170,34 +240,20 @@ export function TalkScreen() {
     }
   }, [voiceLevel, talking, pulseAnim]);
 
-  const requestMicAccess = async () => {
-    if (Platform.OS === 'android') {
-      try {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-          {
-            title: 'Microphone Access',
-            message: 'Talk mode needs microphone access to capture your voice.',
-            buttonPositive: 'Allow',
-          },
-        );
-        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-          setMicEnabled(true);
-          setMicError(null);
-        } else {
-          setMicEnabled(false);
-          setMicError(tr.talkMicDenied);
-        }
-      } catch {
-        setMicEnabled(false);
-        setMicError(tr.talkMicDenied);
-      }
+  useEffect(() => {
+    if (incomingCalls.size === 0) {
+      incomingPulse.setValue(1);
       return;
     }
-
-    setMicEnabled(true);
-    setMicError(null);
-  };
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(incomingPulse, { toValue: 0.3, duration: 600, useNativeDriver: true }),
+        Animated.timing(incomingPulse, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [incomingCalls.size, incomingPulse]);
 
   const startSoundMonitoring = () => {
     if (soundMonitoring) return;
@@ -213,148 +269,218 @@ export function TalkScreen() {
     setVoiceLevel(0);
   };
 
+  if (messagesGroup) {
+    return <MessagesScreen group={messagesGroup} onClose={() => setMessagesGroup(null)} />;
+  }
+
   return (
     <View style={styles.root}>
-      <Text style={styles.sectionTitle}>{tr.talkGroupsTitle}</Text>
       <ScrollView
         style={styles.groupsScroll}
         contentContainerStyle={styles.groupsContainer}
         horizontal
         showsHorizontalScrollIndicator={false}>
-        {GROUPS.map(group => {
-          const active = group === selectedGroup;
+        {orderedGroups.map((group, idx) => {
+          const gs = groupCalls[group];
+          const groupColor = gs?.callActive
+            ? (gs.isHolding && gs.pushState === 'accepted' ? c.success
+              : gs.pushState === 'occupied' ? c.error
+              : c.primary)
+            : undefined;
+          const isActiveGroup = group === selectedGroup;
           return (
-            <TouchableOpacity
-              key={group}
-              onPress={() => setSelectedGroup(group)}
-              activeOpacity={0.8}
-              style={[styles.groupPill, active && styles.groupPillActive]}
-              testID={`talk-group-${group}`}>
-              <Text style={[styles.groupText, active && styles.groupTextActive]}>{group}</Text>
-            </TouchableOpacity>
+            <View key={group} style={styles.groupCol}>
+              <View style={styles.groupAvatarWrap}>
+                <TouchableOpacity
+                  onPress={() => handleSelectGroup(group)}
+                  activeOpacity={0.8}
+                  style={[
+                    styles.groupAvatar,
+                    groupColor
+                      ? { backgroundColor: groupColor, borderColor: groupColor }
+                      : isActiveGroup && styles.groupAvatarActive,
+                  ]}
+                  testID={`talk-group-${group}`}>
+                  <View style={styles.groupIconWrap}>
+                    <View style={styles.groupIconPerson}>
+                      <View style={[styles.groupIconHead, { backgroundColor: groupColor || isActiveGroup ? c.textOnAccent : c.textSecondary }]} />
+                      <View style={[styles.groupIconBody, { backgroundColor: groupColor || isActiveGroup ? c.textOnAccent : c.textSecondary }]} />
+                    </View>
+                    <View style={[styles.groupIconPerson, { marginLeft: -4 }]}>
+                      <View style={[styles.groupIconHead, { backgroundColor: groupColor || isActiveGroup ? 'rgba(255,255,255,0.5)' : c.textMuted }]} />
+                      <View style={[styles.groupIconBody, { backgroundColor: groupColor || isActiveGroup ? 'rgba(255,255,255,0.5)' : c.textMuted }]} />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+                {incomingCalls.has(group) && !groupCalls[group]?.callActive && (
+                  <Animated.View testID={`talk-incoming-badge-${group}`} pointerEvents="none" style={[styles.incomingBadge, { opacity: incomingPulse }]} />
+                )}
+              </View>
+              <Text style={[styles.groupLabel, isActiveGroup && styles.groupLabelActive]}>{group}</Text>
+            </View>
           );
         })}
       </ScrollView>
 
       <View style={styles.centerCard}>
-        <Text style={styles.selectedLabel} testID="talk-selected-group">
-          {tr.talkSelectedGroup}: {selectedGroup}
-        </Text>
-
-        <View style={styles.pushButtonWrapper}>
-          {isLoading && (
-            <Animated.View
-              style={[
-                styles.pushButtonRing,
-                {
-                  transform: [
-                    {
-                      rotate: spinAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ['0deg', '360deg'],
-                      }),
-                    },
-                  ],
-                },
-              ]}
-            />
-          )}
-          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-            <Pressable
-              testID="talk-push-button"
-              onPressIn={() => {
-                if (!callActive || pushState === 'occupied') return;
-                if (!micEnabled) {
-                  requestMicAccess();
-                  return;
-                }
-                if (pushState === 'idle') {
-                  setIsLoading(true);
-                  setTimeout(() => {
-                    setPushState('accepted');
-                    setIsHolding(true);
-                    startSoundMonitoring();
-                    setIsLoading(false);
-                  }, 500);
-                  return;
-                }
-                setIsHolding(true);
-                startSoundMonitoring();
-              }}
-              onPressOut={() => {
-                if (isHolding) {
-                  setIsHolding(false);
-                  stopSoundMonitoring();
-                }
-              }}
-              disabled={buttonDisabled}
-              style={[
-                styles.pushButton,
-                { backgroundColor: pushButtonColor },
-                buttonDisabled && styles.pushButtonDisabled,
-              ]}>
-              <Text style={styles.buttonSpeakerName}>{currentSpeakerName}</Text>
-              <View style={styles.voiceMeterContainer}>
-                {BAR_HEIGHTS.map((height, i) => (
-                  <Animated.View
-                    key={i}
-                    style={[
-                      styles.voiceBar,
-                      {
-                        height: height * 36,
-                        backgroundColor: barAnims[i].interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ['rgba(255,255,255,0.15)', BAR_COLORS[i]],
-                        }),
-                        opacity: barAnims[i].interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [0.25, 1],
-                        }),
-                      },
-                    ]}
-                  />
-                ))}
-              </View>
-              <Text style={styles.pushButtonText}>{buttonLabel}</Text>
-              <Text style={styles.pushButtonStatus}>{buttonStatusLabel}</Text>
-              <Text style={styles.pushButtonMeta}>{buttonHint}</Text>
-            </Pressable>
-          </Animated.View>
+        <View style={styles.selectedRow}>
+          <Text style={styles.selectedLabel} testID="talk-selected-group">
+            {selectedGroup}
+          </Text>
+          <TouchableOpacity
+            onPress={() => setShowGroupMenu(!showGroupMenu)}
+            activeOpacity={0.8}
+            style={styles.menuToggleButton}
+            testID="talk-group-menu-toggle">
+            <Text style={styles.menuToggleIcon}>
+              {showGroupMenu ? '▲' : '▼'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        <View>
+        {showGroupMenu && (
+          <View style={styles.menuOverlayContainer}>
+            <Pressable style={styles.menuBackdrop} onPress={() => setShowGroupMenu(false)} />
+            <View style={styles.menuCard}>
+              {[
+                { key: 'alert',          label: tr.talkMenuStartAlert },
+                { key: 'imminent_peril',  label: tr.talkMenuStartImminentPeril },
+                { key: 'emergency',      label: tr.talkMenuStartEmergency },
+                { key: 'details',        label: tr.talkMenuGroupDetails },
+                { key: 'mute',           label: tr.talkMenuMuteOff },
+              ].map(item => (
+                <TouchableOpacity
+                  key={item.key}
+                  onPress={() => {
+                    if (item.key === 'mute') {
+                      setMuted(prev => !prev);
+                    }
+                    setShowGroupMenu(false);
+                  }}
+                  activeOpacity={0.7}
+                  style={styles.menuItem}
+                  testID={`talk-group-menu-${item.key}`}>
+                  <Text style={styles.menuItemText}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        <View style={styles.centerBody}>
+          <View style={styles.pushButtonWrapper}>
+            {isLoading && (
+              <Animated.View
+                style={[
+                  styles.pushButtonRing,
+                  {
+                    transform: [
+                      {
+                        rotate: spinAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['0deg', '360deg'],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
+            )}
+            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+              <Pressable
+                testID="talk-push-button"
+                onPressIn={() => {
+                  if (!callActive || pushState === 'occupied') return;
+                  if (pushState === 'idle') {
+                    setIsLoading(true);
+                    setTimeout(() => {
+                      setPushState('accepted');
+                      setIsHolding(true);
+                      startSoundMonitoring();
+                      setIsLoading(false);
+                    }, 500);
+                    return;
+                  }
+                  setIsHolding(true);
+                  startSoundMonitoring();
+                }}
+                onPressOut={() => {
+                  if (isHolding) {
+                    setIsHolding(false);
+                    stopSoundMonitoring();
+                  }
+                }}
+                disabled={buttonDisabled}
+                style={[
+                  styles.pushButton,
+                  { backgroundColor: pushButtonColor },
+                  buttonDisabled && styles.pushButtonDisabled,
+                ]}>
+                {pushState === 'occupied' && <Text style={styles.buttonSpeakerName}>{occupiedSpeaker}</Text>}
+                <View style={styles.voiceMeterContainer}>
+                  {BAR_HEIGHTS.map((height, i) => (
+                    <Animated.View
+                      key={i}
+                      style={[
+                        styles.voiceBar,
+                        {
+                          height: height * 36,
+                          backgroundColor: barAnims[i].interpolate({
+                            inputRange: [0, 1],
+                            outputRange: ['rgba(255,255,255,0.15)', BAR_COLORS[i]],
+                          }),
+                          opacity: barAnims[i].interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [0.25, 1],
+                          }),
+                        },
+                      ]}
+                    />
+                  ))}
+                </View>
+                <Text style={styles.pushButtonStatus}>{buttonStatusLabel}</Text>
+              </Pressable>
+            </Animated.View>
+          </View>
+
           <Text style={styles.pushStatus} testID="talk-status-text">{pushStatusLabel}</Text>
-          {!micEnabled ? (
-            <TouchableOpacity
-              testID="talk-mic-button"
-              onPress={requestMicAccess}
-              activeOpacity={0.8}
-              style={[styles.actionButton, styles.micButton]}
-            >
-              <Text style={styles.actionButtonText}>{tr.talkMicEnable}</Text>
-            </TouchableOpacity>
-          ) : (
-            <Text style={styles.micStatusText}>{tr.talkMicEnabled}</Text>
-          )}
-          {micError ? <Text style={styles.micErrorText}>{micError}</Text> : null}
         </View>
 
         <View>
           <View style={styles.modeRow}>
-            {(['receive', 'transmit', 'messages'] as TalkMode[]).map(value => (
-              <TouchableOpacity
-                key={value}
-                testID={`talk-mode-${value}`}
-                onPress={() => setMode(value)}
-                activeOpacity={0.8}
-                style={[styles.modePill, mode === value && styles.modePillActive]}>
-                <Text style={[styles.modeText, mode === value && styles.modeTextActive]}>
-                  {value === 'receive' ? tr.talkModeReceive
-                    : value === 'transmit' ? tr.talkModeTransmit
-                    : tr.talkModeMessages}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {(['receive', 'transmit', 'messages'] as TalkMode[]).map(value => {
+              const isDataGroup = DATA_GROUPS.has(selectedGroup);
+              const isMessagesDisabled = value === 'messages' && !isDataGroup;
+              return (
+                <TouchableOpacity
+                  key={value}
+                  testID={`talk-mode-${value}`}
+                  onPress={() => {
+                    if (isMessagesDisabled) return;
+                    if (value === 'messages' && isDataGroup) {
+                      setMessagesGroup(selectedGroup);
+                      return;
+                    }
+                    setMode(value);
+                  }}
+                  activeOpacity={0.8}
+                  style={[
+                    styles.modePill,
+                    mode === value && !isMessagesDisabled && styles.modePillActive,
+                    isMessagesDisabled && styles.modePillDisabled,
+                  ]}>
+                  <Text style={[
+                    styles.modeText,
+                    mode === value && !isMessagesDisabled && styles.modeTextActive,
+                    isMessagesDisabled && styles.modeTextDisabled,
+                  ]}>
+                    {value === 'receive' ? tr.talkModeReceive
+                      : value === 'transmit' ? tr.talkModeTransmit
+                      : tr.talkModeMessages}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           <View style={styles.actionRow}>
@@ -396,70 +522,93 @@ export function TalkScreen() {
           </View>
         </View>
 
-        {showMockPanel && (
-          <View style={styles.mockOverlay}>
-            <View style={styles.mockCard}>
-              <View style={styles.mockHeader}>
-                <Text style={styles.mockTitle}>{tr.talkMockPanelTitle}</Text>
-                <TouchableOpacity
-                  onPress={() => setShowMockPanel(false)}
-                  activeOpacity={0.8}
-                  style={styles.mockCloseButton}
-                  testID="talk-mock-close">
-                  <Text style={styles.mockCloseText}>✕</Text>
-                </TouchableOpacity>
-              </View>
+      </View>
 
-              <Text style={styles.mockSectionLabel}>Floor</Text>
-              <View style={styles.mockRow}>
-                <TouchableOpacity
-                  testID="talk-mock-accept"
-                  onPress={() => setPushState('accepted')}
-                  activeOpacity={0.8}
-                  style={[styles.mockButton, styles.mockButtonPrimary]}>
-                  <Text style={styles.mockButtonText}>{tr.talkMockAccept}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  testID="talk-mock-occupy"
-                  onPress={() => { setPushState('occupied'); setOccupiedSpeaker('Alice'); }}
-                  activeOpacity={0.8}
-                  style={[styles.mockButton, styles.mockButtonDanger]}>
-                  <Text style={styles.mockButtonText}>{tr.talkMockOccupy}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  testID="talk-mock-reset"
-                  onPress={() => setPushState('idle')}
-                  activeOpacity={0.8}
-                  style={[styles.mockButton, styles.mockButtonReset]}>
-                  <Text style={styles.mockButtonText}>{tr.talkMockReset}</Text>
-                </TouchableOpacity>
-              </View>
+      {showMockPanel && (
+        <View style={styles.mockOverlay}>
+          <Pressable style={styles.mockBackdrop} onPress={() => setShowMockPanel(false)} />
+          <View style={styles.mockCard}>
+            <View style={styles.mockHeader}>
+              <Text style={styles.mockTitle}>{tr.talkMockPanelTitle}</Text>
+              <TouchableOpacity
+                onPress={() => setShowMockPanel(false)}
+                activeOpacity={0.8}
+                style={styles.mockCloseButton}
+                testID="talk-mock-close">
+                <Text style={styles.mockCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
 
-              <Text style={styles.mockSectionLabel}>Call</Text>
-              <View style={styles.mockRow}>
-                <TouchableOpacity
-                  onPress={() => { setCallActive(true); setPushState('idle'); }}
-                  activeOpacity={0.8}
-                  style={[styles.mockButton, styles.mockButtonPrimary]}>
-                  <Text style={styles.mockButtonText}>Start</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => { setCallActive(false); setPushState('idle'); setIsHolding(false); }}
-                  activeOpacity={0.8}
-                  style={[styles.mockButton, styles.mockButtonDanger]}>
-                  <Text style={styles.mockButtonText}>End</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => { setOccupiedSpeaker('Bob'); setPushState('occupied'); }}
-                  activeOpacity={0.8}
-                  style={[styles.mockButton, styles.mockButtonReset]}>
-                  <Text style={styles.mockButtonText}>Bob</Text>
-                </TouchableOpacity>
-              </View>
+            <Text style={styles.mockSectionLabel}>Floor</Text>
+            <View style={styles.mockRow}>
+              <TouchableOpacity
+                testID="talk-mock-accept"
+                onPress={() => setPushState('accepted')}
+                activeOpacity={0.8}
+                style={[styles.mockButton, styles.mockButtonPrimary]}>
+                <Text style={styles.mockButtonText}>{tr.talkMockAccept}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="talk-mock-occupy"
+                onPress={() => { setPushState('occupied'); setOccupiedSpeaker('Alice'); }}
+                activeOpacity={0.8}
+                style={[styles.mockButton, styles.mockButtonDanger]}>
+                <Text style={styles.mockButtonText}>{tr.talkMockOccupy}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="talk-mock-reset"
+                onPress={() => setPushState('idle')}
+                activeOpacity={0.8}
+                style={[styles.mockButton, styles.mockButtonReset]}>
+                <Text style={styles.mockButtonText}>{tr.talkMockReset}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.mockSectionLabel}>Incoming Calls</Text>
+            <View style={styles.mockRow}>
+              {orderedGroups.map(g => {
+                const hasCall = incomingCalls.has(g);
+                return (
+                  <TouchableOpacity
+                    key={g}
+                    testID={`talk-mock-incoming-${g}`}
+                    onPress={() => {
+                      const next = new Set(incomingCalls);
+                      if (hasCall) next.delete(g); else next.add(g);
+                      setIncomingCalls(next);
+                    }}
+                    activeOpacity={0.8}
+                    style={[styles.mockButton, hasCall ? styles.mockButtonPrimary : styles.mockButtonReset]}>
+                    <Text style={styles.mockButtonText}>{g}{hasCall ? ' 🔔' : ''}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.mockSectionLabel}>Call</Text>
+            <View style={styles.mockRow}>
+              <TouchableOpacity
+                onPress={() => { setCallActive(true); setPushState('idle'); }}
+                activeOpacity={0.8}
+                style={[styles.mockButton, styles.mockButtonPrimary]}>
+                <Text style={styles.mockButtonText}>Start</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => { setCallActive(false); setPushState('idle'); setIsHolding(false); }}
+                activeOpacity={0.8}
+                style={[styles.mockButton, styles.mockButtonDanger]}>
+                <Text style={styles.mockButtonText}>End</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => { setOccupiedSpeaker('Bob'); setPushState('occupied'); }}
+                activeOpacity={0.8}
+                style={[styles.mockButton, styles.mockButtonReset]}>
+                <Text style={styles.mockButtonText}>Bob</Text>
+              </TouchableOpacity>
             </View>
           </View>
-        )}
-      </View>
+        </View>
+      )}
     </View>
   );
 }

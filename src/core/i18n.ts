@@ -123,6 +123,11 @@ export interface Translations {
   tabTalk: string;
   talkGroupsTitle: string;
   talkSelectedGroup: string;
+  talkMenuStartAlert: string;
+  talkMenuStartImminentPeril: string;
+  talkMenuStartEmergency: string;
+  talkMenuGroupDetails: string;
+  talkMenuMuteOff: string;
   talkButton: string;
   talkButtonHold: string;
   talkHoldHint: string;
@@ -195,6 +200,15 @@ export interface Translations {
   btnClearHistory: string;
   btnCallBack: string;
   cardCommencement: string;
+
+  // ── Messages / Chat
+  talkMessagesTitle: string;
+  talkMessagesEmpty: string;
+  talkMessagesInputPlaceholder: string;
+  talkMessagesSend: string;
+  talkMessagesFile: string;
+  talkMessagesImage: string;
+  talkMessagesCamera: string;
 
   // ── Mock / test
   callIncoming: string;
@@ -315,6 +329,11 @@ const tr: Translations = {
   tabTalk:               'Talk',
   talkGroupsTitle:       'Gruplar',
   talkSelectedGroup:     'Seçilen grup',
+  talkMenuStartAlert:        'Uyarıyı Başlat',
+  talkMenuStartImminentPeril: 'Yakın Tehlikeyi Başlat',
+  talkMenuStartEmergency:    'Acil Durumu Başlat',
+  talkMenuGroupDetails:      'Grup Detayları',
+  talkMenuMuteOff:           'Sesi Aç',
   talkButton:            'Push to talk',
   talkButtonHold:        'Hold to talk',
   talkSpeakerYou:        'You',
@@ -339,6 +358,13 @@ const tr: Translations = {
   talkMicEnabled:        'Mikrofon etkin',
   talkMicDenied:         'Mikrofon izni reddedildi',
   talkMicDisabledHint:   'Ses göndermek için mikrofonu etkinleştirin',
+  talkMessagesTitle:            'Mesajlar',
+  talkMessagesEmpty:            'Henüz mesaj yok.',
+  talkMessagesInputPlaceholder: 'Mesaj yazın…',
+  talkMessagesSend:             'Gönder',
+  talkMessagesFile:             'Dosya Ekle',
+  talkMessagesImage:            'Resim Ekle',
+  talkMessagesCamera:           'Kamera',
   contactsEmpty:         'Henüz kişi yok. Yukarıdan ekle.',
   contactsCount:           n => `${n} kişi`,
   contactsAlertClearTitle:   'Tüm kişileri sil',
@@ -508,6 +534,11 @@ const en: Translations = {
   tabTalk:               'Talk',
   talkGroupsTitle:       'Groups',
   talkSelectedGroup:     'Selected group',
+  talkMenuStartAlert:        'Start Alert',
+  talkMenuStartImminentPeril: 'Start Imminent Peril',
+  talkMenuStartEmergency:    'Start Emergency',
+  talkMenuGroupDetails:      'Group Details',
+  talkMenuMuteOff:           'Mute Off',
   talkButton:            'Push to talk',
   talkButtonHold:        'Hold to talk',
   talkSpeakerYou:        'You',
@@ -532,6 +563,13 @@ const en: Translations = {
   talkMicEnabled:        'Microphone enabled',
   talkMicDenied:         'Microphone permission denied',
   talkMicDisabledHint:   'Enable microphone to send audio',
+  talkMessagesTitle:            'Messages',
+  talkMessagesEmpty:            'No messages yet.',
+  talkMessagesInputPlaceholder: 'Type a message…',
+  talkMessagesSend:             'Send',
+  talkMessagesFile:             'Attach File',
+  talkMessagesImage:            'Attach Image',
+  talkMessagesCamera:           'Camera',
   contactsEmpty:           'No contacts yet. Add one above.',
   contactsCount:           n => `${n} contact${n === 1 ? '' : 's'}`,
   contactsAlertClearTitle:   'Delete all contacts',

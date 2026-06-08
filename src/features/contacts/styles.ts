@@ -68,11 +68,32 @@ export function makeContactsStyles(c: ThemePalette) {
     },
 
     // ── MC buttons ────────────────────────────────────────────────────────────
-    mcRow:    { flexDirection: 'row', gap: 10, marginBottom: 14 },
+    mcRow:    { flexDirection: 'row', gap: 10, marginBottom: 8 },
     mcBtn:    { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
     mcHalf:   { backgroundColor: c.primary },
     mcFull:   { backgroundColor: c.secondary },
     mcBtnText: { color: c.textOnAccent, fontWeight: '700', fontSize: 12 },
+
+    // ── Duplex call buttons ───────────────────────────────────────────────────
+    duplexRow:  { flexDirection: 'row', gap: 10, marginBottom: 14 },
+    duplexBtn:  { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center', borderWidth: 1.5 },
+    duplexHalf: { borderColor: c.primary, backgroundColor: 'transparent' },
+    duplexFull: { borderColor: c.secondary, backgroundColor: 'transparent' },
+    duplexBtnText: { color: c.textPrimary, fontWeight: '700', fontSize: 12 },
+
+    // ── Info sections ─────────────────────────────────────────────────────────
+    infoSection: {
+      backgroundColor: c.bg,
+      borderRadius: 8,
+      padding: 10,
+      marginBottom: 10,
+    },
+    infoSectionTitle: { color: c.textPrimary, fontWeight: '700', fontSize: 13, marginBottom: 8 },
+    infoRow:  { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+    infoLabel: { color: c.textMuted, fontSize: 12 },
+    infoValue: { color: c.textSecondary, fontSize: 12 },
+    infoActive: { color: c.success },
+    infoMissed: { color: c.error },
 
     // ── Callback section ──────────────────────────────────────────────────────
     callbackSection:  { backgroundColor: c.bg, borderRadius: 8, padding: 10 },

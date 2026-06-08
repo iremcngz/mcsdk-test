@@ -4,12 +4,13 @@
  */
 
 import React, { useMemo } from 'react';
-import { StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../contexts/AppContext';
 import { useSdkContext } from '../contexts/SdkContext';
 import { useNavigation } from '../contexts/NavigationContext';
 import { makeCommonStyles } from '../shared/commonStyles';
+import { AuthSettings } from '../core/settings';
 import type { Screen } from '../shared/types';
 
 import { HomeScreen }     from '../features/home/HomeScreen';
@@ -20,7 +21,6 @@ import { ContactsScreen } from '../features/contacts/ContactsScreen';
 import { CallsTab }       from '../features/calls/CallsTab';
 import { TalkScreen }     from '../features/talk/TalkScreen';
 
-// Tab order: most-used first on the left.
 const TABS: { id: Screen; icon: string }[] = [
   { id: 'home',     icon: '🏠' },
   { id: 'contacts', icon: '👥' },
@@ -48,7 +48,6 @@ export function TabNavigator() {
     talk:     tr.tabTalk,
   };
 
-  // Status badge (shown in header when on Home tab)
   const statusColor = initialized
     ? c.success
     : paramsSet
@@ -56,6 +55,7 @@ export function TabNavigator() {
       : created
         ? c.primary
         : c.error;
+
   const statusText = initialized
     ? tr.statusInitialized
     : paramsSet
@@ -64,9 +64,91 @@ export function TabNavigator() {
         ? tr.statusCreated
         : tr.statusNotCreated;
 
-  // Bottom tab bar styles (override the top-border-based commonStyles)
-  const bottomTabBar = useMemo(() => StyleSheet.create({
-    bar: {
+  // Kullanıcı adını güvenli bir şekilde alıp baş harflerini çıkarma mantığı
+  const username = AuthSettings.getLastUsername() ?? '—';
+  const userInitials = useMemo(() => {
+    if (!username || username === '—') return 'U';
+    return username.trim().substring(0, 2).toUpperCase();
+  }, [username]);
+
+  // Yeni Estetik Navigasyon ve Premium Header Stilleri
+  const navStyles = useMemo(() => StyleSheet.create({
+    customHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      backgroundColor: c.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    profileSection: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    avatarWrapper: {
+      width: 36,
+      height: 36,
+      borderRadius: 10, // Modern squircle görünüm
+      backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+      borderWidth: 1,
+      borderColor: c.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    avatarText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: c.accent,
+    },
+    identityBlock: {
+      justifyContent: 'center',
+    },
+    metaTitle: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: c.textMuted,
+      letterSpacing: 0.6,
+      textTransform: 'uppercase',
+      marginBottom: 1,
+    },
+    usernameText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: c.textPrimary,
+    },
+    rightSection: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    ipBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 6,
+      backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    ipText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: c.textSecondary,
+      fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    },
+    statusBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 6,
+    },
+    statusBadgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#ffffff',
+    },
+    bottomBar: {
       flexDirection: 'row',
       backgroundColor: c.surface,
       borderTopWidth: 1,
@@ -96,24 +178,35 @@ export function TabNavigator() {
     labelActive: {
       color: c.accent,
     },
-  }), [c, insets.bottom]);
+  }), [c, theme, insets.bottom]);
 
   return (
     <View style={[s.root, { paddingTop: insets.top }]}>
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
 
-      {/* ── Header ──────────────────────────────────────────────────────── */}
-      <View style={s.header}>
-        <Text style={s.title}>MCSDK Test</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      {/* ── Yeni Estetik Üst Başlık (Header) ────────────────────────────── */}
+      <View style={navStyles.customHeader}>
+        <View style={navStyles.profileSection}>
+          <View style={navStyles.avatarWrapper}>
+            <Text style={navStyles.avatarText}>{userInitials}</Text>
+          </View>
+          <View style={navStyles.identityBlock}>
+            <Text style={navStyles.metaTitle}>MCSDK Test</Text>
+            <Text style={navStyles.usernameText} numberOfLines={1}>
+              {username}
+            </Text>
+          </View>
+        </View>
+
+        <View style={navStyles.rightSection}>
           {ipInfo.ip != null && (
-            <View style={[s.badge, { backgroundColor: c.border }]}>
-              <Text style={[s.badgeText, { color: c.textSecondary }]}>{ipInfo.ip}</Text>
+            <View style={navStyles.ipBadge}>
+              <Text style={navStyles.ipText}>{ipInfo.ip}</Text>
             </View>
           )}
           {screen === 'home' && (
-            <View style={[s.badge, { backgroundColor: statusColor }]}>
-              <Text style={s.badgeText}>{statusText}</Text>
+            <View style={[navStyles.statusBadge, { backgroundColor: statusColor }]}>
+              <Text style={navStyles.statusBadgeText}>{statusText}</Text>
             </View>
           )}
         </View>
@@ -131,18 +224,18 @@ export function TabNavigator() {
       </View>
 
       {/* ── Bottom Tab Bar ───────────────────────────────────────────────── */}
-      <View style={bottomTabBar.bar}>
+      <View style={navStyles.bottomBar}>
         {TABS.map(({ id, icon }) => {
           const active = screen === id;
           return (
             <TouchableOpacity
               key={id}
-              style={[bottomTabBar.tab, active && bottomTabBar.tabActive]}
+              style={[navStyles.tab, active && navStyles.tabActive]}
               onPress={() => setScreen(id)}
               activeOpacity={0.7}>
-              <Text style={bottomTabBar.icon}>{icon}</Text>
+              <Text style={navStyles.icon}>{icon}</Text>
               <Text
-                style={[bottomTabBar.label, active && bottomTabBar.labelActive]}
+                style={[navStyles.label, active && navStyles.labelActive]}
                 numberOfLines={1}>
                 {tabLabels[id]}
               </Text>

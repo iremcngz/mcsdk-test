@@ -127,4 +127,10 @@ dependencies {
 
     // react-native-sound-level (manually linked, no auto-linking support)
     implementation project(':react-native-sound-level')
+
+    // react-native-image-picker (camera / gallery)
+    implementation project(':react-native-image-picker')
+
+    // react-native-document-picker (file picker)
+    implementation project(':react-native-document-picker')
 }

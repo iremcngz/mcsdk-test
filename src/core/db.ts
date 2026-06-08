@@ -161,13 +161,21 @@ const SEED_CONTACTS = [
   { name: 'Frank Özdemir',   sipUri: 'sip:frank@mc.example.com',   notes: 'Team Bravo' },
   { name: 'Grace Yıldız',    sipUri: 'sip:grace@mc.example.com',   notes: 'Logistics' },
   { name: 'Hasan Demir',     sipUri: 'sip:hasan@mc.example.com',   notes: 'Security' },
+  { name: 'Irina Petrova',   sipUri: 'sip:irina@mc.example.com',   notes: 'Dispatch' },
+  { name: 'Jean Moreau',     sipUri: 'sip:jean@mc.example.com',    notes: 'Command' },
+  { name: 'Kenji Tanaka',    sipUri: 'sip:kenji@mc.example.com',   notes: 'Team Alpha' },
+  { name: 'Li Wei',          sipUri: 'sip:liwe@mc.example.com',    notes: 'Logistics' },
+  { name: 'Maria Silva',     sipUri: 'sip:maria@mc.example.com',   notes: 'Security' },
+  { name: 'Omar Hassan',     sipUri: 'sip:omar@mc.example.com',    notes: 'Team Bravo' },
 ];
 
 export async function seedContacts(): Promise<void> {
   const existing = await getAllContacts();
-  if (existing.length > 0) return;
+  const existingNames = new Set(existing.map(c => c.name));
   for (const ct of SEED_CONTACTS) {
-    await insertContact(ct.name, ct.sipUri, ct.notes);
+    if (!existingNames.has(ct.name)) {
+      await insertContact(ct.name, ct.sipUri, ct.notes);
+    }
   }
 }
 

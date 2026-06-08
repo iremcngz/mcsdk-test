@@ -35,6 +35,49 @@ interface CallbackInfo {
   lastCallback: Date | null;
 }
 
+// ── Call Info / User Info ─────────────────────────────────────────────────────
+
+type CallStatus = 'idle' | 'active' | 'missed' | 'ended';
+type CallType = 'half_duplex' | 'full_duplex' | 'none';
+
+interface CallInfo {
+  callStatus: CallStatus;
+  callType: CallType;
+  lastCall: Date | null;
+}
+
+interface UserInfo {
+  userStatus: PresenceStatus;
+  lastOnline: Date | null;
+}
+
+function mockCallStatus(id: number): CallStatus {
+  const statuses: CallStatus[] = ['idle', 'active', 'missed', 'ended'];
+  return statuses[(id * 2) % statuses.length];
+}
+
+function mockCallType(id: number): CallType {
+  const types: CallType[] = ['half_duplex', 'full_duplex', 'none'];
+  return types[id % types.length];
+}
+
+function mockLastCallDate(id: number): Date {
+  const now = Date.now();
+  const offsets = [0, 3600000, 86400000, 172800000, 604800000];
+  return new Date(now - offsets[id % offsets.length]);
+}
+
+function mockLastOnline(id: number): Date {
+  const now = Date.now();
+  const offsets = [300000, 3600000, 43200000, 86400000, 172800000];
+  return new Date(now - offsets[id % offsets.length]);
+}
+
+function mockUserStatus(id: number): PresenceStatus {
+  const statuses: PresenceStatus[] = ['online', 'away', 'busy', 'offline'];
+  return statuses[(id * 3) % statuses.length];
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export function ContactsScreen() {
@@ -50,6 +93,8 @@ export function ContactsScreen() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [presence,   setPresence]   = useState<Record<number, PresenceStatus>>({});
   const [callbacks,  setCallbacks]  = useState<Record<number, CallbackInfo>>({});
+  const [callInfo,   setCallInfo]   = useState<Record<number, CallInfo>>({});
+  const [userInfo,   setUserInfo]   = useState<Record<number, UserInfo>>({});
 
   useEffect(() => {
     initDb().then(async () => {
@@ -57,8 +102,23 @@ export function ContactsScreen() {
       const rows = await getAllContacts();
       setContacts(rows);
       const p: Record<number, PresenceStatus> = {};
-      rows.forEach(r => { p[r.id] = mockPresence(r.id); });
+      const ci: Record<number, CallInfo> = {};
+      const ui: Record<number, UserInfo> = {};
+      rows.forEach(r => {
+        p[r.id] = mockPresence(r.id);
+        ci[r.id] = {
+          callStatus: mockCallStatus(r.id),
+          callType: mockCallType(r.id),
+          lastCall: mockLastCallDate(r.id),
+        };
+        ui[r.id] = {
+          userStatus: mockUserStatus(r.id),
+          lastOnline: mockLastOnline(r.id),
+        };
+      });
       setPresence(p);
+      setCallInfo(ci);
+      setUserInfo(ui);
     });
   }, []);
 
@@ -86,6 +146,8 @@ export function ContactsScreen() {
     const pStatus    = presence[item.id] ?? 'offline';
     const isSelected = selectedId === item.id;
     const cb         = callbacks[item.id] ?? { status: 'none' as CallbackStatus, lastCallback: null };
+    const ci         = callInfo[item.id] ?? { callStatus: 'idle' as CallStatus, callType: 'none' as CallType, lastCall: null };
+    const ui         = userInfo[item.id] ?? { userStatus: 'offline' as PresenceStatus, lastOnline: null };
 
     return (
       <View>
@@ -124,6 +186,56 @@ export function ContactsScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Duplex Call Buttons */}
+            <View style={cs.duplexRow}>
+              <TouchableOpacity
+                style={[cs.duplexBtn, cs.duplexHalf]}
+                onPress={() => {
+                  startCall(item.name, item.sip_uri, 'half_duplex');
+                  setScreen('calls');
+                }}>
+                <Text style={cs.duplexBtnText}>Half Duplex</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[cs.duplexBtn, cs.duplexFull]}
+                onPress={() => {
+                  startCall(item.name, item.sip_uri, 'full_duplex');
+                  setScreen('calls');
+                }}>
+                <Text style={cs.duplexBtnText}>Full Duplex</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Call Info */}
+            <View style={cs.infoSection}>
+              <Text style={cs.infoSectionTitle}>Call Info</Text>
+              <View style={cs.infoRow}>
+                <Text style={cs.infoLabel}>Call Status</Text>
+                <Text style={[cs.infoValue, ci.callStatus === 'active' ? cs.infoActive : ci.callStatus === 'missed' ? cs.infoMissed : undefined]}>{ci.callStatus}</Text>
+              </View>
+              <View style={cs.infoRow}>
+                <Text style={cs.infoLabel}>Call Type</Text>
+                <Text style={cs.infoValue}>{ci.callType === 'none' ? '—' : ci.callType}</Text>
+              </View>
+              <View style={cs.infoRow}>
+                <Text style={cs.infoLabel}>Last Call</Text>
+                <Text style={cs.infoValue}>{ci.lastCall ? ci.lastCall.toLocaleString() : '—'}</Text>
+              </View>
+            </View>
+
+            {/* User Info */}
+            <View style={cs.infoSection}>
+              <Text style={cs.infoSectionTitle}>User Info</Text>
+              <View style={cs.infoRow}>
+                <Text style={cs.infoLabel}>User Status</Text>
+                <Text style={[cs.infoValue, ui.userStatus === 'online' ? cs.infoActive : undefined]}>{ui.userStatus}</Text>
+              </View>
+              <View style={cs.infoRow}>
+                <Text style={cs.infoLabel}>Last Online</Text>
+                <Text style={cs.infoValue}>{ui.lastOnline ? ui.lastOnline.toLocaleString() : '—'}</Text>
+              </View>
+            </View>
+
             {/* Callback section */}
             <View style={cs.callbackSection}>
               <Text style={cs.callbackTitle}>Callback</Text>
@@ -154,7 +266,7 @@ export function ContactsScreen() {
         )}
       </View>
     );
-  }, [cs, presence, selectedId, callbacks, handleSelect, handlePlaceRequest]);
+  }, [cs, presence, selectedId, callbacks, callInfo, userInfo, handleSelect, handlePlaceRequest]);
 
   return (
     <View style={[cs.root, { paddingBottom: insets.bottom }]}>

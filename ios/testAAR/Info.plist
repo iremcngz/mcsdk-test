@@ -35,6 +35,10 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera access is required to take photos for messages.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo library access is required to attach images to messages.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone access is required for Talk mode.</string>
 	<key>RCTNewArchEnabled</key>

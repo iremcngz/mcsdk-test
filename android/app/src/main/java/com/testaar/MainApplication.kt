@@ -17,6 +17,8 @@ class MainApplication : Application(), ReactApplication {
         PackageList(this).packages.apply {
           add(McSdkPackage())
           add(com.punarinta.RNSoundLevel.RNSoundLevel())
+          add(com.imagepicker.ImagePickerPackage())
+          add(com.reactnativedocumentpicker.RNDocumentPickerPackage())
         },
     )
   }

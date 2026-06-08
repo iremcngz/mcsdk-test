@@ -20,5 +20,9 @@ module.exports = {
     'react-native-get-random-values': '<rootDir>/__mocks__/react-native-get-random-values.js',
     // @react-native-community/netinfo: native module — replaced with a static mock
     '@react-native-community/netinfo': '<rootDir>/__mocks__/@react-native-community/netinfo.js',
+    // react-native-image-picker: native module — camera / gallery
+    'react-native-image-picker': '<rootDir>/__mocks__/react-native-image-picker.js',
+    // react-native-document-picker: native module — file picker
+    'react-native-document-picker': '<rootDir>/__mocks__/react-native-document-picker.js',
   },
 };
