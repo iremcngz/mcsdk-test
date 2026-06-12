@@ -26,6 +26,37 @@ export function makeContactsStyles(c: ThemePalette) {
 
     countText: { color: c.textMuted, fontSize: 11, paddingHorizontal: 14, marginBottom: 4 },
 
+    // ── Filter tabs ─────────────────────────────────────────────────────────────
+    filterRow: {
+      flexDirection: 'row',
+      marginHorizontal: 12,
+      marginBottom: 8,
+      backgroundColor: c.surface,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    filterTab: {
+      flex: 1,
+      paddingVertical: 8,
+      alignItems: 'center',
+      borderRadius: 9,
+    },
+    filterTabActive: {
+      backgroundColor: c.accent,
+    },
+    filterTabText: {
+      color: c.textSecondary,
+      fontWeight: '600',
+      fontSize: 13,
+    },
+    filterTabTextActive: {
+      color: c.textOnAccent,
+    },
+
+    // ── Group row ────────────────────────────────────────────────────────────────
+    groupIcon: { fontSize: 18, marginRight: 10 },
+
     // ── Contact row ───────────────────────────────────────────────────────────
     row: {
       flexDirection: 'row',

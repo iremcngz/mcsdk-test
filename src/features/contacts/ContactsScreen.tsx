@@ -8,6 +8,18 @@ import type { ThemePalette } from '../../core/theme';
 import { initDb, getAllContacts, seedContacts, type Contact } from '../../core/db';
 import { makeContactsStyles } from './styles';
 
+const GROUPS = ['group1', 'group2', 'group3', 'group4', 'group5', 'group6', 'group7'];
+type ContactFilter = 'all' | 'people' | 'groups';
+
+interface GroupItem {
+  id: number;
+  name: string;
+  sip_uri: string;
+  notes: string;
+  created_at: number;
+  __isGroup: true;
+}
+
 // ── Presence ──────────────────────────────────────────────────────────────────
 
 type PresenceStatus = 'online' | 'busy' | 'away' | 'offline';
@@ -90,6 +102,7 @@ export function ContactsScreen() {
 
   const [contacts,   setContacts]   = useState<Contact[]>([]);
   const [query,      setQuery]      = useState('');
+  const [filter,     setFilter]     = useState<ContactFilter>('all');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [presence,   setPresence]   = useState<Record<number, PresenceStatus>>({});
   const [callbacks,  setCallbacks]  = useState<Record<number, CallbackInfo>>({});
@@ -122,14 +135,33 @@ export function ContactsScreen() {
     });
   }, []);
 
+  const groupContacts: GroupItem[] = useMemo(() =>
+    GROUPS.map((g, i) => ({
+      id: -(i + 1),
+      name: g,
+      sip_uri: `${g}@test.com`,
+      notes: '',
+      created_at: 0,
+      __isGroup: true as const,
+    })),
+  [], []);
+
+  const allItems = useMemo(() => {
+    const people: (Contact | GroupItem)[] = filter === 'groups' ? [] : contacts;
+    const groups: (Contact | GroupItem)[] = filter === 'people' ? [] : groupContacts;
+    return [...people, ...groups];
+  }, [contacts, groupContacts, filter]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return contacts;
-    return contacts.filter(ct =>
-      ct.name.toLowerCase().includes(q) ||
-      ct.sip_uri.toLowerCase().includes(q),
+    if (!q) return allItems;
+    return allItems.filter(item =>
+      item.name.toLowerCase().includes(q),
     );
-  }, [contacts, query]);
+  }, [allItems, query]);
+
+  const isGroup = (item: Contact | GroupItem): item is GroupItem =>
+    '__isGroup' in item;
 
   const handleSelect = useCallback((id: number) => {
     setSelectedId(prev => (prev === id ? null : id));
@@ -142,9 +174,71 @@ export function ContactsScreen() {
     }));
   }, []);
 
-  const renderItem = useCallback(({ item }: { item: Contact }) => {
-    const pStatus    = presence[item.id] ?? 'offline';
+  const renderItem = useCallback(({ item }: { item: Contact | GroupItem }) => {
+    const g = isGroup(item);
     const isSelected = selectedId === item.id;
+
+    if (g) {
+      return (
+        <View>
+          <TouchableOpacity
+            style={[cs.row, isSelected && cs.rowSelected]}
+            onPress={() => handleSelect(item.id)}
+            activeOpacity={0.75}>
+            <Text style={cs.groupIcon}>👥</Text>
+            <Text style={cs.rowName} numberOfLines={1}>{item.name}</Text>
+            <Text style={cs.chevron}>{isSelected ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+
+          {isSelected && (
+            <View style={cs.detail}>
+              <Text style={cs.detailName}>{item.name}</Text>
+              <Text style={cs.detailUri}>{item.sip_uri}</Text>
+
+              <View style={cs.mcRow}>
+                <TouchableOpacity
+                  style={[cs.mcBtn, cs.mcHalf]}
+                  onPress={() => {
+                    startCall(item.name, item.sip_uri, 'half_duplex', 'manual');
+                    setScreen('incall');
+                  }}>
+                  <Text style={cs.mcBtnText}>Half Duplex MC</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[cs.mcBtn, cs.mcFull]}
+                  onPress={() => {
+                    startCall(item.name, item.sip_uri, 'full_duplex', 'manual');
+                    setScreen('incall');
+                  }}>
+                  <Text style={cs.mcBtnText}>Full Duplex MC</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={cs.duplexRow}>
+                <TouchableOpacity
+                  style={[cs.duplexBtn, cs.duplexHalf]}
+                  onPress={() => {
+                    startCall(item.name, item.sip_uri, 'half_duplex', 'auto');
+                    setScreen('callactive');
+                  }}>
+                  <Text style={cs.duplexBtnText}>Half Duplex AC</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[cs.duplexBtn, cs.duplexFull]}
+                  onPress={() => {
+                    startCall(item.name, item.sip_uri, 'full_duplex', 'auto');
+                    setScreen('callactive');
+                  }}>
+                  <Text style={cs.duplexBtnText}>Full Duplex AC</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    const pStatus    = presence[item.id] ?? 'offline';
     const cb         = callbacks[item.id] ?? { status: 'none' as CallbackStatus, lastCallback: null };
     const ci         = callInfo[item.id] ?? { callStatus: 'idle' as CallStatus, callType: 'none' as CallType, lastCall: null };
     const ui         = userInfo[item.id] ?? { userStatus: 'offline' as PresenceStatus, lastOnline: null };
@@ -166,47 +260,44 @@ export function ContactsScreen() {
             <Text style={cs.detailName}>{item.name}</Text>
             <Text style={cs.detailUri}>{item.sip_uri}</Text>
 
-            {/* MC Buttons */}
             <View style={cs.mcRow}>
               <TouchableOpacity
                 style={[cs.mcBtn, cs.mcHalf]}
                 onPress={() => {
-                  startCall(item.name, item.sip_uri, 'half_duplex');
-                  setScreen('calls');
+                  startCall(item.name, item.sip_uri, 'half_duplex', 'manual');
+                  setScreen('incall');
                 }}>
                 <Text style={cs.mcBtnText}>Half Duplex MC</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[cs.mcBtn, cs.mcFull]}
                 onPress={() => {
-                  startCall(item.name, item.sip_uri, 'full_duplex');
-                  setScreen('calls');
+                  startCall(item.name, item.sip_uri, 'full_duplex', 'manual');
+                  setScreen('incall');
                 }}>
                 <Text style={cs.mcBtnText}>Full Duplex MC</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Duplex Call Buttons */}
             <View style={cs.duplexRow}>
               <TouchableOpacity
                 style={[cs.duplexBtn, cs.duplexHalf]}
                 onPress={() => {
-                  startCall(item.name, item.sip_uri, 'half_duplex');
-                  setScreen('calls');
+                  startCall(item.name, item.sip_uri, 'half_duplex', 'auto');
+                  setScreen('callactive');
                 }}>
-                <Text style={cs.duplexBtnText}>Half Duplex</Text>
+                <Text style={cs.duplexBtnText}>Half Duplex AC</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[cs.duplexBtn, cs.duplexFull]}
                 onPress={() => {
-                  startCall(item.name, item.sip_uri, 'full_duplex');
-                  setScreen('calls');
+                  startCall(item.name, item.sip_uri, 'full_duplex', 'auto');
+                  setScreen('callactive');
                 }}>
-                <Text style={cs.duplexBtnText}>Full Duplex</Text>
+                <Text style={cs.duplexBtnText}>Full Duplex AC</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Call Info */}
             <View style={cs.infoSection}>
               <Text style={cs.infoSectionTitle}>Call Info</Text>
               <View style={cs.infoRow}>
@@ -223,7 +314,6 @@ export function ContactsScreen() {
               </View>
             </View>
 
-            {/* User Info */}
             <View style={cs.infoSection}>
               <Text style={cs.infoSectionTitle}>User Info</Text>
               <View style={cs.infoRow}>
@@ -236,7 +326,6 @@ export function ContactsScreen() {
               </View>
             </View>
 
-            {/* Callback section */}
             <View style={cs.callbackSection}>
               <Text style={cs.callbackTitle}>Callback</Text>
               <View style={cs.callbackInfoRow}>
@@ -266,7 +355,13 @@ export function ContactsScreen() {
         )}
       </View>
     );
-  }, [cs, presence, selectedId, callbacks, callInfo, userInfo, handleSelect, handlePlaceRequest]);
+  }, [cs, presence, selectedId, callbacks, callInfo, userInfo, handleSelect, handlePlaceRequest, startCall, setScreen]);
+
+  const filterTabs: { key: ContactFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'people', label: 'People' },
+    { key: 'groups', label: 'Groups' },
+  ];
 
   return (
     <View style={[cs.root, { paddingBottom: insets.bottom }]}>
@@ -284,8 +379,23 @@ export function ContactsScreen() {
         />
       </View>
 
+      {/* Filter tabs */}
+      <View style={cs.filterRow}>
+        {filterTabs.map(tab => (
+          <TouchableOpacity
+            key={tab.key}
+            onPress={() => { setFilter(tab.key); setSelectedId(null); }}
+            activeOpacity={0.7}
+            style={[cs.filterTab, filter === tab.key && cs.filterTabActive]}>
+            <Text style={[cs.filterTabText, filter === tab.key && cs.filterTabTextActive]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <Text style={cs.countText}>
-        {filtered.length} contact{filtered.length !== 1 ? 's' : ''}
+        {filtered.length} {filter === 'groups' ? 'group' : 'contact'}{filtered.length !== 1 ? 's' : ''}
       </Text>
 
       <FlatList
@@ -295,8 +405,8 @@ export function ContactsScreen() {
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           <View style={cs.emptyWrap}>
-            <Text style={cs.emptyIcon}>👤</Text>
-            <Text style={cs.emptyText}>No contacts found.</Text>
+            <Text style={cs.emptyIcon}>{filter === 'groups' ? '👥' : '👤'}</Text>
+            <Text style={cs.emptyText}>{filter === 'groups' ? 'No groups found.' : 'No contacts found.'}</Text>
           </View>
         }
       />

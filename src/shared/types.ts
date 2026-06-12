@@ -16,4 +16,4 @@ export interface SdkLogEntry {
   msg: string;
 }
 
-export type Screen = 'home' | 'metrics' | 'sdklogs' | 'settings' | 'contacts' | 'calls' | 'talk';
+export type Screen = 'home' | 'metrics' | 'sdklogs' | 'settings' | 'contacts' | 'calls' | 'talk' | 'incall' | 'callactive';

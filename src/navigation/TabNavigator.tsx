@@ -3,12 +3,13 @@
  * and bottom tab bar. Screen state is owned by NavigationContext.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../contexts/AppContext';
 import { useSdkContext } from '../contexts/SdkContext';
 import { useNavigation } from '../contexts/NavigationContext';
+import { useTalkContext } from '../contexts/TalkContext';
 import { makeCommonStyles } from '../shared/commonStyles';
 import { AuthSettings } from '../core/settings';
 import type { Screen } from '../shared/types';
@@ -20,6 +21,9 @@ import { SettingsScreen } from '../features/settings/SettingsScreen';
 import { ContactsScreen } from '../features/contacts/ContactsScreen';
 import { CallsTab }       from '../features/calls/CallsTab';
 import { TalkScreen }     from '../features/talk/TalkScreen';
+import { InCallScreen }   from '../features/calls/InCallScreen';
+import { CallActiveScreen } from '../features/calls/CallActiveScreen';
+import { IncomingCallOverlay } from '../features/calls/IncomingCallOverlay';
 
 const TABS: { id: Screen; icon: string }[] = [
   { id: 'home',     icon: '🏠' },
@@ -35,8 +39,10 @@ export function TabNavigator() {
   const { c, tr, theme } = useAppContext();
   const { ipInfo, created, initialized, paramsSet } = useSdkContext();
   const { screen, setScreen } = useNavigation();
+  const { activeGroups, setPendingGroup } = useTalkContext();
   const insets = useSafeAreaInsets();
   const s = useMemo(() => makeCommonStyles(c), [c]);
+  const [showActiveList, setShowActiveList] = useState(false);
 
   const tabLabels: Record<Screen, string> = {
     home:     tr.tabHome,
@@ -46,6 +52,8 @@ export function TabNavigator() {
     contacts: tr.tabContacts,
     calls:    tr.tabCalls,
     talk:     tr.tabTalk,
+    incall:   'In Call',
+    callactive: 'Active Call',
   };
 
   const statusColor = initialized
@@ -178,6 +186,54 @@ export function TabNavigator() {
     labelActive: {
       color: c.accent,
     },
+    activeListOverlay: {
+      position: 'absolute',
+      top: 0, left: 0, right: 0, bottom: 0,
+      zIndex: 100,
+    },
+    activeListCard: {
+      position: 'absolute',
+      top: 56,
+      right: 12,
+      backgroundColor: c.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingVertical: 4,
+      minWidth: 200,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.3,
+      shadowRadius: 20,
+      elevation: 12,
+      zIndex: 101,
+    },
+    activeListItem: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    activeListItemDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: c.success,
+    },
+    activeListItemText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: c.textPrimary,
+    },
+    activeListEmpty: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+    activeListEmptyText: {
+      fontSize: 13,
+      color: c.textMuted,
+    },
   }), [c, theme, insets.bottom]);
 
   return (
@@ -209,8 +265,48 @@ export function TabNavigator() {
               <Text style={navStyles.statusBadgeText}>{statusText}</Text>
             </View>
           )}
+          {activeGroups.length > 0 && (
+            <TouchableOpacity
+              style={[navStyles.statusBadge, { backgroundColor: c.success }]}
+              onPress={() => setShowActiveList(p => !p)}
+              activeOpacity={0.8}>
+              <Text style={navStyles.statusBadgeText}>📞 {activeGroups.length}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
+
+      {/* ── Active call list dropdown ───────────────────────────────── */}
+      {showActiveList && (
+        <View style={navStyles.activeListOverlay}>
+          <TouchableOpacity
+            style={{ flex: 1 }}
+            activeOpacity={1}
+            onPress={() => setShowActiveList(false)} />
+          <View style={navStyles.activeListCard}>
+            {activeGroups.length === 0 ? (
+              <View style={navStyles.activeListEmpty}>
+                <Text style={navStyles.activeListEmptyText}>No active calls</Text>
+              </View>
+            ) : (
+              activeGroups.map(g => (
+                <TouchableOpacity
+                  key={g.name}
+                  style={navStyles.activeListItem}
+                  onPress={() => {
+                    setShowActiveList(false);
+                    setPendingGroup(g.name);
+                    setScreen('talk');
+                  }}
+                  activeOpacity={0.7}>
+                  <View style={navStyles.activeListItemDot} />
+                  <Text style={navStyles.activeListItemText}>{g.name}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        </View>
+      )}
 
       {/* ── Screen Content ──────────────────────────────────────────────── */}
       <View style={{ flex: 1 }}>
@@ -221,28 +317,34 @@ export function TabNavigator() {
         {screen === 'contacts' && <ContactsScreen />}
         {screen === 'calls'    && <CallsTab />}
         {screen === 'talk'     && <TalkScreen />}
+        {screen === 'incall'   && <InCallScreen />}
+        {screen === 'callactive' && <CallActiveScreen />}
       </View>
 
-      {/* ── Bottom Tab Bar ───────────────────────────────────────────────── */}
-      <View style={navStyles.bottomBar}>
-        {TABS.map(({ id, icon }) => {
-          const active = screen === id;
-          return (
-            <TouchableOpacity
-              key={id}
-              style={[navStyles.tab, active && navStyles.tabActive]}
-              onPress={() => setScreen(id)}
-              activeOpacity={0.7}>
-              <Text style={navStyles.icon}>{icon}</Text>
-              <Text
-                style={[navStyles.label, active && navStyles.labelActive]}
-                numberOfLines={1}>
-                {tabLabels[id]}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {screen !== 'incall' && screen !== 'callactive' && (
+        <View style={navStyles.bottomBar}>
+          {TABS.map(({ id, icon }) => {
+            const active = screen === id;
+            return (
+              <TouchableOpacity
+                key={id}
+                style={[navStyles.tab, active && navStyles.tabActive]}
+                onPress={() => setScreen(id)}
+                activeOpacity={0.7}>
+                <Text style={navStyles.icon}>{icon}</Text>
+                <Text
+                  style={[navStyles.label, active && navStyles.labelActive]}
+                  numberOfLines={1}>
+                  {tabLabels[id]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {/* ── Incoming call overlay (on top of everything) ─────────────── */}
+      <IncomingCallOverlay />
     </View>
   );
 }

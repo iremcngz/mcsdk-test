@@ -78,6 +78,10 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace "com.testaar"
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
     defaultConfig {
         applicationId "com.testaar"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -131,6 +135,5 @@ dependencies {
     // react-native-image-picker (camera / gallery)
     implementation project(':react-native-image-picker')
 
-    // react-native-document-picker (file picker)
-    implementation project(':react-native-document-picker')
+
 }

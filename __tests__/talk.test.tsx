@@ -87,6 +87,11 @@ jest.mock('../src/contexts/AppContext', () => ({
 }));
 
 import { TalkScreen } from '../src/features/talk/TalkScreen';
+import { TalkContextProvider } from '../src/contexts/TalkContext';
+
+function renderWithTalkCtx(ui: React.ReactElement) {
+  return render(<TalkContextProvider>{ui}</TalkContextProvider>);
+}
 
 function getStyle(el: any) {
   return Array.isArray(el.props.style) ? el.props.style : [el.props.style];
@@ -98,30 +103,30 @@ function hasBackground(el: any, color: string) {
 
 describe('TalkScreen — visual state and actions', () => {
   it('renders the group selector and default selected group', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     expect(screen.getByTestId('talk-selected-group')).toHaveTextContent('group1');
   });
 
   it('switches selected group when a group pill is pressed', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-group-group4'));
     expect(screen.getByTestId('talk-selected-group')).toHaveTextContent('group4');
   });
 
   it('shows idle push-button before any action', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     const button = screen.getByTestId('talk-push-button');
-    expect(hasBackground(button, mockPalette.surface)).toBe(true);
+    expect(hasBackground(button, '#2d2d3f')).toBe(true);
   });
 
   it('does not start talk when no call is active', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent(screen.getByTestId('talk-push-button'), 'pressIn');
     expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Idle');
   });
 
   it('accepts push once call is active and shows granted status after loading', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-start-button'));
     act(() => { jest.advanceTimersByTime(600); });
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
@@ -131,7 +136,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('turns the push-to-talk button dark when a call is active', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-start-button'));
     act(() => { jest.advanceTimersByTime(600); });
     expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Call active');
@@ -140,7 +145,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('shows the push-to-talk button as dark after SDK accepts push during a call', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-start-button'));
     act(() => { jest.advanceTimersByTime(600); });
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
@@ -151,7 +156,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('starts talking while holding push-to-talk after acceptance', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-start-button'));
     act(() => { jest.advanceTimersByTime(600); });
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
@@ -165,14 +170,18 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('updates mode selection when transmit is pressed', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
+    // Start call first
+    fireEvent.press(screen.getByTestId('talk-start-button'));
+    act(() => { jest.advanceTimersByTime(600); });
+
     fireEvent.press(screen.getByTestId('talk-mode-transmit'));
     const button = screen.getByTestId('talk-mode-transmit');
     expect(hasBackground(button, mockPalette.accent)).toBe(true);
   });
 
   it('shows group avatar blue when call active and idle', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-start-button'));
     act(() => { jest.advanceTimersByTime(600); });
     const avatar = screen.getByTestId('talk-group-group1');
@@ -180,7 +189,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('shows group avatar red when occupied', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-start-button'));
     act(() => { jest.advanceTimersByTime(600); });
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
@@ -190,7 +199,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('shows group avatar green while talking', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-start-button'));
     act(() => { jest.advanceTimersByTime(600); });
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
@@ -202,7 +211,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('handles multi-group calls independently', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
 
     // Start call on group1
     fireEvent.press(screen.getByTestId('talk-start-button'));
@@ -228,7 +237,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('switching groups restores per-group call state', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
 
     // Start call on group1, occupy it
     fireEvent.press(screen.getByTestId('talk-start-button'));
@@ -249,7 +258,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('shows incoming call badge and auto-accepts after 3s', async () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
 
     // Open mock panel, toggle incoming call for group3
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
@@ -271,7 +280,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('moves incoming call group to front of ordered groups', async () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
     fireEvent.press(screen.getByTestId('talk-mock-incoming-group6'));
 
@@ -282,7 +291,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('toggles group action menu', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-group-menu-toggle'));
     expect(screen.getByTestId('talk-group-menu-alert')).toBeTruthy();
     expect(screen.getByTestId('talk-group-menu-mute')).toBeTruthy();
@@ -292,7 +301,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('shows selected group label as active', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     const labels = screen.getAllByText('group1');
     // First match is the group label below the avatar
     const label = labels[0];
@@ -301,7 +310,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('shows incoming badge with pointerEvents none', async () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
     fireEvent.press(screen.getByTestId('talk-mock-incoming-group3'));
 
@@ -312,7 +321,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('shows inactive group label with muted color', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     // group2 is not selected by default
     const label = screen.getByText('group2');
     const style = Array.isArray(label.props.style) ? label.props.style : [label.props.style];
@@ -320,7 +329,7 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('incoming badge disappears after auto-accept', async () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
     fireEvent.press(screen.getByTestId('talk-mock-incoming-group5'));
 
@@ -337,20 +346,37 @@ describe('TalkScreen — visual state and actions', () => {
   });
 
   it('messages button opens messages for data groups', () => {
-    render(<TalkScreen />);
+    renderWithTalkCtx(<TalkScreen />);
     // group3 is a data group
     fireEvent.press(screen.getByTestId('talk-group-group3'));
+
+    // Start call first
+    fireEvent.press(screen.getByTestId('talk-start-button'));
+    act(() => { jest.advanceTimersByTime(600); });
+
     fireEvent.press(screen.getByTestId('talk-mode-messages'));
 
     // MessagesScreen should render (the TalkScreen should unmount)
     expect(screen.queryByTestId('talk-push-button')).toBeNull();
   });
 
-  it('messages button disabled for non-data groups', () => {
-    render(<TalkScreen />);
-    // group1 is not a data group
-    const msgBtn = screen.getByTestId('talk-mode-messages');
-    const style = Array.isArray(msgBtn.props.style) ? msgBtn.props.style : [msgBtn.props.style];
-    expect(style).toEqual(expect.arrayContaining([expect.objectContaining({ opacity: 0.35 })]));
+  it('messages button hidden for non-data groups', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    // group1 is not a data group → messages button should not exist
+    expect(screen.queryByTestId('talk-mode-messages')).toBeNull();
+  });
+
+  it('disables mode buttons when no call is active', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    // group3 is a data group, so it has all 3 mode buttons
+    fireEvent.press(screen.getByTestId('talk-group-group3'));
+
+    const receiveBtn = screen.getByTestId('talk-mode-receive');
+    const transmitBtn = screen.getByTestId('talk-mode-transmit');
+    const messagesBtn = screen.getByTestId('talk-mode-messages');
+
+    expect(receiveBtn.props.disabled).toBe(true);
+    expect(transmitBtn.props.disabled).toBe(true);
+    expect(messagesBtn.props.disabled).toBe(true);
   });
 });

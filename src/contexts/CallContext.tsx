@@ -42,8 +42,9 @@ interface CallContextValue {
    * @param contactName  Display name of the callee.
    * @param sipUri       SIP URI of the callee.
    * @param callType     `half_duplex` or `full_duplex`.
+   * @param commencement `'auto'` (direct active) or `'manual'` (connecting, needs answer).
    */
-  startCall: (contactName: string, sipUri: string, callType: CallType) => void;
+  startCall: (contactName: string, sipUri: string, callType: CallType, commencement?: CommencementMode) => void;
 
   /** Terminate the active call and add it to history. */
   endCall: () => void;
@@ -81,6 +82,9 @@ interface CallContextValue {
    */
   rejectCall: () => void;
 
+  /** Simulate the remote party answering an outgoing call (connecting → active). */
+  simulateAnswer: () => void;
+
   /** Force floor state to 'busy' (simulate another party speaking). */
   simulateFloorBusy: () => void;
 
@@ -115,7 +119,9 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     contactName: string,
     sipUri: string,
     callType: CallType,
+    commencement?: CommencementMode,
   ) => {
+    const mode = commencement ?? commencementMode;
     // End any existing call first (shouldn't normally happen but be safe)
     setActiveCall(prev => {
       if (prev) {
@@ -136,18 +142,17 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
       return null;
     });
 
-    const isManual = commencementMode === 'manual';
     const call: ActiveCall = {
       id:               uuid(),
       contactName,
       sipUri,
       callType,
       direction:        'outgoing',
-      commencementMode,
-      state:            isManual ? 'connecting' : 'active',
+      commencementMode: mode,
+      state:            mode === 'auto' ? 'active' : 'connecting',
       floorState:       'idle',
       startedAt:        Date.now(),
-      needsManualJoin:  isManual,
+      needsManualJoin:  false,
     };
     setActiveCall(call);
   }, [commencementMode]);
@@ -170,6 +175,14 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
       setCallHistory(h => [record, ...h]);
       return null;
     });
+  }, []);
+
+  const simulateAnswer = useCallback(() => {
+    setActiveCall(prev =>
+      prev && prev.state === 'connecting'
+        ? { ...prev, state: 'active', startedAt: Date.now() }
+        : prev,
+    );
   }, []);
 
   const setFloorState = useCallback((state: FloorState) => {
@@ -281,6 +294,7 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     simulateIncomingCall,
     acceptCall,
     rejectCall,
+    simulateAnswer,
     simulateFloorBusy,
     simulateFloorIdle,
   }), [
@@ -288,6 +302,7 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     setCommencementMode, startCall, endCall,
     setFloorState, joinCall, clearHistory,
     simulateIncomingCall, acceptCall, rejectCall,
+    simulateAnswer,
     simulateFloorBusy, simulateFloorIdle,
   ]);
 

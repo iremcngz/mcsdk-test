@@ -13,7 +13,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import type { FloorState } from './types';
@@ -27,10 +27,12 @@ export function ActiveCallScreen() {
 
   // ── Elapsed timer ──────────────────────────────────────────────────────────
   const [elapsed, setElapsed] = useState(0);
+  const [isClosing, setIsClosing] = useState(false);
+  const blinkAnim = useRef(new Animated.Value(1)).current;
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (!activeCall || activeCall.state !== 'active') {
+    if (!activeCall || activeCall.state !== 'active' || isClosing) {
       setElapsed(0);
       return;
     }
@@ -41,7 +43,7 @@ export function ActiveCallScreen() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [activeCall?.state, activeCall?.startedAt]);
+  }, [activeCall?.state, activeCall?.startedAt, isClosing]);
 
   if (!activeCall) return null;
 
@@ -55,8 +57,26 @@ export function ActiveCallScreen() {
   };
   const floor = floorConfig[activeCall.floorState];
 
+  const handleEndCall = () => {
+    if (isClosing) return;
+    setIsClosing(true);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    Animated.sequence([
+      Animated.delay(500),
+      Animated.timing(blinkAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+      Animated.timing(blinkAnim, { toValue: 1, duration: 150, useNativeDriver: true }),
+      Animated.timing(blinkAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+      Animated.timing(blinkAnim, { toValue: 1, duration: 150, useNativeDriver: true }),
+      Animated.timing(blinkAnim, { toValue: 0, duration: 250, useNativeDriver: true }),
+    ]).start(() => {
+      endCall();
+    });
+  };
+
   // ── State label ────────────────────────────────────────────────────────────
   const stateLabel =
+    isClosing ? 'Closed' :
     activeCall.state === 'connecting' ? tr.callConnecting :
     activeCall.state === 'ending'     ? tr.callEnding     :
     tr.callActive;
@@ -67,7 +87,7 @@ export function ActiveCallScreen() {
     activeCall.commencementMode === 'auto' ? tr.commencementAuto : tr.commencementManual;
 
   return (
-    <View style={s.screen}>
+    <Animated.View style={[s.screen, { opacity: blinkAnim }]}>
       {/* ── Call info card ─────────────────────────────────────────────────── */}
       <View style={s.callCard}>
         {/* Commencement badge */}
@@ -84,15 +104,15 @@ export function ActiveCallScreen() {
             <Text style={[s.pillText, { color: c.textSecondary }]}>{typeLabel}</Text>
           </View>
           <Text style={s.stateText}>{stateLabel}</Text>
-          {activeCall.state === 'active' && (
-            <Text style={s.timerText}>{tr.callDuration(elapsed)}</Text>
+          {(activeCall.state === 'active' || isClosing) && (
+            <Text style={s.timerText}>{isClosing ? 'Closed' : tr.callDuration(elapsed)}</Text>
           )}
         </View>
       </View>
 
       {/* ── Manual join banner ─────────────────────────────────────────────── */}
       {activeCall.needsManualJoin && (
-        <TouchableOpacity style={s.joinButton} onPress={joinCall} activeOpacity={0.8}>
+        <TouchableOpacity style={s.joinButton} onPress={isClosing ? undefined : joinCall} disabled={isClosing} activeOpacity={0.8}>
           <Text style={s.joinButtonText}>📞  {tr.btnJoinCall}</Text>
         </TouchableOpacity>
       )}
@@ -101,10 +121,10 @@ export function ActiveCallScreen() {
       {!activeCall.needsManualJoin && (
         <View style={s.floorButtonWrap}>
           <TouchableOpacity
-            style={[s.floorButton, { backgroundColor: floor.bg }]}
-            onPress={floor.onPress}
-            disabled={!floor.onPress}
-            activeOpacity={floor.onPress ? 0.75 : 1}>
+            style={[s.floorButton, { backgroundColor: floor.bg }, isClosing && { opacity: 0.5 }]}
+            onPress={isClosing ? undefined : floor.onPress}
+            disabled={!floor.onPress || isClosing}
+            activeOpacity={floor.onPress && !isClosing ? 0.75 : 1}>
             <Text style={s.floorButtonIcon}>{floor.icon}</Text>
             <Text style={s.floorButtonLabel}>{floor.label}</Text>
           </TouchableOpacity>
@@ -115,17 +135,21 @@ export function ActiveCallScreen() {
       <MockActiveCallControls
         onFloorBusy={simulateFloorBusy}
         onFloorIdle={simulateFloorIdle}
-        onRemoteHangup={endCall}
+        onRemoteHangup={handleEndCall}
         tr={tr}
         c={c}
       />
 
       {/* ── End call button ─────────────────────────────────────────────────── */}
       <View style={{ flex: 1 }} />
-      <TouchableOpacity style={s.endCallButton} onPress={endCall} activeOpacity={0.8}>
-        <Text style={s.endCallText}>📵  {tr.btnEndCall}</Text>
+      <TouchableOpacity 
+        style={[s.endCallButton, isClosing && { opacity: 0.5 }]} 
+        onPress={handleEndCall} 
+        disabled={isClosing}
+        activeOpacity={0.8}>
+        <Text style={s.endCallText}>📵  {isClosing ? 'Closed' : tr.btnEndCall}</Text>
       </TouchableOpacity>
-    </View>
+    </Animated.View>
   );
 }
 

@@ -95,8 +95,9 @@ export function makeTalkStyles(c: ThemePalette) {
       marginBottom: 14,
     },
     selectedLabel: {
-      color: c.textSecondary,
-      fontSize: 13,
+      color: c.textPrimary,
+      fontSize: 16,
+      fontWeight: '800',
     },
     menuToggleButton: {
       width: 40,
@@ -113,6 +114,20 @@ export function makeTalkStyles(c: ThemePalette) {
       fontSize: 18,
       fontWeight: '700',
       lineHeight: 20,
+    },
+    mockToggleMini: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    mockToggleMiniText: {
+      fontSize: 14,
+      color: c.textMuted,
     },
     menuOverlayContainer: {
       position: 'absolute',
@@ -157,78 +172,78 @@ export function makeTalkStyles(c: ThemePalette) {
       fontWeight: '600',
     },
     pushButtonWrapper: {
-  width: 270,
-  height: 270,
-  alignSelf: 'center',
-  justifyContent: 'center',
-  alignItems: 'center',
-  marginBottom: 14,
-},
-// Dış yükleme ve durum halkası
-pushButtonRing: {
-  position: 'absolute',
-  width: 266,
-  height: 266,
-  borderRadius: 133,
-  borderWidth: 2,
-  borderColor: c.accent,
-  opacity: 0.8,
-},
-pushButton: {
-  width: 230,
-  height: 230,
-  alignSelf: 'center',
-  borderRadius: 115,
-  justifyContent: 'center',
-  alignItems: 'center',
-  borderWidth: 1,
-  // Sabit ve temiz bir border, derinlik hissi için şık gölgeler
-  borderColor: 'rgba(255, 255, 255, 0.1)', 
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 12 },
-  shadowOpacity: 0.24,
-  shadowRadius: 16,
-  elevation: 10,
-},
-pushButtonDisabled: {
-  opacity: 0.4,
-},
-buttonSpeakerName: {
-  color: 'rgba(255, 255, 255, 0.6)',
-  fontSize: 12,
-  fontWeight: '600',
-  textTransform: 'uppercase',
-  letterSpacing: 1,
-  marginBottom: 8,
-},
-voiceMeterContainer: {
-  flexDirection: 'row',
-  alignItems: 'center', // Barları ortalayarak daha modern bir görünüm elde edebiliriz
-  justifyContent: 'center',
-  gap: 4,
-  height: 40,
-  marginBottom: 12,
-  paddingHorizontal: 30,
-},
-voiceBar: {
-  flex: 1,
-  borderRadius: 3,
-  minHeight: 4,
-},
-pushButtonStatus: {
-  color: '#ffffff',
-  fontSize: 22,
-  fontWeight: '700',
-  letterSpacing: 0.5,
-  textAlign: 'center',
-},
+      width: 270,
+      height: 270,
+      alignSelf: 'center',
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 14,
+    },
+    // Dış yükleme ve durum halkası
+    pushButtonRing: {
+      position: 'absolute',
+      width: 266,
+      height: 266,
+      borderRadius: 133,
+      borderWidth: 2,
+      borderColor: c.accent,
+      opacity: 0.8,
+    },
+    pushButton: {
+      width: 230,
+      height: 230,
+      alignSelf: 'center',
+      borderRadius: 115,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      // Sabit ve temiz bir border, derinlik hissi için şık gölgeler
+      borderColor: 'rgba(255, 255, 255, 0.1)',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: 0.24,
+      shadowRadius: 16,
+      elevation: 10,
+    },
+    pushButtonDisabled: {
+      opacity: 0.4,
+    },
+    buttonSpeakerName: {
+      color: 'rgba(255, 255, 255, 0.6)',
+      fontSize: 12,
+      fontWeight: '600',
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+      marginBottom: 8,
+    },
+    voiceMeterContainer: {
+      flexDirection: 'row',
+      alignItems: 'center', // Barları ortalayarak daha modern bir görünüm elde edebiliriz
+      justifyContent: 'center',
+      gap: 4,
+      height: 40,
+      marginBottom: 12,
+      paddingHorizontal: 30,
+    },
+    voiceBar: {
+      flex: 1,
+      borderRadius: 3,
+      minHeight: 4,
+    },
+    pushButtonStatus: {
+      color: '#ffffff',
+      fontSize: 22,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      textAlign: 'center',
+    },
     speakerName: {
       color: c.textOnAccent,
       fontSize: 14,
       fontWeight: '700',
       marginBottom: 12,
     },
-    
+
     pushButtonText: {
       color: c.textOnAccent,
       fontSize: 20,
@@ -236,7 +251,7 @@ pushButtonStatus: {
       textAlign: 'center',
       marginBottom: 6,
     },
-  
+
     voiceLevelRow: {
       flexDirection: 'row',
       alignItems: 'flex-end',
@@ -271,57 +286,79 @@ pushButtonStatus: {
       gap: 10,
       marginBottom: 16,
     },
+    modeRowHidden: {
+      opacity: 0,
+      pointerEvents: 'none',
+    },
     modePill: {
       flex: 1,
       backgroundColor: c.bg,
       borderRadius: 12,
-      borderWidth: 1,
+      borderWidth: 1.5,
       borderColor: c.border,
       justifyContent: 'center',
       alignItems: 'center',
       paddingVertical: 10,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 3,
+      elevation: 2,
     },
     modePillActive: {
       backgroundColor: c.accent,
       borderColor: c.accent,
+      shadowColor: c.accent,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.35,
+      shadowRadius: 8,
+      elevation: 5,
     },
     modePillDisabled: {
-      opacity: 0.35,
+      opacity: 0.4,
     },
     modeText: {
-      color: c.textMuted,
+      color: c.textSecondary,
       fontSize: 13,
-      fontWeight: '700',
+      fontWeight: '800',
     },
     modeTextActive: {
       color: c.textOnAccent,
-    },
-    modeTextDisabled: {
-      color: c.textMuted,
+      fontSize: 14,
     },
     actionRow: {
       flexDirection: 'row',
       gap: 12,
-      marginBottom: 16,
+      marginBottom: -12
     },
     actionButton: {
       flex: 1,
-      paddingVertical: 14,
-      borderRadius: 12,
+      flexDirection: 'row',
+      paddingVertical: 8,
+      borderRadius: 14,
       justifyContent: 'center',
       alignItems: 'center',
+      gap: 6,
     },
-
     startButton: {
       backgroundColor: c.primary,
     },
     endButton: {
       backgroundColor: c.error,
     },
+    actionButtonDisabled: {
+      opacity: 0.35,
+    },
     actionButtonText: {
       color: c.textOnAccent,
       fontWeight: '700',
       fontSize: 14,
+    },
+    actionButtonTextDisabled: {
+      opacity: 0.5,
+    },
+    actionButtonIcon: {
+      fontSize: 18,
     },
     mockOverlay: {
       position: 'absolute',
