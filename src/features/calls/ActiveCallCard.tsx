@@ -1,7 +1,10 @@
 /**
- * features/calls/ActiveCallScreen.tsx
+ * features/calls/ActiveCallCard.tsx
  *
- * Displayed when there is an active (or connecting) call.
+ * Compact in-tab view of an active (or connecting) call, rendered inside the
+ * Calls tab by CallsTab. Distinct from ActiveCallFullScreen, which shows the
+ * same call full-screen via the 'callactive' route.
+ *
  * Floor button color/behavior:
  *   idle    → blue   (c.primary)  → tap to request floor
  *   granted → green  (c.success)  → tap to release floor
@@ -13,13 +16,13 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Text, TouchableOpacity, View } from 'react-native';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import type { FloorState } from './types';
-import { makeCallStyles } from './styles';
+import { makeCallStyles, makeMockActiveCallControlsStyles } from './styles';
 
-export function ActiveCallScreen() {
+export function ActiveCallCard() {
   const { c, tr } = useAppContext();
   const { activeCall, endCall, setFloorState, joinCall,
           simulateFloorBusy, simulateFloorIdle } = useCallContext();
@@ -166,43 +169,7 @@ interface MockActiveCallControlsProps {
 function MockActiveCallControls({ onFloorBusy, onFloorIdle, onRemoteHangup, tr, c }: MockActiveCallControlsProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const ms = useMemo(() => StyleSheet.create({
-    card: {
-      marginHorizontal: 16,
-      marginTop: 20,
-      borderRadius: 10,
-      borderWidth: 1.5,
-      borderColor: c.warn + '88',
-      overflow: 'hidden',
-    },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      backgroundColor: c.warn + '18',
-    },
-    headerTitle: {
-      flex: 1,
-      fontSize: 12,
-      fontWeight: '700',
-      color: c.warn,
-    },
-    chevron: { fontSize: 12, color: c.textSecondary },
-    body: {
-      padding: 12,
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-    },
-    btn: {
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 8,
-      alignItems: 'center',
-    },
-    btnText: { fontSize: 12, fontWeight: '700', color: '#fff' },
-  }), [c]);
+  const ms = useMemo(() => makeMockActiveCallControlsStyles(c), [c]);
 
   return (
     <View style={ms.card}>

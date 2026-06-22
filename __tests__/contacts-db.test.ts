@@ -9,7 +9,7 @@
  * ┌─ WHAT IS TESTED ─────────────────────────────────────────────────────────┐
  * │                                                                          │
  * │  1. seedContacts()                                                       │
- * │     — Inserts exactly 8 contacts when table is empty.                   │
+ * │     — Inserts the full seed set (SEED_COUNT) when table is empty.       │
  * │     — Is idempotent: calling twice does not duplicate rows.              │
  * │                                                                          │
  * │  2. getAllContacts()                                                      │
@@ -42,38 +42,57 @@
 // 1.  seedContacts
 // =============================================================================
 
+// Number of contacts seedContacts() inserts into an empty table.
+// Keep in sync with SEED_CONTACTS in src/core/db.ts.
+const SEED_COUNT = 14;
+
 describe('seedContacts', () => {
-  it('inserts exactly 8 rows when the contacts table is empty', async () => {
+  it('inserts the full set of seed rows when the contacts table is empty', async () => {
     await jest.isolateModulesAsync(async () => {
       const { initDb, seedContacts, getAllContacts } = require('../src/core/db');
       await initDb();
       await seedContacts();
       const rows = await getAllContacts();
-      expect(rows).toHaveLength(8);
+      expect(rows).toHaveLength(SEED_COUNT);
     });
   });
 
-  it('is idempotent — calling twice still yields exactly 8 rows', async () => {
+  it('is idempotent — calling twice still yields the same seed rows', async () => {
     await jest.isolateModulesAsync(async () => {
       const { initDb, seedContacts, getAllContacts } = require('../src/core/db');
       await initDb();
       await seedContacts();
       await seedContacts(); // second call should be a no-op
       const rows = await getAllContacts();
-      expect(rows).toHaveLength(8);
+      expect(rows).toHaveLength(SEED_COUNT);
     });
   });
 
-  it('returns early without inserting when contacts already exist', async () => {
+  it('does not duplicate a pre-existing contact but still adds the seed set', async () => {
     await jest.isolateModulesAsync(async () => {
       const { initDb, insertContact, seedContacts, getAllContacts } = require('../src/core/db');
       await initDb();
-      // Pre-populate with 1 manual contact so seedContacts bails early
+      // Pre-populate with 1 manual contact whose name is not in the seed set.
       await insertContact('Test User', 'sip:test@example.com', '');
       await seedContacts();
-      // Still exactly 1 row — the 8 seed contacts were NOT inserted
+      // seedContacts adds any seed name that isn't already present, so the
+      // manual contact remains plus the full seed set = 1 + SEED_COUNT.
       const rows = await getAllContacts();
-      expect(rows).toHaveLength(1);
+      expect(rows).toHaveLength(1 + SEED_COUNT);
+    });
+  });
+
+  it('does not re-insert a seed contact that already exists by name', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, insertContact, seedContacts, getAllContacts } = require('../src/core/db');
+      await initDb();
+      // Pre-insert a contact sharing a seed name → seedContacts skips that name.
+      await insertContact('Alice Johnson', 'sip:other@example.com', '');
+      await seedContacts();
+      const rows = await getAllContacts();
+      // The duplicate-named seed entry is skipped, so total = SEED_COUNT.
+      expect(rows).toHaveLength(SEED_COUNT);
+      expect(rows.filter((r: any) => r.name === 'Alice Johnson')).toHaveLength(1);
     });
   });
 
@@ -265,8 +284,9 @@ describe('recordLogin', () => {
 //   PRIMARY KEY (mcid, uri)  |  INDEX idx_documents_mcid ON documents(mcid)
 // =============================================================================
 
-const DOC_A = { uri: 'http://bms.example.com/doc/a', timestamp: '2024-01-01T00:00:00Z', etag: '"abc"', org: 'org-1', content: '<xml/>', size: '24' };
-const DOC_B = { uri: 'http://bms.example.com/doc/b', timestamp: '2024-01-02T00:00:00Z', etag: '"def"', org: 'org-2', content: '<xml2/>', size: '28' };
+// McSdkDocument shape: { uri, etag, content, type, fetchedAt }.
+const DOC_A = { uri: 'http://bms.example.com/doc/a', etag: '"abc"', content: '<xml/>',  type: 0, fetchedAt: 1704067200000 };
+const DOC_B = { uri: 'http://bms.example.com/doc/b', etag: '"def"', content: '<xml2/>', type: 1, fetchedAt: 1704153600000 };
 
 describe('saveDocuments / getDocumentsByMcId / clearDocumentsByMcId', () => {
   it('getDocumentsByMcId returns [] when no docs exist for mcid', async () => {
@@ -325,18 +345,17 @@ describe('saveDocuments / getDocumentsByMcId / clearDocumentsByMcId', () => {
     });
   });
 
-  it('returned docs contain all 6 fields', async () => {
+  it('returned docs contain all McSdkDocument fields', async () => {
     await jest.isolateModulesAsync(async () => {
       const { initDb, saveDocuments, getDocumentsByMcId } = require('../src/core/db');
       await initDb();
       await saveDocuments('sip:alice@mc.example.com', [DOC_A]);
       const [doc] = await getDocumentsByMcId('sip:alice@mc.example.com');
       expect(doc.uri).toBe(DOC_A.uri);
-      expect(doc.timestamp).toBe(DOC_A.timestamp);
       expect(doc.etag).toBe(DOC_A.etag);
-      expect(doc.org).toBe(DOC_A.org);
       expect(doc.content).toBe(DOC_A.content);
-      expect(doc.size).toBe(DOC_A.size);
+      expect(doc.type).toBe(DOC_A.type);
+      expect(doc.fetchedAt).toBe(DOC_A.fetchedAt);
     });
   });
 

@@ -98,12 +98,16 @@ jest.mock('../src/core/db', () => ({
   getUserByUsername:    jest.fn().mockResolvedValue(null),
   recordLogin:          jest.fn().mockResolvedValue(undefined),
   getDocumentsByMcId:   jest.fn().mockResolvedValue([]),
+  // getAllDocuments feeds AppContext's cachedDocsMap (pre-loaded at startup).
+  // handleInit now reads cached docs from that map rather than via a per-mcId
+  // DB call, so setDocuments tests seed this instead of getDocumentsByMcId.
+  getAllDocuments:      jest.fn().mockResolvedValue(new Map()),
   saveDocuments:        jest.fn().mockResolvedValue(undefined),
   clearDocumentsByMcId: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { getDocumentsByMcId, getUserByUsername } from '../src/core/db';
-const MockGetDocsByMcId = getDocumentsByMcId as jest.MockedFunction<typeof getDocumentsByMcId>;
+import { getAllDocuments, getUserByUsername } from '../src/core/db';
+const MockGetAllDocuments = getAllDocuments as jest.MockedFunction<typeof getAllDocuments>;
 const MockGetUserByUsername = getUserByUsername as jest.MockedFunction<typeof getUserByUsername>;
 
 /** Typed reference to the mocked McSdk constructor. */
@@ -206,7 +210,7 @@ describe('Initial render', () => {
 
   it('shows NOT CREATED status badge', () => {
     render(<App />);
-    expect(screen.getByText('NOT CREATED')).toBeTruthy();
+    expect(screen.getAllByText('NOT CREATED')[0]).toBeTruthy();
   });
 
   it('shows Home and Metrics tabs', () => {
@@ -252,7 +256,7 @@ describe('handleCreate', () => {
 
   it('updates status badge to CREATED', async () => {
     await renderAndCreate();
-    expect(screen.getByText('CREATED')).toBeTruthy();
+    expect(screen.getAllByText('CREATED')[0]).toBeTruthy();
   });
 
   it('logs the success message', async () => {
@@ -304,7 +308,7 @@ describe('handleSetParams', () => {
     await act(async () => {
       fireEvent.press(screen.getByText('② Set Parameters'));
     });
-    expect(screen.getByText('PARAMS SET')).toBeTruthy();
+    expect(screen.getAllByText('PARAMS SET')[0]).toBeTruthy();
   });
 
   it('calls sdk.setParams exactly once', async () => {
@@ -427,7 +431,7 @@ describe('handleInit', () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));
     });
     await waitFor(() => {
-      expect(screen.getByText('INITIALIZED')).toBeTruthy();
+      expect(screen.getAllByText('INITIALIZED')[0]).toBeTruthy();
     });
   });
 
@@ -450,7 +454,7 @@ describe('handleInit', () => {
     await waitFor(() => {
       expect(screen.getByText(/init\(\) returned: false/)).toBeTruthy();
     });
-    expect(screen.queryByText('INITIALIZED')).toBeNull();
+    expect(screen.queryAllByText('INITIALIZED')).toHaveLength(0);
   });
 
   it('logs the error message when sdk.init throws', async () => {
@@ -462,7 +466,7 @@ describe('handleInit', () => {
     await waitFor(() => {
       expect(screen.getByText(/init\(\) threw: pjsip assertion failed/)).toBeTruthy();
     });
-    expect(screen.queryByText('INITIALIZED')).toBeNull();
+    expect(screen.queryAllByText('INITIALIZED')).toHaveLength(0);
   });
 
   it('proceeds even when setParams was skipped (warns but calls init)', async () => {
@@ -480,7 +484,7 @@ describe('handleInit', () => {
       expect(sdk.init).toHaveBeenCalledTimes(1);
     });
     await waitFor(() => {
-      expect(screen.getByText('INITIALIZED')).toBeTruthy();
+      expect(screen.getAllByText('INITIALIZED')[0]).toBeTruthy();
     });
   });
 });
@@ -505,7 +509,7 @@ describe('handleDestroy', () => {
   it('resets status badge to NOT CREATED', async () => {
     await renderAndCreate();
     await act(async () => { fireEvent.press(screen.getByText('Destroy')); });
-    expect(screen.getByText('NOT CREATED')).toBeTruthy();
+    expect(screen.getAllByText('NOT CREATED')[0]).toBeTruthy();
   });
 
   it('logs the destroy success message', async () => {
@@ -520,10 +524,10 @@ describe('handleDestroy', () => {
     await act(async () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));
     });
-    await waitFor(() => expect(screen.getByText('INITIALIZED')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('INITIALIZED')[0]).toBeTruthy());
 
     await act(async () => { fireEvent.press(screen.getByText('Destroy')); });
-    expect(screen.getByText('NOT CREATED')).toBeTruthy();
+    expect(screen.getAllByText('NOT CREATED')[0]).toBeTruthy();
   });
 
   it('allows re-creating the SDK after destroy', async () => {
@@ -533,7 +537,7 @@ describe('handleDestroy', () => {
 
     await act(async () => { fireEvent.press(screen.getByText('① Create')); });
     expect(MockMcSdk).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('CREATED')).toBeTruthy();
+    expect(screen.getAllByText('CREATED')[0]).toBeTruthy();
   });
 
   it('logs an error when sdk.destroy throws', async () => {
@@ -606,7 +610,7 @@ describe('Tab navigation', () => {
   it('status badge is NOT shown on the Metrics tab', () => {
     render(<App />);
     fireEvent.press(screen.getByText('Metrics'));
-    expect(screen.queryByText('NOT CREATED')).toBeNull();
+    expect(screen.queryAllByText('NOT CREATED')).toHaveLength(0);
   });
 
   it('Home tab content is hidden while Metrics tab is active', () => {
@@ -788,7 +792,7 @@ describe('Registration progress bar', () => {
     await act(async () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));
     });
-    await waitFor(() => expect(screen.getByText('INITIALIZED')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('INITIALIZED')[0]).toBeTruthy());
     expect(sdk.register).toHaveBeenCalledTimes(1);
   });
 
@@ -904,23 +908,31 @@ describe('setDocuments — SdkContext integration', () => {
    *   setDocuments must PRECEDE register so the engine processes docs first.
    */
 
+  const TEST_MCID = 'sip:alice@mc.example.com';
+
+  // handleInit reads cached docs from AppContext's cachedDocsMap, which is
+  // populated once at startup from getAllDocuments(). Seed that map per-test.
+  const seedCachedDocs = (docs: any[]) => {
+    MockGetAllDocuments.mockResolvedValue(new Map([[TEST_MCID, docs]]));
+  };
+
   beforeEach(() => {
     // Provide credentials so handleCreate sets currentMcIdRef.current,
-    // enabling handleInit to call getDocumentsByMcId(mcId).
-    AuthSettings.setLastUsername('sip:alice@mc.example.com');
+    // enabling handleInit to look up cached docs for this mcId.
+    AuthSettings.setLastUsername(TEST_MCID);
     MockGetUserByUsername.mockResolvedValue({
       id: 1,
-      username: 'sip:alice@mc.example.com',
+      username: TEST_MCID,
       password: 'test-pass',
       updated_at: 0,
       last_login_at: 0,
     } as any);
-    // Reset per-test doc cache to empty (default = no docs)
-    MockGetDocsByMcId.mockResolvedValue([]);
+    // Reset doc cache to empty (default = no docs)
+    MockGetAllDocuments.mockResolvedValue(new Map());
   });
 
   it('does NOT call setDocuments when document cache is empty', async () => {
-    MockGetDocsByMcId.mockResolvedValueOnce([]);
+    seedCachedDocs([]);
     const sdk = await renderCreateAndSetParams();
     await act(async () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));
@@ -931,7 +943,7 @@ describe('setDocuments — SdkContext integration', () => {
 
   it('calls setDocuments with cached docs array when docs exist', async () => {
     const docs = [{ uri: 'http://bms.example.com/doc/a', timestamp: '2024-01-01T00:00:00Z', etag: '"abc"', org: 'org-1', content: '<xml/>', size: '24' }];
-    MockGetDocsByMcId.mockResolvedValueOnce(docs);
+    seedCachedDocs(docs);
     const sdk = await renderCreateAndSetParams();
     await act(async () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));
@@ -942,7 +954,7 @@ describe('setDocuments — SdkContext integration', () => {
 
   it('calls setDocuments BEFORE register (FIFO order requirement)', async () => {
     const docs = [{ uri: 'http://bms.example.com/doc/a', timestamp: '', etag: '', org: '', content: '', size: '' }];
-    MockGetDocsByMcId.mockResolvedValueOnce(docs);
+    seedCachedDocs(docs);
     const callOrder: string[] = [];
     const sdk = await renderCreateAndSetParams();
     sdk.setDocuments.mockImplementation(() => { callOrder.push('setDocuments'); });
@@ -957,7 +969,7 @@ describe('setDocuments — SdkContext integration', () => {
 
   it('setDocuments receives a McSdkDocument array (not individual fields)', async () => {
     const docs = [{ uri: 'uri-1', timestamp: 't', etag: 'e', org: 'o', content: 'c', size: 's' }];
-    MockGetDocsByMcId.mockResolvedValueOnce(docs);
+    seedCachedDocs(docs);
     const sdk = await renderCreateAndSetParams();
     await act(async () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));
@@ -970,7 +982,7 @@ describe('setDocuments — SdkContext integration', () => {
 
   it('still calls register() even when setDocuments throws (error recovery)', async () => {
     const docs = [{ uri: 'x', timestamp: '', etag: '', org: '', content: '', size: '' }];
-    MockGetDocsByMcId.mockResolvedValueOnce(docs);
+    seedCachedDocs(docs);
     const sdk = await renderCreateAndSetParams();
     sdk.setDocuments.mockImplementation(() => { throw new Error('JNI error'); });
 
@@ -982,7 +994,7 @@ describe('setDocuments — SdkContext integration', () => {
 
   it('setDocuments is called exactly once per init() call', async () => {
     const docs = [{ uri: 'u', timestamp: '', etag: '', org: '', content: '', size: '' }];
-    MockGetDocsByMcId.mockResolvedValueOnce(docs);
+    seedCachedDocs(docs);
     const sdk = await renderCreateAndSetParams();
     await act(async () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));

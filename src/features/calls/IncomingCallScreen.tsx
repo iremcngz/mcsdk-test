@@ -9,15 +9,16 @@
  */
 
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Text, TouchableOpacity, View } from 'react-native';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
-import { makeCallStyles } from './styles';
+import { makeCallStyles, makeIncomingCallScreenStyles } from './styles';
 
 export function IncomingCallScreen() {
   const { c, tr } = useAppContext();
   const { activeCall, acceptCall, rejectCall } = useCallContext();
   const s = useMemo(() => makeCallStyles(c), [c]);
+  const ls = useMemo(() => makeIncomingCallScreenStyles(c), [c]);
 
   // ── Pulsing ring animation ─────────────────────────────────────────────────
   const pulse = useRef(new Animated.Value(1)).current;
@@ -35,74 +36,6 @@ export function IncomingCallScreen() {
   if (!activeCall) return null;
 
   const typeLabel = activeCall.callType === 'half_duplex' ? tr.callTypeHD : tr.callTypeFD;
-
-  const ls = StyleSheet.create({
-    screen: {
-      flex: 1,
-      backgroundColor: c.background,
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 16,
-      paddingHorizontal: 32,
-    },
-    callLabel: {
-      fontSize: 14,
-      color: c.textSecondary,
-      letterSpacing: 1,
-      textTransform: 'uppercase',
-    },
-    ringWrap: {
-      width: 120,
-      height: 120,
-      borderRadius: 60,
-      backgroundColor: c.primary + '22',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    ringIcon: {
-      fontSize: 52,
-    },
-    name: {
-      fontSize: 26,
-      fontWeight: '700',
-      color: c.text,
-      textAlign: 'center',
-    },
-    uri: {
-      fontSize: 13,
-      color: c.textSecondary,
-      textAlign: 'center',
-    },
-    actions: {
-      flexDirection: 'row',
-      gap: 40,
-      marginTop: 24,
-    },
-    actionBtn: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 3 },
-      shadowOpacity: 0.2,
-      shadowRadius: 6,
-      elevation: 5,
-    },
-    actionIcon: {
-      fontSize: 28,
-    },
-    actionLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      marginTop: 6,
-      color: c.textSecondary,
-    },
-    actionWrap: {
-      alignItems: 'center',
-    },
-  });
 
   return (
     <View style={ls.screen}>

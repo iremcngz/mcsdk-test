@@ -10,6 +10,7 @@ import { useAppContext } from '../contexts/AppContext';
 import { useSdkContext } from '../contexts/SdkContext';
 import { useNavigation } from '../contexts/NavigationContext';
 import { useTalkContext } from '../contexts/TalkContext';
+import { useCallContext } from '../contexts/CallContext';
 import { makeCommonStyles } from '../shared/commonStyles';
 import { AuthSettings } from '../core/settings';
 import type { Screen } from '../shared/types';
@@ -21,8 +22,8 @@ import { SettingsScreen } from '../features/settings/SettingsScreen';
 import { ContactsScreen } from '../features/contacts/ContactsScreen';
 import { CallsTab }       from '../features/calls/CallsTab';
 import { TalkScreen }     from '../features/talk/TalkScreen';
-import { InCallScreen }   from '../features/calls/InCallScreen';
-import { CallActiveScreen } from '../features/calls/CallActiveScreen';
+import { OutgoingCallScreen } from '../features/calls/OutgoingCallScreen';
+import { ActiveCallFullScreen } from '../features/calls/ActiveCallFullScreen';
 import { IncomingCallOverlay } from '../features/calls/IncomingCallOverlay';
 
 const TABS: { id: Screen; icon: string }[] = [
@@ -39,10 +40,13 @@ export function TabNavigator() {
   const { c, tr, theme } = useAppContext();
   const { ipInfo, created, initialized, paramsSet } = useSdkContext();
   const { screen, setScreen } = useNavigation();
-  const { activeGroups, setPendingGroup } = useTalkContext();
+  const { activeGroups, setPendingGroup, isBroadcasting } = useTalkContext();
+  const { activeCall } = useCallContext();
   const insets = useSafeAreaInsets();
   const s = useMemo(() => makeCommonStyles(c), [c]);
   const [showActiveList, setShowActiveList] = useState(false);
+  const hasActiveCall = activeCall !== null && activeCall.state === 'active';
+  const totalActive = activeGroups.length + (hasActiveCall ? 1 : 0);
 
   const tabLabels: Record<Screen, string> = {
     home:     tr.tabHome,
@@ -240,41 +244,43 @@ export function TabNavigator() {
     <View style={[s.root, { paddingTop: insets.top }]}>
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
 
-      {/* ── Yeni Estetik Üst Başlık (Header) ────────────────────────────── */}
-      <View style={navStyles.customHeader}>
-        <View style={navStyles.profileSection}>
-          <View style={navStyles.avatarWrapper}>
-            <Text style={navStyles.avatarText}>{userInitials}</Text>
+      {/* ── Yeni Estetik Üst Başlık (Header) — transmit ekranında gizlenir ── */}
+      {!isBroadcasting && (
+        <View style={navStyles.customHeader}>
+          <View style={navStyles.profileSection}>
+            <View style={navStyles.avatarWrapper}>
+              <Text style={navStyles.avatarText}>{userInitials}</Text>
+            </View>
+            <View style={navStyles.identityBlock}>
+              <Text style={navStyles.metaTitle}>MCSDK Test</Text>
+              <Text style={navStyles.usernameText} numberOfLines={1}>
+                {username}
+              </Text>
+            </View>
           </View>
-          <View style={navStyles.identityBlock}>
-            <Text style={navStyles.metaTitle}>MCSDK Test</Text>
-            <Text style={navStyles.usernameText} numberOfLines={1}>
-              {username}
-            </Text>
-          </View>
-        </View>
 
-        <View style={navStyles.rightSection}>
-          {ipInfo.ip != null && (
-            <View style={navStyles.ipBadge}>
-              <Text style={navStyles.ipText}>{ipInfo.ip}</Text>
-            </View>
-          )}
-          {screen === 'home' && (
-            <View style={[navStyles.statusBadge, { backgroundColor: statusColor }]}>
-              <Text style={navStyles.statusBadgeText}>{statusText}</Text>
-            </View>
-          )}
-          {activeGroups.length > 0 && (
-            <TouchableOpacity
-              style={[navStyles.statusBadge, { backgroundColor: c.success }]}
-              onPress={() => setShowActiveList(p => !p)}
-              activeOpacity={0.8}>
-              <Text style={navStyles.statusBadgeText}>📞 {activeGroups.length}</Text>
-            </TouchableOpacity>
-          )}
+          <View style={navStyles.rightSection}>
+            {ipInfo.ip != null && (
+              <View style={navStyles.ipBadge}>
+                <Text style={navStyles.ipText}>{ipInfo.ip}</Text>
+              </View>
+            )}
+            {screen === 'home' && (
+              <View style={[navStyles.statusBadge, { backgroundColor: statusColor }]}>
+                <Text style={navStyles.statusBadgeText}>{statusText}</Text>
+              </View>
+            )}
+            {totalActive > 0 && (
+              <TouchableOpacity
+                style={[navStyles.statusBadge, { backgroundColor: c.success }]}
+                onPress={() => setShowActiveList(p => !p)}
+                activeOpacity={0.8}>
+                <Text style={navStyles.statusBadgeText}>📞 {totalActive}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
-      </View>
+      )}
 
       {/* ── Active call list dropdown ───────────────────────────────── */}
       {showActiveList && (
@@ -284,25 +290,39 @@ export function TabNavigator() {
             activeOpacity={1}
             onPress={() => setShowActiveList(false)} />
           <View style={navStyles.activeListCard}>
-            {activeGroups.length === 0 ? (
+            {totalActive === 0 ? (
               <View style={navStyles.activeListEmpty}>
                 <Text style={navStyles.activeListEmptyText}>No active calls</Text>
               </View>
             ) : (
-              activeGroups.map(g => (
-                <TouchableOpacity
-                  key={g.name}
-                  style={navStyles.activeListItem}
-                  onPress={() => {
-                    setShowActiveList(false);
-                    setPendingGroup(g.name);
-                    setScreen('talk');
-                  }}
-                  activeOpacity={0.7}>
-                  <View style={navStyles.activeListItemDot} />
-                  <Text style={navStyles.activeListItemText}>{g.name}</Text>
-                </TouchableOpacity>
-              ))
+              <>
+                {activeGroups.map(g => (
+                  <TouchableOpacity
+                    key={g.name}
+                    style={navStyles.activeListItem}
+                    onPress={() => {
+                      setShowActiveList(false);
+                      setPendingGroup(g.name);
+                      setScreen('talk');
+                    }}
+                    activeOpacity={0.7}>
+                    <View style={navStyles.activeListItemDot} />
+                    <Text style={navStyles.activeListItemText}>{g.name}</Text>
+                  </TouchableOpacity>
+                ))}
+                {hasActiveCall && (
+                  <TouchableOpacity
+                    style={navStyles.activeListItem}
+                    onPress={() => {
+                      setShowActiveList(false);
+                      setScreen('callactive');
+                    }}
+                    activeOpacity={0.7}>
+                    <View style={navStyles.activeListItemDot} />
+                    <Text style={navStyles.activeListItemText}>{activeCall.contactName}</Text>
+                  </TouchableOpacity>
+                )}
+              </>
             )}
           </View>
         </View>
@@ -317,11 +337,11 @@ export function TabNavigator() {
         {screen === 'contacts' && <ContactsScreen />}
         {screen === 'calls'    && <CallsTab />}
         {screen === 'talk'     && <TalkScreen />}
-        {screen === 'incall'   && <InCallScreen />}
-        {screen === 'callactive' && <CallActiveScreen />}
+        {screen === 'incall'   && <OutgoingCallScreen />}
+        {screen === 'callactive' && <ActiveCallFullScreen />}
       </View>
 
-      {screen !== 'incall' && screen !== 'callactive' && (
+      {screen !== 'incall' && screen !== 'callactive' && !isBroadcasting && (
         <View style={navStyles.bottomBar}>
           {TABS.map(({ id, icon }) => {
             const active = screen === id;

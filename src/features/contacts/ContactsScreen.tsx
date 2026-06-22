@@ -4,91 +4,28 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import { useNavigation } from '../../contexts/NavigationContext';
-import type { ThemePalette } from '../../core/theme';
 import { initDb, getAllContacts, seedContacts, type Contact } from '../../core/db';
 import { makeContactsStyles } from './styles';
+import type {
+  ContactFilter,
+  GroupItem,
+  PresenceStatus,
+  CallStatus,
+  ContactCallType,
+  CallInfo,
+  UserInfo,
+} from './types';
+import {
+  mockPresence,
+  makePresenceColors,
+  mockCallStatus,
+  mockCallType,
+  mockLastCallDate,
+  mockLastOnline,
+  mockUserStatus,
+} from './mockData';
 
 const GROUPS = ['group1', 'group2', 'group3', 'group4', 'group5', 'group6', 'group7'];
-type ContactFilter = 'all' | 'people' | 'groups';
-
-interface GroupItem {
-  id: number;
-  name: string;
-  sip_uri: string;
-  notes: string;
-  created_at: number;
-  __isGroup: true;
-}
-
-// ── Presence ──────────────────────────────────────────────────────────────────
-
-type PresenceStatus = 'online' | 'busy' | 'away' | 'offline';
-
-function mockPresence(id: number): PresenceStatus {
-  const statuses: PresenceStatus[] = ['online', 'busy', 'away', 'offline'];
-  return statuses[id % statuses.length];
-}
-
-function makePresenceColors(c: ThemePalette): Record<PresenceStatus, string> {
-  return {
-    online:  c.success,
-    busy:    c.error,
-    away:    c.warn,
-    offline: c.presenceOffline,
-  };
-}
-
-// ── Callback ──────────────────────────────────────────────────────────────────
-
-type CallbackStatus = 'pending' | 'accepted' | 'rejected' | 'none';
-
-interface CallbackInfo {
-  status: CallbackStatus;
-  lastCallback: Date | null;
-}
-
-// ── Call Info / User Info ─────────────────────────────────────────────────────
-
-type CallStatus = 'idle' | 'active' | 'missed' | 'ended';
-type CallType = 'half_duplex' | 'full_duplex' | 'none';
-
-interface CallInfo {
-  callStatus: CallStatus;
-  callType: CallType;
-  lastCall: Date | null;
-}
-
-interface UserInfo {
-  userStatus: PresenceStatus;
-  lastOnline: Date | null;
-}
-
-function mockCallStatus(id: number): CallStatus {
-  const statuses: CallStatus[] = ['idle', 'active', 'missed', 'ended'];
-  return statuses[(id * 2) % statuses.length];
-}
-
-function mockCallType(id: number): CallType {
-  const types: CallType[] = ['half_duplex', 'full_duplex', 'none'];
-  return types[id % types.length];
-}
-
-function mockLastCallDate(id: number): Date {
-  const now = Date.now();
-  const offsets = [0, 3600000, 86400000, 172800000, 604800000];
-  return new Date(now - offsets[id % offsets.length]);
-}
-
-function mockLastOnline(id: number): Date {
-  const now = Date.now();
-  const offsets = [300000, 3600000, 43200000, 86400000, 172800000];
-  return new Date(now - offsets[id % offsets.length]);
-}
-
-function mockUserStatus(id: number): PresenceStatus {
-  const statuses: PresenceStatus[] = ['online', 'away', 'busy', 'offline'];
-  return statuses[(id * 3) % statuses.length];
-}
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
@@ -105,7 +42,6 @@ export function ContactsScreen() {
   const [filter,     setFilter]     = useState<ContactFilter>('all');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [presence,   setPresence]   = useState<Record<number, PresenceStatus>>({});
-  const [callbacks,  setCallbacks]  = useState<Record<number, CallbackInfo>>({});
   const [callInfo,   setCallInfo]   = useState<Record<number, CallInfo>>({});
   const [userInfo,   setUserInfo]   = useState<Record<number, UserInfo>>({});
 
@@ -144,7 +80,7 @@ export function ContactsScreen() {
       created_at: 0,
       __isGroup: true as const,
     })),
-  [], []);
+  []);
 
   const allItems = useMemo(() => {
     const people: (Contact | GroupItem)[] = filter === 'groups' ? [] : contacts;
@@ -165,13 +101,6 @@ export function ContactsScreen() {
 
   const handleSelect = useCallback((id: number) => {
     setSelectedId(prev => (prev === id ? null : id));
-  }, []);
-
-  const handlePlaceRequest = useCallback((id: number) => {
-    setCallbacks(prev => ({
-      ...prev,
-      [id]: { status: 'pending', lastCallback: new Date() },
-    }));
   }, []);
 
   const renderItem = useCallback(({ item }: { item: Contact | GroupItem }) => {
@@ -239,8 +168,7 @@ export function ContactsScreen() {
     }
 
     const pStatus    = presence[item.id] ?? 'offline';
-    const cb         = callbacks[item.id] ?? { status: 'none' as CallbackStatus, lastCallback: null };
-    const ci         = callInfo[item.id] ?? { callStatus: 'idle' as CallStatus, callType: 'none' as CallType, lastCall: null };
+    const ci         = callInfo[item.id] ?? { callStatus: 'idle' as CallStatus, callType: 'none' as ContactCallType, lastCall: null };
     const ui         = userInfo[item.id] ?? { userStatus: 'offline' as PresenceStatus, lastOnline: null };
 
     return (
@@ -305,10 +233,6 @@ export function ContactsScreen() {
                 <Text style={[cs.infoValue, ci.callStatus === 'active' ? cs.infoActive : ci.callStatus === 'missed' ? cs.infoMissed : undefined]}>{ci.callStatus}</Text>
               </View>
               <View style={cs.infoRow}>
-                <Text style={cs.infoLabel}>Call Type</Text>
-                <Text style={cs.infoValue}>{ci.callType === 'none' ? '—' : ci.callType}</Text>
-              </View>
-              <View style={cs.infoRow}>
                 <Text style={cs.infoLabel}>Last Call</Text>
                 <Text style={cs.infoValue}>{ci.lastCall ? ci.lastCall.toLocaleString() : '—'}</Text>
               </View>
@@ -325,37 +249,11 @@ export function ContactsScreen() {
                 <Text style={cs.infoValue}>{ui.lastOnline ? ui.lastOnline.toLocaleString() : '—'}</Text>
               </View>
             </View>
-
-            <View style={cs.callbackSection}>
-              <Text style={cs.callbackTitle}>Callback</Text>
-              <View style={cs.callbackInfoRow}>
-                <Text style={cs.callbackLabel}>Status</Text>
-                <Text style={[
-                  cs.callbackValue,
-                  cb.status === 'pending'  ? cs.cbPending  : undefined,
-                  cb.status === 'accepted' ? cs.cbAccepted : undefined,
-                  cb.status === 'rejected' ? cs.cbRejected : undefined,
-                ]}>
-                  {cb.status === 'none' ? '—' : cb.status}
-                </Text>
-              </View>
-              <View style={cs.callbackInfoRow}>
-                <Text style={cs.callbackLabel}>Last Callback</Text>
-                <Text style={cs.callbackValue}>
-                  {cb.lastCallback ? cb.lastCallback.toLocaleString() : '—'}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={cs.requestBtn}
-                onPress={() => handlePlaceRequest(item.id)}>
-                <Text style={cs.requestBtnText}>Place a Request</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         )}
       </View>
     );
-  }, [cs, presence, selectedId, callbacks, callInfo, userInfo, handleSelect, handlePlaceRequest, startCall, setScreen]);
+  }, [cs, presence, selectedId, callInfo, userInfo, handleSelect, startCall, setScreen]);
 
   const filterTabs: { key: ContactFilter; label: string }[] = [
     { key: 'all', label: 'All' },

@@ -73,7 +73,7 @@ export const AppSettings = {
 
 const SDK_PREFIX = 'sdk.';
 
-interface SdkSettingsSchema {
+export interface SdkSettingsSchema {
   logEnabled:       boolean;
   logLevel:         string;
   pjLogEnabled:     boolean;

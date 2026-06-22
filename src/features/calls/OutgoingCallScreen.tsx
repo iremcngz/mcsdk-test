@@ -1,12 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import { useNavigation } from '../../contexts/NavigationContext';
+import { makeOutgoingCallStyles } from './styles';
 
-export function InCallScreen() {
-  const { c, theme } = useAppContext();
+/**
+ * features/calls/OutgoingCallScreen.tsx
+ *
+ * Shown while an outgoing call is connecting (state === 'connecting').
+ * Displays "Calling…" with a Simulate Answer control. Once the call becomes
+ * active it navigates to the full-screen ActiveCallFullScreen ('callactive').
+ */
+export function OutgoingCallScreen() {
+  const { c } = useAppContext();
   const { activeCall, endCall, simulateAnswer } = useCallContext();
   const { setScreen } = useNavigation();
   const insets = useSafeAreaInsets();
@@ -14,7 +22,6 @@ export function InCallScreen() {
   const [isClosing, setIsClosing] = useState(false);
   const blinkAnim = useRef(new Animated.Value(1)).current;
   const pulse = useRef(new Animated.Value(1)).current;
-  const isDark = theme === 'dark';
 
   useEffect(() => {
     if (activeCall?.state === 'connecting') {
@@ -60,83 +67,7 @@ export function InCallScreen() {
     // Navigation will happen via the effect above when state becomes 'active'
   };
 
-  const s = useMemo(() => StyleSheet.create({
-    root: {
-      flex: 1,
-      backgroundColor: c.bg,
-      paddingTop: insets.top + 60,
-      paddingBottom: insets.bottom + 50,
-      paddingHorizontal: 32,
-      alignItems: 'center',
-    },
-    avatarRing: {
-      width: 110,
-      height: 110,
-      borderRadius: 55,
-      backgroundColor: c.surface,
-      borderWidth: 3,
-      borderColor: c.primary,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 24,
-    },
-    avatarIcon: {
-      fontSize: 48,
-    },
-    contactName: {
-      fontSize: 30,
-      fontWeight: '700',
-      color: c.textPrimary,
-      textAlign: 'center',
-      marginBottom: 8,
-    },
-    statusText: {
-      fontSize: 18,
-      fontWeight: '500',
-      color: c.textSecondary,
-      marginTop: 16,
-      letterSpacing: 1,
-    },
-    spacer: {
-      flex: 1,
-    },
-    mockAnswerBtn: {
-      paddingHorizontal: 32,
-      paddingVertical: 14,
-      borderRadius: 24,
-      borderWidth: 1,
-      borderColor: c.border,
-      marginBottom: 24,
-    },
-    mockAnswerText: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: c.textSecondary,
-    },
-    endCallButton: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      backgroundColor: c.error,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: c.error,
-      shadowOffset: { width: 0, height: 6 },
-      shadowOpacity: 0.4,
-      shadowRadius: 16,
-      elevation: 10,
-    },
-    endCallIcon: {
-      fontSize: 28,
-      color: '#fff',
-    },
-    endCallLabel: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: c.textSecondary,
-      marginTop: 8,
-    },
-  }), [c, insets, isDark]);
+  const s = useMemo(() => makeOutgoingCallStyles(c, insets), [c, insets]);
 
   if (!activeCall || activeCall.state !== 'connecting') return null;
 

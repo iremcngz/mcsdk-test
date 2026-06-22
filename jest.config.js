@@ -24,5 +24,9 @@ module.exports = {
     'react-native-image-picker': '<rootDir>/__mocks__/react-native-image-picker.js',
     // react-native-document-picker: native module — file picker
     'react-native-document-picker': '<rootDir>/__mocks__/react-native-document-picker.js',
+    // react-native-vision-camera: native module — camera preview
+    'react-native-vision-camera': '<rootDir>/__mocks__/react-native-vision-camera.js',
+    // react-native-sound-level: native module — mic level metering
+    'react-native-sound-level': '<rootDir>/__mocks__/react-native-sound-level.js',
   },
 };

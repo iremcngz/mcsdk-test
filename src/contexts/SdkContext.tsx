@@ -15,7 +15,7 @@ import React, {
   useState,
 } from 'react';
 import { McSdk, type McSdkParams, type LogEvent, type RegistrationEvent, type StoreDocumentsEvent } from '../mcsdk';
-import { SdkSettings } from '../core/settings';
+import { SdkSettings, type SdkSettingsSchema } from '../core/settings';
 import { AppLogger, SdkLogger } from '../core/logger';
 import { useIpMonitor, type IpInfo } from '../core/netMonitor';
 import { useAppContext } from './AppContext';
@@ -154,30 +154,48 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   const [registrationState,    setRegistrationState]    = useState('');
 
   // ── SDK parameter state ────────────────────────────────────────────────────
-  const [_init] = useState(() => SdkSettings.load());
-  const [logEnabled,       setLogEnabled]       = useState(_init.logEnabled);
-  const [logLevel,         setLogLevel]         = useState(_init.logLevel);
-  const [pjLogEnabled,     setPjLogEnabled]     = useState(_init.pjLogEnabled);
-  const [pjLogLevel,       setPjLogLevel]       = useState(_init.pjLogLevel);
-  const [rxTxEnabled,      setRxTxEnabled]      = useState(_init.rxTxEnabled);
-  const [httpPort,         setHttpPort]         = useState(_init.httpPort);
-  const [sipUdpPort,       setSipUdpPort]       = useState(_init.sipUdpPort);
-  const [sipTcpEnabled,    setSipTcpEnabled]    = useState(_init.sipTcpEnabled);
-  const [sipTcpPort,       setSipTcpPort]       = useState(_init.sipTcpPort);
-  const [sipTlsEnabled,    setSipTlsEnabled]    = useState(_init.sipTlsEnabled);
-  const [sipTlsPort,       setSipTlsPort]       = useState(_init.sipTlsPort);
-  const [sipIpv6Enabled,   setSipIpv6Enabled]   = useState(_init.sipIpv6Enabled);
-  const [mTlsEnabled,      setMTlsEnabled]      = useState(_init.mTlsEnabled);
-  const [certPath,         setCertPath]         = useState(_init.certPath);
-  const [privKeyPath,      setPrivKeyPath]      = useState(_init.privKeyPath);
-  const [caListPath,       setCaListPath]       = useState(_init.caListPath);
-  const [sipRxThreads,     setSipRxThreads]     = useState(_init.sipRxThreads);
-  const [sipWorkerThreads, setSipWorkerThreads] = useState(_init.sipWorkerThreads);
-  const [idmsUrl, setIdmsUrl] = useState(_init.idmsUrl);
-  const [bmsUrl,  setBmsUrl]  = useState(_init.bmsUrl);
-  const [cmsUrl,  setCmsUrl]  = useState(_init.cmsUrl);
-  const [gmsUrl,  setGmsUrl]  = useState(_init.gmsUrl);
-  const [mcxMock, setMcxMock] = useState(_init.mock);
+  // All 25 SDK parameters live in a single object (shape = SdkSettingsSchema).
+  // Per-field setters below are derived from it, so the public context API
+  // (sdk.logLevel / sdk.setLogLevel(...)) stays exactly the same as before.
+  const [params, setParams] = useState<SdkSettingsSchema>(() => SdkSettings.load());
+
+  // Generic field updater — the single source of truth for all param changes.
+  const updateParam = useCallback(
+    <K extends keyof SdkSettingsSchema>(key: K, value: SdkSettingsSchema[K]) => {
+      setParams(prev => ({ ...prev, [key]: value }));
+    },
+    [],
+  );
+
+  // Stable per-field setters that preserve the original flat API. Built once so
+  // their identity never changes between renders (matches the old useState
+  // setters, which were also stable).
+  const setters = useMemo(() => ({
+    setLogEnabled:       (v: boolean) => updateParam('logEnabled', v),
+    setLogLevel:         (v: string)  => updateParam('logLevel', v),
+    setPjLogEnabled:     (v: boolean) => updateParam('pjLogEnabled', v),
+    setPjLogLevel:       (v: string)  => updateParam('pjLogLevel', v),
+    setRxTxEnabled:      (v: boolean) => updateParam('rxTxEnabled', v),
+    setHttpPort:         (v: string)  => updateParam('httpPort', v),
+    setSipUdpPort:       (v: string)  => updateParam('sipUdpPort', v),
+    setSipTcpEnabled:    (v: boolean) => updateParam('sipTcpEnabled', v),
+    setSipTcpPort:       (v: string)  => updateParam('sipTcpPort', v),
+    setSipTlsEnabled:    (v: boolean) => updateParam('sipTlsEnabled', v),
+    setSipTlsPort:       (v: string)  => updateParam('sipTlsPort', v),
+    setSipIpv6Enabled:   (v: boolean) => updateParam('sipIpv6Enabled', v),
+    setMTlsEnabled:      (v: boolean) => updateParam('mTlsEnabled', v),
+    setCertPath:         (v: string)  => updateParam('certPath', v),
+    setPrivKeyPath:      (v: string)  => updateParam('privKeyPath', v),
+    setCaListPath:       (v: string)  => updateParam('caListPath', v),
+    setSipRxThreads:     (v: string)  => updateParam('sipRxThreads', v),
+    setSipWorkerThreads: (v: string)  => updateParam('sipWorkerThreads', v),
+    setIdmsUrl:          (v: string)  => updateParam('idmsUrl', v),
+    setBmsUrl:           (v: string)  => updateParam('bmsUrl', v),
+    setCmsUrl:           (v: string)  => updateParam('cmsUrl', v),
+    setGmsUrl:           (v: string)  => updateParam('gmsUrl', v),
+    // Context exposes this as `mcxMock`; the schema field is `mock`.
+    setMcxMock:          (v: boolean) => updateParam('mock', v),
+  }), [updateParam]);
 
   // ── Log buffers ────────────────────────────────────────────────────────────
   const [logs,    setLogs]    = useState<LogEntry[]>([]);
@@ -265,52 +283,52 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
       return;
     }
     try {
-      const params: McSdkParams = {
+      const mcParams: McSdkParams = {
         Logging: {
-          enabled: logEnabled,
-          level: Number(logLevel) as any,
-          pjEnabled: pjLogEnabled,
-          pjLevel: Number(pjLogLevel) as any,
-          rxTxEnabled,
+          enabled: params.logEnabled,
+          level: Number(params.logLevel) as any,
+          pjEnabled: params.pjLogEnabled,
+          pjLevel: Number(params.pjLogLevel) as any,
+          rxTxEnabled: params.rxTxEnabled,
         },
-        Http: { port: Number(httpPort) },
+        Http: { port: Number(params.httpPort) },
         Sip: {
-          udpPort:     Number(sipUdpPort),
-          tcpEnabled:  sipTcpEnabled,
-          tcpPort:     Number(sipTcpPort),
-          tlsEnabled:  sipTlsEnabled,
-          tlsPort:     Number(sipTlsPort),
-          ipv6Enabled: sipIpv6Enabled,
+          udpPort:     Number(params.sipUdpPort),
+          tcpEnabled:  params.sipTcpEnabled,
+          tcpPort:     Number(params.sipTcpPort),
+          tlsEnabled:  params.sipTlsEnabled,
+          tlsPort:     Number(params.sipTlsPort),
+          ipv6Enabled: params.sipIpv6Enabled,
         },
-        Tls: { mTlsEnabled, certPath, privKeyPath, caListPath },
+        Tls: {
+          mTlsEnabled: params.mTlsEnabled,
+          certPath:    params.certPath,
+          privKeyPath: params.privKeyPath,
+          caListPath:  params.caListPath,
+        },
         Threading: {
-          sipRxThreadCount:     Number(sipRxThreads),
-          sipWorkerThreadCount: Number(sipWorkerThreads),
+          sipRxThreadCount:     Number(params.sipRxThreads),
+          sipWorkerThreadCount: Number(params.sipWorkerThreads),
         },
-        Mcx: { idmsUrl, bmsUrl, cmsUrl, gmsUrl, mock: mcxMock },
+        Mcx: {
+          idmsUrl: params.idmsUrl,
+          bmsUrl:  params.bmsUrl,
+          cmsUrl:  params.cmsUrl,
+          gmsUrl:  params.gmsUrl,
+          mock:    params.mock,
+        },
       };
-      sdkRef.current.setParams(params);
+      sdkRef.current.setParams(mcParams);
       setParamsSet(true);
       addLog('setParams() called successfully');
-      addLog(`  Logging: enabled=${logEnabled} level=${logLevel}`);
-      addLog(`  Http: port=${httpPort}`);
-      addLog(`  Sip: udp=${sipUdpPort} tcp=${sipTcpEnabled}:${sipTcpPort} tls=${sipTlsEnabled}:${sipTlsPort}`);
-      SdkSettings.save({
-        logEnabled, logLevel, pjLogEnabled, pjLogLevel, rxTxEnabled,
-        httpPort, sipUdpPort, sipTcpEnabled, sipTcpPort, sipTlsEnabled,
-        sipTlsPort, sipIpv6Enabled, mTlsEnabled, certPath, privKeyPath,
-        caListPath, sipRxThreads, sipWorkerThreads,
-        idmsUrl, bmsUrl, cmsUrl, gmsUrl, mock: mcxMock,
-      });
+      addLog(`  Logging: enabled=${params.logEnabled} level=${params.logLevel}`);
+      addLog(`  Http: port=${params.httpPort}`);
+      addLog(`  Sip: udp=${params.sipUdpPort} tcp=${params.sipTcpEnabled}:${params.sipTcpPort} tls=${params.sipTlsEnabled}:${params.sipTlsPort}`);
+      SdkSettings.save(params);
     } catch (err: any) {
       addLog(`setParams() failed: ${err.message}`, 'error');
     }
-  }, [
-    addLog, logEnabled, logLevel, pjLogEnabled, pjLogLevel, rxTxEnabled,
-    httpPort, sipUdpPort, sipTcpEnabled, sipTcpPort, sipTlsEnabled, sipTlsPort,
-    sipIpv6Enabled, mTlsEnabled, certPath, privKeyPath, caListPath,
-    sipRxThreads, sipWorkerThreads, idmsUrl, bmsUrl, cmsUrl, gmsUrl, mcxMock,
-  ]);
+  }, [addLog, params]);
 
   const handleInit = useCallback(async () => {
     if (!sdkRef.current) {
@@ -365,6 +383,10 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   }, [addLog]);
 
   // ── Memoised value ────────────────────────────────────────────────────────
+  // The flat per-field API is rebuilt here by spreading `params` (the single
+  // state object) and `setters` (the stable derived setters). Consumers still
+  // read sdk.logLevel / call sdk.setLogLevel(...) exactly as before; the
+  // `mcxMock` field maps onto the schema's `mock` key.
   const value: SdkContextValue = useMemo(() => ({
     sdkRef,
     created, initialized, paramsSet,
@@ -372,40 +394,16 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     ipInfo,
     registrationProgress, registrationPhase, registrationState,
     handleCreate, handleSetParams, handleInit, handleDestroy,
-    logEnabled,       setLogEnabled,
-    logLevel,         setLogLevel,
-    pjLogEnabled,     setPjLogEnabled,
-    pjLogLevel,       setPjLogLevel,
-    rxTxEnabled,      setRxTxEnabled,
-    httpPort,         setHttpPort,
-    sipUdpPort,       setSipUdpPort,
-    sipTcpEnabled,    setSipTcpEnabled,
-    sipTcpPort,       setSipTcpPort,
-    sipTlsEnabled,    setSipTlsEnabled,
-    sipTlsPort,       setSipTlsPort,
-    sipIpv6Enabled,   setSipIpv6Enabled,
-    mTlsEnabled,      setMTlsEnabled,
-    certPath,         setCertPath,
-    privKeyPath,      setPrivKeyPath,
-    caListPath,       setCaListPath,
-    sipRxThreads,     setSipRxThreads,
-    sipWorkerThreads, setSipWorkerThreads,
-    idmsUrl, setIdmsUrl,
-    bmsUrl,  setBmsUrl,
-    cmsUrl,  setCmsUrl,
-    gmsUrl,  setGmsUrl,
-    mcxMock, setMcxMock,
+    ...params,
+    mcxMock: params.mock,
+    ...setters,
   }), [
     created, initialized, paramsSet,
     logs, sdkLogs, addLog, clearLogs, clearSdkLogs,
     ipInfo,
     registrationProgress, registrationPhase, registrationState,
     handleCreate, handleSetParams, handleInit, handleDestroy,
-    logEnabled, logLevel, pjLogEnabled, pjLogLevel, rxTxEnabled,
-    httpPort, sipUdpPort, sipTcpEnabled, sipTcpPort, sipTlsEnabled,
-    sipTlsPort, sipIpv6Enabled, mTlsEnabled, certPath, privKeyPath,
-    caListPath, sipRxThreads, sipWorkerThreads,
-    idmsUrl, bmsUrl, cmsUrl, gmsUrl, mcxMock,
+    params, setters,
   ]);
 
   return <SdkContext.Provider value={value}>{children}</SdkContext.Provider>;

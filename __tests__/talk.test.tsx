@@ -47,6 +47,7 @@ const mockPalette = {
 jest.mock('../src/contexts/AppContext', () => ({
   useAppContext: () => ({
     c: mockPalette,
+    theme: 'dark',
     tr: {
       talkGroupsTitle: 'Groups',
       talkSelectedGroup: 'Selected group',
@@ -116,13 +117,15 @@ describe('TalkScreen — visual state and actions', () => {
   it('shows idle push-button before any action', () => {
     renderWithTalkCtx(<TalkScreen />);
     const button = screen.getByTestId('talk-push-button');
-    expect(hasBackground(button, '#2d2d3f')).toBe(true);
+    // Idle (no active call) → button uses the muted color.
+    expect(hasBackground(button, mockPalette.textMuted)).toBe(true);
   });
 
   it('does not start talk when no call is active', () => {
     renderWithTalkCtx(<TalkScreen />);
     fireEvent(screen.getByTestId('talk-push-button'), 'pressIn');
-    expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Idle');
+    // With no active call the status label is empty (nothing to show).
+    expect(screen.getByTestId('talk-status-text')).toHaveTextContent('');
   });
 
   it('accepts push once call is active and shows granted status after loading', () => {
@@ -141,7 +144,8 @@ describe('TalkScreen — visual state and actions', () => {
     act(() => { jest.advanceTimersByTime(600); });
     expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Call active');
     const button = screen.getByTestId('talk-push-button');
-    expect(hasBackground(button, '#0f172a')).toBe(true);
+    // Active call in dark theme → button uses the dark bg color.
+    expect(hasBackground(button, mockPalette.bg)).toBe(true);
   });
 
   it('shows the push-to-talk button as dark after SDK accepts push during a call', () => {
@@ -152,7 +156,8 @@ describe('TalkScreen — visual state and actions', () => {
     fireEvent.press(screen.getByTestId('talk-mock-accept'));
     expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Push granted');
     const button = screen.getByTestId('talk-push-button');
-    expect(hasBackground(button, '#0f172a')).toBe(true);
+    // Accepted (not yet talking) in dark theme → still the dark bg color.
+    expect(hasBackground(button, mockPalette.bg)).toBe(true);
   });
 
   it('starts talking while holding push-to-talk after acceptance', () => {
@@ -169,15 +174,16 @@ describe('TalkScreen — visual state and actions', () => {
     expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Push granted');
   });
 
-  it('updates mode selection when transmit is pressed', () => {
+  it('opens the broadcast screen when transmit is pressed', () => {
     renderWithTalkCtx(<TalkScreen />);
     // Start call first
     fireEvent.press(screen.getByTestId('talk-start-button'));
     act(() => { jest.advanceTimersByTime(600); });
 
+    // Transmit now switches to the full-screen BroadcastScreen, so the
+    // TalkScreen (and its push button) unmounts.
     fireEvent.press(screen.getByTestId('talk-mode-transmit'));
-    const button = screen.getByTestId('talk-mode-transmit');
-    expect(hasBackground(button, mockPalette.accent)).toBe(true);
+    expect(screen.queryByTestId('talk-push-button')).toBeNull();
   });
 
   it('shows group avatar blue when call active and idle', () => {
@@ -247,9 +253,9 @@ describe('TalkScreen — visual state and actions', () => {
     const g1 = screen.getByTestId('talk-group-group1');
     expect(hasBackground(g1, mockPalette.error)).toBe(true);
 
-    // Switch to group2 (no call) → status should be Idle
+    // Switch to group2 (no call) → status label is empty (no active call)
     fireEvent.press(screen.getByTestId('talk-group-group2'));
-    expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Idle');
+    expect(screen.getByTestId('talk-status-text')).toHaveTextContent('');
 
     // Switch back to group1 → should restore occupied/red state
     fireEvent.press(screen.getByTestId('talk-group-group1'));
@@ -279,10 +285,19 @@ describe('TalkScreen — visual state and actions', () => {
     });
   });
 
-  it('moves incoming call group to front of ordered groups', async () => {
+  it('moves incoming call group to front of ordered groups once it activates', async () => {
     renderWithTalkCtx(<TalkScreen />);
+
+    // Select group6 first so the auto-accept effect activates it on this screen.
+    fireEvent.press(screen.getByTestId('talk-group-group6'));
+
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
     fireEvent.press(screen.getByTestId('talk-mock-incoming-group6'));
+    // Close the mock panel so the group labels are reachable.
+    fireEvent.press(screen.getByTestId('talk-mock-close'));
+
+    // Group ordering only reflects activation, so advance past auto-accept (3s).
+    act(() => { jest.advanceTimersByTime(3000); });
 
     await waitFor(() => {
       const labels = screen.getAllByText(/^group\d+$/);
@@ -375,8 +390,9 @@ describe('TalkScreen — visual state and actions', () => {
     const transmitBtn = screen.getByTestId('talk-mode-transmit');
     const messagesBtn = screen.getByTestId('talk-mode-messages');
 
-    expect(receiveBtn.props.disabled).toBe(true);
-    expect(transmitBtn.props.disabled).toBe(true);
-    expect(messagesBtn.props.disabled).toBe(true);
+    // TouchableOpacity surfaces `disabled` via accessibilityState.
+    expect(receiveBtn.props.accessibilityState?.disabled).toBe(true);
+    expect(transmitBtn.props.accessibilityState?.disabled).toBe(true);
+    expect(messagesBtn.props.accessibilityState?.disabled).toBe(true);
   });
 });

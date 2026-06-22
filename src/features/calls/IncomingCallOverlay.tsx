@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, PanResponder, StyleSheet, Text, TouchableOpacity, Vibration, View } from 'react-native';
+import { Animated, PanResponder, Text, TouchableOpacity, Vibration, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import { useNavigation } from '../../contexts/NavigationContext';
+import { makeIncomingCallOverlayStyles } from './styles';
 
 const SWIPE_THRESHOLD = 200;
 
@@ -75,131 +76,7 @@ export function IncomingCallOverlay() {
 
   const isDark = theme === 'dark';
 
-  const s = useMemo(() => StyleSheet.create({
-    overlay: {
-      ...StyleSheet.absoluteFill,
-      backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(248, 250, 252, 0.95)',
-      zIndex: 9999,
-      justifyContent: 'space-between',
-    },
-    header: {
-      paddingTop: insets.top + 40,
-      alignItems: 'center',
-    },
-    incomingLabel: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: c.textSecondary,
-      letterSpacing: 2,
-      textTransform: 'uppercase',
-      marginBottom: 40,
-    },
-    avatarContainer: {
-      alignItems: 'center',
-      marginBottom: 32,
-    },
-    avatarRing: {
-      width: 120,
-      height: 120,
-      borderRadius: 60,
-      backgroundColor: c.surface,
-      borderWidth: 4,
-      borderColor: c.primary,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: c.primary,
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.3,
-      shadowRadius: 16,
-      elevation: 10,
-    },
-    avatarIcon: {
-      fontSize: 54,
-    },
-    contactInfo: {
-      alignItems: 'center',
-      paddingHorizontal: 24,
-    },
-    contactName: {
-      fontSize: 34,
-      fontWeight: '800',
-      color: c.textPrimary,
-      textAlign: 'center',
-      marginBottom: 12,
-      letterSpacing: -0.5,
-    },
-    actionsContainer: {
-      paddingBottom: insets.bottom + 40,
-      paddingHorizontal: 32,
-      alignItems: 'center',
-      gap: 32,
-    },
-    sliderWrap: {
-      width: '100%',
-      height: 72,
-      borderRadius: 36,
-      backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
-      borderWidth: 1,
-      borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-      justifyContent: 'center',
-      overflow: 'hidden',
-    },
-    sliderTrack: {
-      flex: 1,
-      borderRadius: 36,
-      justifyContent: 'center',
-      position: 'relative',
-    },
-    sliderThumb: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
-      backgroundColor: c.success || '#10b981',
-      alignItems: 'center',
-      justifyContent: 'center',
-      position: 'absolute',
-      left: 4,
-      zIndex: 2,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.3,
-      shadowRadius: 8,
-      elevation: 6,
-    },
-    sliderThumbIcon: {
-      fontSize: 28,
-      color: '#fff',
-    },
-    sliderLabelContainer: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      justifyContent: 'center',
-      alignItems: 'center',
-      zIndex: 1,
-    },
-    sliderLabel: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
-      letterSpacing: 0.5,
-      paddingLeft: 40, // Thumb'ın arkasında kalmaması için
-    },
-    declineBtn: {
-      paddingHorizontal: 40,
-      paddingVertical: 14,
-      borderRadius: 28,
-      backgroundColor: 'transparent',
-    },
-    declineText: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: c.error || '#ef4444',
-      letterSpacing: 0.5,
-    },
-  }), [c, insets, isDark]);
+  const s = useMemo(() => makeIncomingCallOverlayStyles(c, insets, isDark), [c, insets, isDark]);
 
   if (!activeCall || activeCall.state !== 'ringing') return null;
 

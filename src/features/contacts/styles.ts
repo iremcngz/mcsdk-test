@@ -126,18 +126,6 @@ export function makeContactsStyles(c: ThemePalette) {
     infoActive: { color: c.success },
     infoMissed: { color: c.error },
 
-    // ── Callback section ──────────────────────────────────────────────────────
-    callbackSection:  { backgroundColor: c.bg, borderRadius: 8, padding: 10 },
-    callbackTitle:    { color: c.textPrimary, fontWeight: '700', fontSize: 13, marginBottom: 8 },
-    callbackInfoRow:  { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-    callbackLabel:    { color: c.textMuted, fontSize: 12 },
-    callbackValue:    { color: c.textSecondary, fontSize: 12 },
-    cbPending:        { color: c.warn },
-    cbAccepted:       { color: c.success },
-    cbRejected:       { color: c.error },
-    requestBtn:       { backgroundColor: c.success, borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 6 },
-    requestBtnText:   { color: c.textOnAccent, fontWeight: '700', fontSize: 13 },
-
     // ── Empty state ───────────────────────────────────────────────────────────
     emptyWrap: { alignItems: 'center', marginTop: 60 },
     emptyIcon: { fontSize: 40, marginBottom: 10 },

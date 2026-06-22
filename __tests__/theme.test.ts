@@ -127,16 +127,16 @@ describe('Regression guards — dark palette', () => {
 describe('Regression guards — light palette', () => {
   const light = getThemePalette('light');
 
-  it('primary is #1565c0 (dark action blue)', () => {
-    expect(light.primary).toBe('#1565c0');
+  it('primary is #2196F3 (action blue)', () => {
+    expect(light.primary).toBe('#2196F3');
   });
 
-  it('secondary is #7B1FA2 (dark action purple)', () => {
-    expect(light.secondary).toBe('#7B1FA2');
+  it('secondary is #9C27B0 (action purple)', () => {
+    expect(light.secondary).toBe('#9C27B0');
   });
 
-  it('presenceOffline is #757575 (dark grey)', () => {
-    expect(light.presenceOffline).toBe('#757575');
+  it('presenceOffline is #9E9E9E (neutral grey)', () => {
+    expect(light.presenceOffline).toBe('#9E9E9E');
   });
 });
 

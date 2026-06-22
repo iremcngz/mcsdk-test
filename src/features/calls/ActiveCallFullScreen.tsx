@@ -1,16 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PermissionsAndroid, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Animated, PermissionsAndroid, Platform, Pressable, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SoundLevel from 'react-native-sound-level';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import { useNavigation } from '../../contexts/NavigationContext';
+import { mapSoundLevel, useVoiceBars, VoiceMeterBars } from '../../shared/VoiceMeter';
+import { makeActiveCallFullScreenStyles } from './styles';
 
-const BAR_COUNT = 7;
-const BAR_HEIGHTS = [0.25, 0.4, 0.55, 0.7, 0.85, 1.0, 1.0];
-const BAR_COLORS = ['#4ade80', '#4ade80', '#facc15', '#facc15', '#fb923c', '#ef4444', '#ef4444'];
-
-export function CallActiveScreen() {
+/**
+ * features/calls/ActiveCallFullScreen.tsx
+ *
+ * Full-screen view of an in-progress call (state === 'active'), reached via
+ * the 'callactive' route. Shows avatar, timer, and (for half-duplex) the
+ * push-to-talk button with a live voice meter. Distinct from ActiveCallCard,
+ * which renders the same call compactly inside the Calls tab.
+ */
+export function ActiveCallFullScreen() {
   const { c, theme } = useAppContext();
   const { activeCall, endCall, setFloorState } = useCallContext();
   const { setScreen } = useNavigation();
@@ -24,9 +30,7 @@ export function CallActiveScreen() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [voiceLevel, setVoiceLevel] = useState(0);
   const soundActiveRef = useRef(false);
-  const barAnims = useRef(
-    Array.from({ length: BAR_COUNT }, () => new Animated.Value(0))
-  ).current;
+  const barAnims = useVoiceBars(voiceLevel);
 
   const isDark = theme === 'dark';
   const isHalfDuplex = activeCall?.callType === 'half_duplex';
@@ -75,8 +79,7 @@ export function CallActiveScreen() {
         SoundLevel.start();
         soundActiveRef.current = true;
         SoundLevel.onNewFrame = (data: { value: number }) => {
-          const mapped = Math.max(0, Math.min(5, Math.round((data.value + 100) / 20)));
-          setVoiceLevel(mapped);
+          setVoiceLevel(mapSoundLevel(data.value));
         };
       };
       start();
@@ -96,17 +99,6 @@ export function CallActiveScreen() {
       soundActiveRef.current = false;
     };
   }, [isGranted, isClosing]);
-
-  useEffect(() => {
-    const activeCount = Math.floor((voiceLevel / 5) * BAR_COUNT);
-    barAnims.forEach((anim, i) => {
-      Animated.timing(anim, {
-        toValue: i < activeCount ? 1 : 0,
-        duration: 120,
-        useNativeDriver: false,
-      }).start();
-    });
-  }, [voiceLevel, barAnims]);
 
   useEffect(() => {
     if (isGranted && voiceLevel > 0) {
@@ -158,152 +150,10 @@ export function CallActiveScreen() {
   const buttonSize = Math.min(width * 0.50, 200);
   const ringSize = buttonSize + 24;
 
-  const s = useMemo(() => StyleSheet.create({
-    root: {
-      flex: 1,
-      backgroundColor: c.bg,
-      paddingTop: insets.top ,
-      paddingBottom: insets.bottom + 30,
-    },
-    header: {
-      alignItems: 'center',
-      paddingHorizontal: 24,
-    },
-    avatarContainer: {
-      alignItems: 'center',
-      marginBottom: 16,
-    },
-    avatarRing: {
-      width: 80,
-      height: 80,
-      borderRadius: 40,
-      backgroundColor: c.surface,
-      borderWidth: 3,
-      borderColor: isGranted ? (c.success || '#10b981') : c.primary,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: isGranted ? (c.success || '#10b981') : c.primary,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.2,
-      shadowRadius: 8,
-      elevation: 5,
-    },
-    avatarIcon: {
-      fontSize: 36,
-    },
-    contactName: {
-      fontSize: 30,
-      fontWeight: '800',
-      color: c.textPrimary,
-      textAlign: 'center',
-      letterSpacing: -0.5,
-    },
-    timer: {
-      fontSize: 42,
-      fontWeight: '200',
-      color: c.textPrimary,
-      fontVariant: ['tabular-nums'],
-      letterSpacing: 2,
-      marginTop: 12,
-    },
-    centerBody: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-      paddingHorizontal: 24,
-      marginVertical: 32, // ÜST VE ALT TARAFTA GÜVENLİ BOŞLUK GARANTİSİ EKLENDİ
-      minHeight: ringSize, 
-    },
-    pushButtonWrapper: {
-      width: ringSize,
-      height: ringSize,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    pushButtonRing: {
-      position: 'absolute',
-      width: ringSize,
-      height: ringSize,
-      borderRadius: ringSize / 2,
-      borderWidth: 2,
-      borderColor: ringColor,
-      opacity: 0.5,
-    },
-    pushButton: {
-      width: buttonSize,
-      height: buttonSize,
-      borderRadius: buttonSize / 2,
-      justifyContent: 'center',
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-      shadowColor: floorState === 'busy' ? '#000' : ringColor,
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.3,
-      shadowRadius: 16,
-      elevation: 8,
-    },
-    pushButtonDisabled: {
-      opacity: 0.6,
-    },
-    voiceMeterContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 4,
-      height: 36,
-      marginBottom: 8,
-      paddingHorizontal: 20,
-    },
-    voiceBar: {
-      flex: 1,
-      borderRadius: 3,
-      minHeight: 4,
-    },
-    pushButtonStatus: {
-      color: isDark ? '#ffffff' : c.textPrimary,
-      fontSize: 16,
-      fontWeight: '700',
-      letterSpacing: 0.5,
-      textAlign: 'center',
-    },
-    pushStat: {
-      color: c.textSecondary,
-      fontSize: 14,
-      fontWeight: '500',
-      textAlign: 'center',
-      marginTop: 28, 
-      letterSpacing: 0.5,
-    },
-    actionsContainer: {
-      alignItems: 'center',
-      paddingHorizontal: 24,
-      gap: 12,
-    },
-    endCallButton: {
-      width: 80, 
-      height: 80,
-      borderRadius: 40,
-      backgroundColor: c.error || '#ef4444',
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: c.error || '#ef4444',
-      shadowOffset: { width: 0, height: 6 },
-      shadowOpacity: 0.4,
-      shadowRadius: 16,
-      elevation: 10,
-    },
-    endCallIcon: {
-      fontSize: 32,
-      color: '#fff',
-      transform: [{ rotate: '135deg' }], 
-    },
-    endCallLabel: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: c.textSecondary,
-    },
-  }), [c, insets, isDark, ringColor, isGranted, floorState, buttonSize, ringSize]);
+  const s = useMemo(
+    () => makeActiveCallFullScreenStyles(c, { insets, isDark, ringColor, isGranted, floorState, buttonSize, ringSize }),
+    [c, insets, isDark, ringColor, isGranted, floorState, buttonSize, ringSize],
+  );
 
   if (!activeCall || activeCall.state !== 'active') return null;
 
@@ -340,25 +190,13 @@ export function CallActiveScreen() {
                   (pushDisabled || isClosing) && s.pushButtonDisabled,
                 ]}>
                 <View style={s.voiceMeterContainer}>
-                  {BAR_HEIGHTS.map((height, i) => (
-                    <Animated.View
-                      key={i}
-                      style={[
-                        s.voiceBar,
-                        {
-                          height: height * 24, 
-                          backgroundColor: barAnims[i].interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)', BAR_COLORS[i]],
-                          }),
-                          opacity: barAnims[i].interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [0.3, 1],
-                          }),
-                        },
-                      ]}
-                    />
-                  ))}
+                  <VoiceMeterBars
+                    barAnims={barAnims}
+                    barStyle={s.voiceBar}
+                    heightScale={24}
+                    inactiveColor={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}
+                    inactiveOpacity={0.3}
+                  />
                 </View>
                 <Text style={s.pushButtonStatus}>{pushStatusLabel}</Text>
               </Pressable>

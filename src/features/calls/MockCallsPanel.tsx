@@ -18,7 +18,6 @@
 
 import React, { useMemo, useState } from 'react';
 import {
-  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
@@ -28,6 +27,7 @@ import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import { useNavigation } from '../../contexts/NavigationContext';
 import type { CallType } from './types';
+import { makeMockCallsPanelStyles } from './styles';
 
 const DEFAULT_NAME = 'Alice Johnson';
 const DEFAULT_URI  = 'sip:alice@mc.example.com';
@@ -41,101 +41,7 @@ export function MockCallsPanel() {
   const [callerName, setCallerName] = useState(DEFAULT_NAME);
   const [callerUri,  setCallerUri]  = useState(DEFAULT_URI);
 
-  const ls = useMemo(() => StyleSheet.create({
-    card: {
-      margin: 12,
-      borderRadius: 12,
-      backgroundColor: c.surface,
-      borderWidth: 1.5,
-      borderColor: c.warn + '88',
-      overflow: 'hidden',
-    },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      backgroundColor: c.warn + '18',
-      gap: 8,
-    },
-    headerTitle: {
-      flex: 1,
-      fontSize: 14,
-      fontWeight: '700',
-      color: c.warn,
-    },
-    chevron: {
-      fontSize: 14,
-      color: c.textSecondary,
-    },
-    body: {
-      padding: 14,
-      gap: 14,
-    },
-    inputRow: {
-      gap: 6,
-    },
-    inputLabel: {
-      fontSize: 11,
-      fontWeight: '600',
-      color: c.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    input: {
-      borderWidth: 1,
-      borderColor: c.border,
-      borderRadius: 8,
-      paddingHorizontal: 10,
-      paddingVertical: 7,
-      fontSize: 13,
-      color: c.text,
-      backgroundColor: c.background,
-    },
-    sectionLabel: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: c.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-      marginBottom: 2,
-    },
-    row: {
-      flexDirection: 'row',
-      gap: 8,
-    },
-    btn: {
-      flex: 1,
-      paddingVertical: 10,
-      borderRadius: 10,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    btnText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: '#fff',
-    },
-    divider: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: c.border,
-    },
-    commencementRow: {
-      flexDirection: 'row',
-      gap: 8,
-    },
-    commBtn: {
-      flex: 1,
-      paddingVertical: 8,
-      borderRadius: 8,
-      borderWidth: 1.5,
-      alignItems: 'center',
-    },
-    commBtnText: {
-      fontSize: 12,
-      fontWeight: '700',
-    },
-  }), [c]);
+  const ls = useMemo(() => makeMockCallsPanelStyles(c), [c]);
 
   function fireIncoming(callType: CallType) {
     simulateIncomingCall(

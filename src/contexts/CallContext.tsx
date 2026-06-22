@@ -177,14 +177,6 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     });
   }, []);
 
-  const simulateAnswer = useCallback(() => {
-    setActiveCall(prev =>
-      prev && prev.state === 'connecting'
-        ? { ...prev, state: 'active', startedAt: Date.now() }
-        : prev,
-    );
-  }, []);
-
   const setFloorState = useCallback((state: FloorState) => {
     setActiveCall(prev => prev ? { ...prev, floorState: state } : null);
   }, []);
@@ -199,8 +191,60 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     setCallHistory([]);
   }, []);
 
-  // ── Mock helpers ──────────────────────────────────────────────────────────
+  const acceptCall = useCallback(() => {
+    setActiveCall(prev => {
+      if (!prev || prev.state !== 'ringing') return prev;
+      const isManual = commencementMode === 'manual';
+      return {
+        ...prev,
+        state:           isManual ? 'connecting' : 'active',
+        needsManualJoin: isManual,
+        startedAt:       Date.now(), // reset timer to call-accepted moment
+      };
+    });
+  }, [commencementMode]);
 
+  const rejectCall = useCallback(() => {
+    setActiveCall(prev => {
+      if (!prev || prev.state !== 'ringing') return prev;
+      const now = Date.now();
+      const record: CallRecord = {
+        id:               prev.id,
+        contactName:      prev.contactName,
+        sipUri:           prev.sipUri,
+        direction:        prev.direction,
+        callType:         prev.callType,
+        commencementMode: prev.commencementMode,
+        startedAt:        prev.startedAt,
+        endedAt:          now,
+        duration:         0,
+      };
+      setCallHistory(h => [record, ...h]);
+      return null;
+    });
+  }, []);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // MOCK / SIMULATION HELPERS
+  //
+  // These stand in for events the real SDK will eventually push (remote answer,
+  // incoming call, floor grant/release by another party). They are wired into
+  // the same CallContextValue surface as the real actions, but are purely test
+  // scaffolding: when the native bridge exposes real call callbacks, delete
+  // this whole block and drop the corresponding fields from CallContextValue.
+  // Nothing here should ship enabled in a production build.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** Simulate the remote party answering an outgoing call (connecting → active). */
+  const simulateAnswer = useCallback(() => {
+    setActiveCall(prev =>
+      prev && prev.state === 'connecting'
+        ? { ...prev, state: 'active', startedAt: Date.now() }
+        : prev,
+    );
+  }, []);
+
+  /** Simulate an incoming call arriving (state → 'ringing'). */
   const simulateIncomingCall = useCallback((
     contactName: string,
     sipUri: string,
@@ -236,45 +280,14 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     setActiveCall(call);
   }, [commencementMode]);
 
-  const acceptCall = useCallback(() => {
-    setActiveCall(prev => {
-      if (!prev || prev.state !== 'ringing') return prev;
-      const isManual = commencementMode === 'manual';
-      return {
-        ...prev,
-        state:           isManual ? 'connecting' : 'active',
-        needsManualJoin: isManual,
-        startedAt:       Date.now(), // reset timer to call-accepted moment
-      };
-    });
-  }, [commencementMode]);
-
-  const rejectCall = useCallback(() => {
-    setActiveCall(prev => {
-      if (!prev || prev.state !== 'ringing') return prev;
-      const now = Date.now();
-      const record: CallRecord = {
-        id:               prev.id,
-        contactName:      prev.contactName,
-        sipUri:           prev.sipUri,
-        direction:        prev.direction,
-        callType:         prev.callType,
-        commencementMode: prev.commencementMode,
-        startedAt:        prev.startedAt,
-        endedAt:          now,
-        duration:         0,
-      };
-      setCallHistory(h => [record, ...h]);
-      return null;
-    });
-  }, []);
-
+  /** Force floor state to 'busy' (simulate another party speaking). */
   const simulateFloorBusy = useCallback(() => {
     setActiveCall(prev =>
       prev && prev.state === 'active' ? { ...prev, floorState: 'busy' } : prev,
     );
   }, []);
 
+  /** Release a simulated floor-busy back to 'idle'. */
   const simulateFloorIdle = useCallback(() => {
     setActiveCall(prev =>
       prev && prev.state === 'active' ? { ...prev, floorState: 'idle' } : prev,
@@ -282,6 +295,7 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const value = useMemo<CallContextValue>(() => ({
+    // ── Real call actions ──
     activeCall,
     callHistory,
     commencementMode,
@@ -290,19 +304,19 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     endCall,
     setFloorState,
     joinCall,
-    clearHistory,
-    simulateIncomingCall,
     acceptCall,
     rejectCall,
+    clearHistory,
+    // ── Mock / simulation scaffolding (remove with the block above) ──
+    simulateIncomingCall,
     simulateAnswer,
     simulateFloorBusy,
     simulateFloorIdle,
   }), [
     activeCall, callHistory, commencementMode,
     setCommencementMode, startCall, endCall,
-    setFloorState, joinCall, clearHistory,
-    simulateIncomingCall, acceptCall, rejectCall,
-    simulateAnswer,
+    setFloorState, joinCall, acceptCall, rejectCall, clearHistory,
+    simulateIncomingCall, simulateAnswer,
     simulateFloorBusy, simulateFloorIdle,
   ]);
 
