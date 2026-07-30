@@ -57,6 +57,15 @@ jest.mock('../src/mcsdk/NativeMcSdk', () => {
         importData:      jest.fn(),
         exportData:      jest.fn().mockReturnValue(''),
         fetchDocument:   jest.fn(),
+        startPrivateCall: jest.fn(),
+        startGroupCall: jest.fn(),
+        answerCall: jest.fn(),
+        rejectCall: jest.fn(),
+        terminateCall: jest.fn(),
+        requestFloor: jest.fn(),
+        releaseFloor: jest.fn(),
+        selectCall: jest.fn(),
+        muteMicrophone: jest.fn(),
         sendSds:         jest.fn(),
     };
     return { __esModule: true, default: mock };
@@ -167,14 +176,14 @@ const DOC_A: McSdkDocument = {
     uri:       'http://bms.example.com/ue-init',
     etag:      '"etag-a"',
     content:   '<UeInit/>',
-    type:      DocumentType.UeInit,
+    type:      DocumentType.UeInitialConfig,
     fetchedAt: 1700000000000,
 };
 const DOC_B: McSdkDocument = {
     uri:       'http://bms.example.com/ue-config',
     etag:      '"etag-b"',
     content:   '<UeConfig/>',
-    type:      DocumentType.UeConfig,
+    type:      DocumentType.UeInitConfig,
     fetchedAt: 1700000001000,
 };
 
@@ -270,7 +279,7 @@ describe('handleInit uses cachedDocsMap', () => {
         const arg = MockNative.setDocuments.mock.calls[0][0] as string;
         const parsed = JSON.parse(arg);
         expect(typeof parsed[0].type).toBe('number');
-        expect(parsed[0].type).toBe(DocumentType.UeInit);
+        expect(parsed[0].type).toBe(DocumentType.UeInitialConfig);
         expect(typeof parsed[0].fetchedAt).toBe('number');
         expect(parsed[0].fetchedAt).toBe(1700000000000);
     });
@@ -322,7 +331,7 @@ describe('getAllDocuments output shape', () => {
         mockGetAllDocuments.mockResolvedValueOnce(map);
         const result = await mockGetAllDocuments();
         const doc = result.get(ALICE_MCID)![0];
-        expect(doc.type).toBe(DocumentType.UeInit);
+        expect(doc.type).toBe(DocumentType.UeInitialConfig);
         expect(doc.fetchedAt).toBe(1700000000000);
     });
 });

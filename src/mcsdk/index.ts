@@ -14,6 +14,10 @@ import type {
     RegistrationEvent,
     McSdkDocument,
     StoreDocumentsEvent,
+    CallInfoEvent,
+    CallTerminatedEvent,
+    CallSelectedEvent,
+    FloorUpdatedEvent,
 } from './types';
 
 export * from './types';
@@ -21,6 +25,7 @@ export * from './types';
 // ── Event names ───────────────────────────────────────────────────────────────
 
 export const McSdkEvents = {
+    /** @deprecated Android no longer emits this; the SDK fetches documents itself. */
     FetchDocument:   'McSdkFetchDocument',
     SdsSent:         'McSdkSdsSent',
     SdsReceived:     'McSdkSdsReceived',
@@ -29,6 +34,11 @@ export const McSdkEvents = {
     Log:             'McSdkLog',
     Registration:    'McSdkRegistration',
     StoreDocuments:  'McSdkStoreDocuments',
+    IncomingCall:    'McSdkIncomingCall',
+    CallUpdated:     'McSdkCallUpdated',
+    CallTerminated:  'McSdkCallTerminated',
+    CallSelected:    'McSdkCallSelected',
+    FloorUpdated:    'McSdkFloorUpdated',
 } as const;
 
 // ── Emitter (singleton, lazily created) ───────────────────────────────────────
@@ -86,11 +96,21 @@ export class McSdk {
             caListPath:      T.caListPath!,
             sipRxThreads:    Th.sipRxThreadCount!,
             sipWorkerThreads: Th.sipWorkerThreadCount!,
-            idmsUrl:         M.idmsUrl ?? '',
             bmsUrl:          M.bmsUrl ?? '',
+            mock:            (M.mock ?? false) ? 1 : 0,
+            // Mcx fields added in SDK 072fad0 — read by Android only.
+            mcdataSds:       (M.mcdataSds ?? true) ? 1 : 0,
+            mcdataFd:        (M.mcdataFd ?? true) ? 1 : 0,
+            mcdataIpconn:    (M.mcdataIpconn ?? false) ? 1 : 0,
+            authViaPublish:  (M.authViaPublish ?? true) ? 1 : 0,
+            registerExpires: M.registerExpires ?? 3600,
+            pocExpires:      M.pocExpires ?? 4294967295,
+            userAgent:       M.userAgent ?? 'Mission 809',
+            imei:            M.imei ?? '0001-0001-000001',
+            // Deprecated on Android, still consumed by the iOS xcframework.
+            idmsUrl:         M.idmsUrl ?? '',
             cmsUrl:          M.cmsUrl ?? '',
             gmsUrl:          M.gmsUrl ?? '',
-            mock:            (M.mock ?? false) ? 1 : 0,
         };
         NativeMcSdk.setParams(JSON.stringify(flat));
     }
@@ -134,6 +154,11 @@ export class McSdk {
 
     // ── Messaging ──────────────────────────────────────────────────────────────
 
+    /**
+     * @deprecated Removed from the Android SDK in 072fad0 — the engine fetches
+     * BMS documents itself and reports them via onStoreDocuments(). This is a
+     * no-op on Android and remains only for the not-yet-rebuilt iOS xcframework.
+     */
     fetchDocument(url: string): void {
         NativeMcSdk.fetchDocument(url);
     }
@@ -141,6 +166,25 @@ export class McSdk {
     sendSds(target: string, body: string): void {
         NativeMcSdk.sendSds(target, body);
     }
+
+    // ── Calling ────────────────────────────────────────────────────────────────
+    // Available on Android only until the iOS xcframework is rebuilt.
+
+    startPrivateCall(mcId: string): void   { NativeMcSdk.startPrivateCall(mcId); }
+    startGroupCall(groupId: string): void  { NativeMcSdk.startGroupCall(groupId); }
+    answerCall(callId: string): void       { NativeMcSdk.answerCall(callId); }
+    rejectCall(callId: string): void       { NativeMcSdk.rejectCall(callId); }
+    terminateCall(callId: string): void    { NativeMcSdk.terminateCall(callId); }
+
+    // ── Floor control ──────────────────────────────────────────────────────────
+
+    requestFloor(callId: string): void     { NativeMcSdk.requestFloor(callId); }
+    releaseFloor(callId: string): void     { NativeMcSdk.releaseFloor(callId); }
+
+    // ── Media ──────────────────────────────────────────────────────────────────
+
+    selectCall(callId: string): void       { NativeMcSdk.selectCall(callId); }
+    muteMicrophone(muted: boolean): void   { NativeMcSdk.muteMicrophone(muted); }
 
     setIdentity(mcId: string, password: string, clientId: string = ''): void {
         NativeMcSdk.setIdentity(mcId, password, clientId);
@@ -162,8 +206,31 @@ export class McSdk {
 
     // ── Event subscriptions ────────────────────────────────────────────────────
 
+    /** @deprecated Android no longer emits this event; see fetchDocument(). */
     onFetchDocument(handler: (e: FetchDocumentEvent) => void) {
         return emitter().addListener(McSdkEvents.FetchDocument, handler);
+    }
+
+    // ── Call & Floor subscriptions (Android only) ──────────────────────────────
+
+    onIncomingCall(handler: (e: CallInfoEvent) => void) {
+        return emitter().addListener(McSdkEvents.IncomingCall, handler);
+    }
+
+    onCallUpdated(handler: (e: CallInfoEvent) => void) {
+        return emitter().addListener(McSdkEvents.CallUpdated, handler);
+    }
+
+    onCallTerminated(handler: (e: CallTerminatedEvent) => void) {
+        return emitter().addListener(McSdkEvents.CallTerminated, handler);
+    }
+
+    onCallSelected(handler: (e: CallSelectedEvent) => void) {
+        return emitter().addListener(McSdkEvents.CallSelected, handler);
+    }
+
+    onFloorUpdated(handler: (e: FloorUpdatedEvent) => void) {
+        return emitter().addListener(McSdkEvents.FloorUpdated, handler);
     }
 
     onSdsSent(handler: (e: SdsSentEvent) => void) {

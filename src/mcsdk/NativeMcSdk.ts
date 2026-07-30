@@ -32,8 +32,26 @@ export interface Spec extends TurboModule {
     exportData(): string;
 
     // Messaging
+    // fetchDocument was dropped from the Android SDK in 072fad0 (the engine now
+    // fetches documents itself). Kept in the spec because the iOS xcframework
+    // still implements it; the Android bridge no longer exports it.
     fetchDocument(url: string): void;
     sendSds(target: string, body: string): void;
+
+    // Calling (Android only until the iOS xcframework is rebuilt)
+    startPrivateCall(mcId: string): void;
+    startGroupCall(groupId: string): void;
+    answerCall(callId: string): void;
+    rejectCall(callId: string): void;
+    terminateCall(callId: string): void;
+
+    // Floor control
+    requestFloor(callId: string): void;
+    releaseFloor(callId: string): void;
+
+    // Media
+    selectCall(callId: string): void;
+    muteMicrophone(muted: boolean): void;
 
     // Identity and registration
     setIdentity(mcId: string, password: string, clientId: string): void;

@@ -83,6 +83,15 @@ jest.mock('../src/mcsdk/NativeMcSdk', () => {
         importData:      jest.fn(),
         exportData:      jest.fn().mockReturnValue(''),
         fetchDocument:   jest.fn(),
+        startPrivateCall: jest.fn(),
+        startGroupCall: jest.fn(),
+        answerCall: jest.fn(),
+        rejectCall: jest.fn(),
+        terminateCall: jest.fn(),
+        requestFloor: jest.fn(),
+        releaseFloor: jest.fn(),
+        selectCall: jest.fn(),
+        muteMicrophone: jest.fn(),
         sendSds:         jest.fn(),
     };
     return { __esModule: true, default: mock };
@@ -98,14 +107,14 @@ const DOC_A: McSdkDocument = {
     uri:       'http://bms.example.com/docs/a',
     etag:      '"abc123"',
     content:   '<McData/>',
-    type:      DocumentType.UeInit,
+    type:      DocumentType.UeInitialConfig,
     fetchedAt: 1700000000000,
 };
 const DOC_B: McSdkDocument = {
     uri:       'http://bms.example.com/docs/b',
     etag:      '"def456"',
     content:   '<McData2/>',
-    type:      DocumentType.UeConfig,
+    type:      DocumentType.UeInitConfig,
     fetchedAt: 1700000001000,
 };
 

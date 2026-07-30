@@ -3,9 +3,11 @@ package com.aselsan.mcsdk.rn
 import com.aselsan.mcsdk.Alarm
 import com.aselsan.mcsdk.AlarmListener
 import com.aselsan.mcsdk.AlarmSeverity
+import com.aselsan.mcsdk.CallInfo
 import com.aselsan.mcsdk.Document
 import com.aselsan.mcsdk.DocumentType
 import com.aselsan.mcsdk.Documents
+import com.aselsan.mcsdk.FloorInfo
 import com.aselsan.mcsdk.Identity
 import com.aselsan.mcsdk.LogLevel
 import com.aselsan.mcsdk.LogListener
@@ -15,6 +17,7 @@ import com.aselsan.mcsdk.RegistrationState
 import com.aselsan.mcsdk.SdkError
 import com.aselsan.mcsdk.SdkListener
 import com.aselsan.mcsdk.SdkParams
+import com.aselsan.mcsdk.TerminationInfo
 import com.facebook.react.bridge.Arguments
 import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
@@ -23,7 +26,6 @@ import com.facebook.react.bridge.ReactMethod
 import org.json.JSONObject
 
 // Event name constants (must match src/index.ts McSdkEvents)
-private const val EVENT_FETCH_DOCUMENT  = "McSdkFetchDocument"
 private const val EVENT_SDS_SENT        = "McSdkSdsSent"
 private const val EVENT_SDS_RECEIVED    = "McSdkSdsReceived"
 private const val EVENT_SDS_ERROR       = "McSdkSdsError"
@@ -31,6 +33,11 @@ private const val EVENT_ALARM           = "McSdkAlarm"
 private const val EVENT_LOG             = "McSdkLog"
 private const val EVENT_REGISTRATION    = "McSdkRegistration"
 private const val EVENT_STORE_DOCUMENTS = "McSdkStoreDocuments"
+private const val EVENT_INCOMING_CALL   = "McSdkIncomingCall"
+private const val EVENT_CALL_UPDATED    = "McSdkCallUpdated"
+private const val EVENT_CALL_TERMINATED = "McSdkCallTerminated"
+private const val EVENT_CALL_SELECTED   = "McSdkCallSelected"
+private const val EVENT_FLOOR_UPDATED   = "McSdkFloorUpdated"
 
 class McSdkModule(
     private val context: ReactApplicationContext,
@@ -113,11 +120,19 @@ class McSdkModule(
             Tls.caListPath      = d.optString("caListPath", "cert/ca.pem")
             Threading.sipRxThreadCount     = maxOf(1, d.optInt("sipRxThreads", 1))
             Threading.sdkWorkerThreadCount = maxOf(1, d.optInt("sipWorkerThreads", 1))
-            Mcx.idmsUrl = d.optString("idmsUrl", "")
-            Mcx.bmsUrl  = d.optString("bmsUrl",  "")
-            Mcx.cmsUrl  = d.optString("cmsUrl",  "")
-            Mcx.gmsUrl  = d.optString("gmsUrl",  "")
-            Mcx.mock    = d.optInt("mock", 0) != 0
+            // Mcx was reshaped in SDK 072fad0: idmsUrl/cmsUrl/gmsUrl are gone
+            // (document fetching moved inside the SDK); the service-enable and
+            // SIP-registration knobs below replaced them.
+            Mcx.mcdataSds       = d.optInt("mcdataSds", 1) != 0
+            Mcx.mcdataFd        = d.optInt("mcdataFd", 1) != 0
+            Mcx.mcdataIpconn    = d.optInt("mcdataIpconn", 0) != 0
+            Mcx.authViaPublish  = d.optInt("authViaPublish", 1) != 0
+            Mcx.registerExpires = d.optInt("registerExpires", 3600)
+            Mcx.pocExpires      = d.optLong("pocExpires", 4294967295L)
+            Mcx.userAgent       = d.optString("userAgent", "Mission 809")
+            Mcx.bmsUrl          = d.optString("bmsUrl", "")
+            Mcx.mock            = d.optInt("mock", 0) != 0
+            Mcx.imei            = d.optString("imei", "0001-0001-000001")
         }
         sdk?.setParams(p)
     }
@@ -175,11 +190,31 @@ class McSdkModule(
 
     // ── Messaging ─────────────────────────────────────────────────────────────
 
-    @ReactMethod
-    fun fetchDocument(url: String) { sdk?.fetchDocument(url) }
+    // NOTE: fetchDocument() was removed from the SDK in 072fad0 — the engine now
+    // fetches BMS documents itself and reports them via onDocumentsUpdated().
+    // The JS-side McSdk.fetchDocument() is a no-op on Android; it remains only
+    // because the iOS xcframework still exposes the old API.
 
     @ReactMethod
     fun sendSds(target: String, body: String) { sdk?.sendSds(target, body) }
+
+    // ── Calling ───────────────────────────────────────────────────────────────
+
+    @ReactMethod fun startPrivateCall(mcId: String)  { sdk?.startPrivateCall(mcId) }
+    @ReactMethod fun startGroupCall(groupId: String) { sdk?.startGroupCall(groupId) }
+    @ReactMethod fun answerCall(callId: String)      { sdk?.answerCall(callId) }
+    @ReactMethod fun rejectCall(callId: String)      { sdk?.rejectCall(callId) }
+    @ReactMethod fun terminateCall(callId: String)   { sdk?.terminateCall(callId) }
+
+    // ── Floor ─────────────────────────────────────────────────────────────────
+
+    @ReactMethod fun requestFloor(callId: String)    { sdk?.requestFloor(callId) }
+    @ReactMethod fun releaseFloor(callId: String)    { sdk?.releaseFloor(callId) }
+
+    // ── Media ─────────────────────────────────────────────────────────────────
+
+    @ReactMethod fun selectCall(callId: String)      { sdk?.selectCall(callId) }
+    @ReactMethod fun muteMicrophone(muted: Boolean)  { sdk?.muteMicrophone(muted) }
 
     // ── Identity & Registration ───────────────────────────────────────────────
 
@@ -264,13 +299,6 @@ class McSdkModule(
 
     override fun onRegistrationFailed() {}
 
-    fun onFetchDocument(url: String, content: String) {
-        emit(EVENT_FETCH_DOCUMENT, Arguments.createMap().apply {
-            putString("url", url)
-            putString("content", content)
-        })
-    }
-
     fun onSdsSent(target: String, body: String) {
         emit(EVENT_SDS_SENT, Arguments.createMap().apply {
             putString("target", target)
@@ -310,6 +338,51 @@ class McSdkModule(
         } catch (e: Exception) {
             Log.e("McSdkBridge", "onDocumentsUpdated serialise error: ${e.message}", e)
         }
+    }
+
+    // ── SdkListener: Call & Floor (added in SDK 072fad0) ──────────────────────
+
+    private fun callInfoToMap(c: CallInfo) = Arguments.createMap().apply {
+        putString("callId", c.callId)
+        putString("type", c.type.name)
+        putString("state", c.state.name)
+        putBoolean("outgoing", c.outgoing)
+        putBoolean("isEmergency", c.isEmergency)
+        putBoolean("isImminentPeril", c.isImminentPeril)
+        putString("callerId", c.callerId)
+        putString("calleeId", c.calleeId)
+        putString("groupId", c.groupId)
+    }
+
+    override fun onIncomingCall(callInfo: CallInfo) {
+        emit(EVENT_INCOMING_CALL, callInfoToMap(callInfo))
+    }
+
+    override fun onCallUpdated(callInfo: CallInfo) {
+        emit(EVENT_CALL_UPDATED, callInfoToMap(callInfo))
+    }
+
+    override fun onCallTerminated(terminationInfo: TerminationInfo) {
+        emit(EVENT_CALL_TERMINATED, Arguments.createMap().apply {
+            putString("callId", terminationInfo.callId)
+            putString("mode", terminationInfo.mode.name)
+            putString("reason", terminationInfo.reason.name)
+        })
+    }
+
+    override fun onCallSelected(callId: String) {
+        emit(EVENT_CALL_SELECTED, Arguments.createMap().apply {
+            putString("callId", callId)
+        })
+    }
+
+    override fun onFloorUpdated(floorInfo: FloorInfo) {
+        emit(EVENT_FLOOR_UPDATED, Arguments.createMap().apply {
+            putString("callId", floorInfo.callId)
+            putString("ownerId", floorInfo.ownerId)
+            putString("status", floorInfo.status.name)
+            putInt("queuePosition", floorInfo.queuePosition)
+        })
     }
 
     // ── AlarmListener ─────────────────────────────────────────────────────────
