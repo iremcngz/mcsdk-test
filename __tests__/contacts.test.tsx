@@ -91,6 +91,13 @@ jest.mock('../src/core/db', () => ({
   getAllContacts:(...args: any[]) => mockGetAll(...args),
 }));
 
+// CallContext now subscribes to the SDK's call callbacks via SdkContext, which
+// reaches the TurboModule (unavailable under Jest). Stub it out; these tests
+// only exercise the contact list, not call wiring.
+jest.mock('../src/contexts/SdkContext', () => ({
+  useSdkContext: () => ({ sdkRef: { current: null }, created: false }),
+}));
+
 import { ContactsScreen } from '../src/features/contacts/ContactsScreen';
 import { CallContextProvider } from '../src/contexts/CallContext';
 import { NavigationContextProvider } from '../src/contexts/NavigationContext';

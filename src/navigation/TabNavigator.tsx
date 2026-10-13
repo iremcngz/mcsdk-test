@@ -3,7 +3,7 @@
  * and bottom tab bar. Screen state is owned by NavigationContext.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../contexts/AppContext';
@@ -39,13 +39,29 @@ const TABS: { id: Screen; icon: string }[] = [
 export function TabNavigator() {
   const { c, tr, theme } = useAppContext();
   const { ipInfo, created, initialized, paramsSet } = useSdkContext();
-  const { screen, setScreen } = useNavigation();
-  const { activeGroups, setPendingGroup, isBroadcasting } = useTalkContext();
+  const { screen, setScreen, leaveCallScreen } = useNavigation();
+  const { activeGroups, setPendingGroup, isBroadcasting, identityServices } = useTalkContext();
   const { activeCall } = useCallContext();
   const insets = useSafeAreaInsets();
   const s = useMemo(() => makeCommonStyles(c), [c]);
   const [showActiveList, setShowActiveList] = useState(false);
   const hasActiveCall = activeCall !== null && activeCall.state === 'active';
+
+  /** Short labels for the MC services the user is authorised for. */
+  const identityServiceLabels = useMemo(() => {
+    const out: string[] = [];
+    if (identityServices.ptt)   out.push(tr.talkSvcPtt);
+    if (identityServices.video) out.push(tr.talkSvcVideo);
+    if (identityServices.data)  out.push(tr.talkSvcData);
+    return out;
+  }, [identityServices, tr]);
+
+  // The call screens render nothing without an active call, and they hide the
+  // tab bar — so when a call goes away (typically the remote party hanging up,
+  // where nothing local navigates) return to the screen the user came from.
+  useEffect(() => {
+    if (!activeCall) leaveCallScreen();
+  }, [activeCall, leaveCallScreen]);
   const totalActive = activeGroups.length + (hasActiveCall ? 1 : 0);
 
   const tabLabels: Record<Screen, string> = {
@@ -130,6 +146,27 @@ export function TabNavigator() {
       fontSize: 15,
       fontWeight: '600',
       color: c.textPrimary,
+    },
+    // Registered MC services, under the username. Deliberately small and low
+    // contrast — this is standing status, not something to act on.
+    svcRow: {
+      flexDirection: 'row',
+      gap: 4,
+      marginTop: 3,
+    },
+    svcBadge: {
+      paddingHorizontal: 5,
+      paddingVertical: 1,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: c.primary + '55',
+      backgroundColor: c.primary + '14',
+    },
+    svcBadgeText: {
+      fontSize: 9,
+      fontWeight: '800',
+      letterSpacing: 0.3,
+      color: c.primary,
     },
     rightSection: {
       flexDirection: 'row',
@@ -256,6 +293,18 @@ export function TabNavigator() {
               <Text style={navStyles.usernameText} numberOfLines={1}>
                 {username}
               </Text>
+              {/* MC services this user is registered for, from
+                  SdkListener::onIdentityUpdated. Empty until registration
+                  completes, so the row simply disappears when nothing is known. */}
+              {identityServiceLabels.length > 0 && (
+                <View style={navStyles.svcRow} testID="header-identity-services">
+                  {identityServiceLabels.map(label => (
+                    <View key={label} style={navStyles.svcBadge}>
+                      <Text style={navStyles.svcBadgeText}>{label}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
           </View>
 

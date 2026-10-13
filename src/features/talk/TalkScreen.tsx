@@ -26,11 +26,10 @@ import { makeTalkStyles } from './styles';
 import { GroupActionMenu } from './components/GroupActionMenu';
 import { TalkMockPanel } from './components/TalkMockPanel';
 import { GroupSelector } from './components/GroupSelector';
+import { AffiliationEditor } from './components/AffiliationEditor';
 import { MessagesScreen } from './MessagesScreen';
 import { BroadcastScreen } from './BroadcastScreen';
 
-const GROUPS = ['group1', 'group2', 'group3', 'group4', 'group5', 'group6', 'group7'];
-const DATA_GROUPS = new Set(['group3', 'group5', 'group6', 'group7']);
 
 // ── Mock timings ───────────────────────────────────────────────────────────
 // Artificial delays that stand in for real SDK round-trips while the native
@@ -44,10 +43,34 @@ type TalkMode = 'receive' | 'transmit' | 'messages';
 
 export function TalkScreen() {
   const { c, tr, theme } = useAppContext();
-  const { setActiveGroups, pendingGroup, setPendingGroup, groupCalls, setGroupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, isBroadcasting, setIsBroadcasting } = useTalkContext();
+  const { affiliatedGroups, affiliationByGroup, applyAffiliation, groups: allGroups, groupsLoaded, setActiveGroups, pendingGroup, setPendingGroup, groupCalls, setGroupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, isBroadcasting, setIsBroadcasting } = useTalkContext();
   const styles = useMemo(() => makeTalkStyles(c), [c]);
 
-  const initialGroup = pendingGroup ?? GROUPS[0];
+  // Only affiliated groups are selectable/listed; the rest live in the editor.
+  const GROUPS = useMemo(() => affiliatedGroups.map(g => g.groupId), [affiliatedGroups]);
+  // Names come from the full provisioned list, which also covers groups that are
+  // not affiliated (so the editor can label them too).
+  const groupLabels = useMemo(
+    () => Object.fromEntries(allGroups.map(g => [g.groupId, g.name || g.groupId])),
+    [allGroups],
+  );
+  // Mode availability follows the group's own capabilities (onGroupsUpdated),
+  // not what the current affiliation happens to cover (onAffiliationsUpdated).
+  // The two differ — a group can support MCVideo while the affiliation was only
+  // established for MCPTT — and the editor shows the supported set, so keying
+  // off anything else makes the chips and the buttons disagree.
+  /** Groups that support MCData — these get the Messages mode. */
+  const dataGroups = useMemo(
+    () => new Set(allGroups.filter(g => g.isData).map(g => g.groupId)),
+    [allGroups],
+  );
+  /** Groups that support MCVideo — these get Receive / Transmit. */
+  const videoGroups = useMemo(
+    () => new Set(allGroups.filter(g => g.isVideo).map(g => g.groupId)),
+    [allGroups],
+  );
+
+  const initialGroup = pendingGroup ?? GROUPS[0] ?? '';
   const initialGroupState = groupCalls[initialGroup];
   const [selectedGroup, setSelectedGroup] = useState(initialGroup);
   const [mode, setMode] = useState<TalkMode>('receive');
@@ -60,6 +83,7 @@ export function TalkScreen() {
   const [soundMonitoring, setSoundMonitoring] = useState(false);
   const [showMockPanel, setShowMockPanel] = useState(false);
   const [showGroupMenu, setShowGroupMenu] = useState(false);
+  const [showAffEditor, setShowAffEditor] = useState(false);
   const [muted, setMuted] = useState(false);
   const isFirstRender = useRef(true);
   const prevCallActive = useRef(callActive);
@@ -74,7 +98,7 @@ export function TalkScreen() {
       .sort((a, b) => (lastClosedAt[b] ?? 0) - (lastClosedAt[a] ?? 0));
     const neverActive = GROUPS.filter(g => !everActive.includes(g));
     return [...activeSorted, ...inactiveSorted, ...neverActive];
-  }, [groupCalls, activationOrder, lastClosedAt]);
+  }, [GROUPS, groupCalls, activationOrder, lastClosedAt]);
   const spinAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const incomingPulse = useRef(new Animated.Value(1)).current;
@@ -170,6 +194,18 @@ const ringColor = pushState === 'occupied'
       setPendingGroup(null);
     }
   }, [pendingGroup]);
+
+  // Keep the selection valid: deaffiliating the selected group (or the first
+  // group set arriving from the SDK) has to move the selection somewhere real.
+  // handleSelectGroup is recreated every render, so it stays out of the deps
+  // (including it would re-run this on every render).
+  useEffect(() => {
+    if (GROUPS.length === 0) return;
+    if (!GROUPS.includes(selectedGroup)) {
+      handleSelectGroup(GROUPS[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [GROUPS, selectedGroup]);
 
   // Slide + fade animation when switching between groups
   useEffect(() => {
@@ -351,20 +387,28 @@ const ringColor = pushState === 'occupied'
         styles={styles}
         c={c}
         orderedGroups={orderedGroups}
+        groupLabels={groupLabels}
         groupCalls={groupCalls}
         selectedGroup={selectedGroup}
         incomingCalls={incomingCalls}
         incomingPulse={incomingPulse}
         onSelectGroup={handleSelectGroup}
+        onEditAffiliation={() => setShowAffEditor(true)}
+        editLabel={tr.talkAffEdit}
+        emptyLabel={groupsLoaded ? tr.talkAffNoneAffiliated : tr.talkAffNotRegistered}
       />
 
       <View style={styles.centerCard}>
         <Animated.View style={{ opacity: contentFade, transform: [{ translateY: contentSlide }], flex: 1 }}>
         <View style={styles.selectedRow}>
-          <Text style={styles.selectedLabel} testID="talk-selected-group">
+          <Text
+            style={styles.selectedLabel}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            testID="talk-selected-group">
             {selectedGroup}
           </Text>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={styles.selectedActions}>
             <TouchableOpacity
               onPress={() => setShowMockPanel(!showMockPanel)}
               activeOpacity={0.8}
@@ -506,8 +550,12 @@ const ringColor = pushState === 'occupied'
         <View style={{ marginTop: 'auto' }}>
 
           <View style={[styles.modeRow, !callActive && styles.modeRowHidden]}>
+            {/* Each mode needs the matching MC service: video for the
+                receive/transmit pair, data for messages. */}
             {(['receive', 'transmit', 'messages'] as TalkMode[]).filter(
-              v => v !== 'messages' || DATA_GROUPS.has(selectedGroup)
+              v => v === 'messages'
+                ? dataGroups.has(selectedGroup)
+                : videoGroups.has(selectedGroup)
             ).map(value => {
               const isActive = mode === value;
               const icon = value === 'transmit' ? '📹'
@@ -587,6 +635,18 @@ const ringColor = pushState === 'occupied'
         </Animated.View>
 
         </View>
+
+        {showAffEditor && (
+          <AffiliationEditor
+            styles={styles}
+            tr={tr}
+            groups={allGroups}
+            affiliationByGroup={affiliationByGroup}
+            groupsLoaded={groupsLoaded}
+            onClose={() => setShowAffEditor(false)}
+            onApply={applyAffiliation}
+          />
+        )}
 
         {showMockPanel && (
           <TalkMockPanel

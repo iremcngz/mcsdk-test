@@ -13,27 +13,52 @@ import React, {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import type { Screen } from '../shared/types';
 
+/** The full-screen call views. They hide the tab bar, so leaving them needs care. */
+const CALL_SCREENS: Screen[] = ['incall', 'callactive'];
+
+export function isCallScreen(s: Screen): boolean {
+  return CALL_SCREENS.includes(s);
+}
+
 interface NavigationContextValue {
   screen: Screen;
   setScreen: (s: Screen) => void;
+  /**
+   * Returns to whatever screen was showing before the call took over. Used when
+   * a call ends — including when the *remote* party hangs up, where there is no
+   * local action to navigate away. Without it the call screen renders nothing
+   * and the tab bar stays hidden, leaving a blank page.
+   */
+  leaveCallScreen: () => void;
 }
 
 const NavigationContext = createContext<NavigationContextValue | null>(null);
 
 export function NavigationContextProvider({ children }: { children: React.ReactNode }) {
   const [screen, setScreenState] = useState<Screen>('home');
+  // Where to go back to once the call is over. Only tracks non-call screens.
+  const preCallScreen = useRef<Screen>('home');
 
   const setScreen = useCallback((s: Screen) => {
-    setScreenState(s);
+    setScreenState(prev => {
+      // Remember the last ordinary screen as we enter a call view.
+      if (isCallScreen(s) && !isCallScreen(prev)) preCallScreen.current = prev;
+      return s;
+    });
+  }, []);
+
+  const leaveCallScreen = useCallback(() => {
+    setScreenState(prev => (isCallScreen(prev) ? preCallScreen.current : prev));
   }, []);
 
   const value = useMemo<NavigationContextValue>(
-    () => ({ screen, setScreen }),
-    [screen, setScreen],
+    () => ({ screen, setScreen, leaveCallScreen }),
+    [screen, setScreen, leaveCallScreen],
   );
 
   return (

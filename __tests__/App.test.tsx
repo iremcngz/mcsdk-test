@@ -145,6 +145,19 @@ const makeSdkInstance = () => ({
   onStoreDocuments:   jest.fn(),
   register:           jest.fn(),
   unregister:     jest.fn(),
+  // Affiliation — TalkContext subscribes to these on mount. The SDK pushes the
+  // group lists; there is no getter.
+  affiliate:              jest.fn(),
+  deaffiliate:            jest.fn(),
+  onIdentityUpdated:      jest.fn().mockReturnValue({ remove: jest.fn() }),
+  onGroupsUpdated:        jest.fn().mockReturnValue({ remove: jest.fn() }),
+  onAffiliationsUpdated:  jest.fn().mockReturnValue({ remove: jest.fn() }),
+  // Call callbacks — CallContext subscribes to these on mount.
+  onIncomingCall:         jest.fn().mockReturnValue({ remove: jest.fn() }),
+  onCallUpdated:          jest.fn().mockReturnValue({ remove: jest.fn() }),
+  onCallTerminated:       jest.fn().mockReturnValue({ remove: jest.fn() }),
+  onCallSelected:         jest.fn().mockReturnValue({ remove: jest.fn() }),
+  onFloorUpdated:         jest.fn().mockReturnValue({ remove: jest.fn() }),
 });
 
 // ── Setup ─────────────────────────────────────────────────────────────────────

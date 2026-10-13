@@ -34,6 +34,11 @@ export type CommencementMode = 'auto' | 'manual';
 /** Represents the currently active (or connecting) call. */
 export interface ActiveCall {
   id: string;
+  /**
+   * The SDK's own call id, needed to answer/reject/terminate it. Absent for
+   * locally simulated calls, which have no counterpart in the SDK.
+   */
+  sdkCallId?: string;
   contactName: string;
   sipUri: string;
   callType: CallType;

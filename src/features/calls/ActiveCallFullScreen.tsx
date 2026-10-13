@@ -19,7 +19,7 @@ import { makeActiveCallFullScreenStyles } from './styles';
 export function ActiveCallFullScreen() {
   const { c, theme } = useAppContext();
   const { activeCall, endCall, setFloorState } = useCallContext();
-  const { setScreen } = useNavigation();
+  const { leaveCallScreen } = useNavigation();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions(); 
 
@@ -137,7 +137,8 @@ export function ActiveCallFullScreen() {
       Animated.timing(blinkAnim, { toValue: 0, duration: 250, useNativeDriver: true }),
     ]).start(() => {
       endCall();
-      setScreen('contacts');
+      // Back to wherever the call was answered from, not a fixed tab.
+      leaveCallScreen();
     });
   };
 

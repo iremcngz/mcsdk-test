@@ -1,20 +1,35 @@
 /**
  * contexts/CallContext.tsx — Global call state.
  *
- * No MCSDK wiring — all state is managed locally.
- * SDK integration will be added when the native bridge exposes call APIs.
+ * Driven by the SDK's call callbacks (onIncomingCall / onCallUpdated /
+ * onCallTerminated / onFloorUpdated). Calls that originate in the SDK carry its
+ * `sdkCallId`, which is what answer/reject/terminate are addressed to; the
+ * simulate* helpers still create purely local calls for testing the UI without
+ * a network.
  */
 
 import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import type {
+  CallInfoEvent,
+  CallTerminatedEvent,
+  FloorUpdatedEvent,
+  McSdkCallState,
+  McSdkFloorStatus,
+} from '../mcsdk';
+import { useSdkContext } from './SdkContext';
+import { AuthSettings } from '../core/settings';
+import type {
   ActiveCall,
   CallRecord,
+  CallState,
   CallType,
   CommencementMode,
   FloorState,
@@ -24,6 +39,65 @@ import type {
 
 function uuid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+// ── SDK → UI mapping ──────────────────────────────────────────────────────────
+
+/**
+ * Maps McSdkCallState onto the UI's CallState.
+ *
+ * INCOMING is the only state that must show the ringing overlay. ACCEPTING and
+ * the outgoing dial states are all "not yet talking" → connecting. TERMINATING /
+ * TERMINATED are not mapped here: teardown is driven by onCallTerminated, which
+ * also carries the reason, so treating them as a state change would race it.
+ */
+function mapCallState(state: McSdkCallState): CallState | null {
+  switch (state) {
+    case 'INCOMING':
+      return 'ringing';
+    case 'ACCEPTING':
+    case 'OUTGOING':
+    case 'CALLING':
+    case 'RINGING':
+    case 'ESTABLISHING':
+    case 'REESTABLISHING':
+      return 'connecting';
+    case 'ACTIVE':
+      return 'active';
+    case 'TERMINATING':
+      return 'ending';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Maps FloorInfo.status onto the UI's three-way floor state. `ownerId` decides
+ * between "we hold it" and "someone else does" for GRANTED/TAKEN.
+ */
+function mapFloorState(status: McSdkFloorStatus, weOwnIt: boolean): FloorState {
+  switch (status) {
+    case 'GRANTED':
+      return weOwnIt ? 'granted' : 'busy';
+    case 'TAKEN':
+      return 'busy';
+    case 'REQUESTED':
+    case 'QUEUED':
+    case 'GRANT_PENDING':
+      return 'idle';
+    default:
+      return 'idle';
+  }
+}
+
+/** MCPTT group/private calls are half-duplex; video is the full-duplex case. */
+function mapCallType(e: CallInfoEvent): CallType {
+  return e.type === 'AMBIENT_LISTENING' ? 'full_duplex' : 'half_duplex';
+}
+
+/** Best available human label for the remote party. */
+function remoteLabel(e: CallInfoEvent): string {
+  return e.groupId || e.callerId || e.calleeId || 'Unknown';
 }
 
 // ── Context shape ─────────────────────────────────────────────────────────────
@@ -107,13 +181,116 @@ export function useCallContext(): CallContextValue {
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function CallContextProvider({ children }: { children: React.ReactNode }) {
+  const { sdkRef, created } = useSdkContext();
   const [activeCall,       setActiveCall]       = useState<ActiveCall | null>(null);
   const [callHistory,      setCallHistory]       = useState<CallRecord[]>([]);
   const [commencementMode, setCommencementModeState] = useState<CommencementMode>('auto');
 
+  // Read inside SDK callbacks, which are registered once and must not capture a
+  // stale mode.
+  const commencementModeRef = useRef(commencementMode);
+  useEffect(() => { commencementModeRef.current = commencementMode; }, [commencementMode]);
+
   const setCommencementMode = useCallback((m: CommencementMode) => {
     setCommencementModeState(m);
   }, []);
+
+  /** Moves a call into history. Shared by SDK teardown and local end/reject. */
+  const archive = useCallback((prev: ActiveCall, duration?: number) => {
+    const now = Date.now();
+    const record: CallRecord = {
+      id:               prev.id,
+      contactName:      prev.contactName,
+      sipUri:           prev.sipUri,
+      direction:        prev.direction,
+      callType:         prev.callType,
+      commencementMode: prev.commencementMode,
+      startedAt:        prev.startedAt,
+      endedAt:          now,
+      duration:         duration ?? Math.round((now - prev.startedAt) / 1000),
+    };
+    setCallHistory(h => [record, ...h]);
+  }, []);
+
+  // ── SDK call callbacks ──────────────────────────────────────────────────────
+  // `sdkRef` is a ref, so it is deliberately not a dependency — only `created`
+  // gates (re)subscription.
+  useEffect(() => {
+    const sdk = sdkRef.current;
+    if (!created || !sdk) return;
+
+    const subs = [
+      // A new inbound call. Shows the ringing overlay via state='ringing'.
+      sdk.onIncomingCall((e: CallInfoEvent) => {
+        setActiveCall(prev => {
+          // A second call while one is up: the existing one is not ours to keep.
+          if (prev) archive(prev);
+          return {
+            id:               uuid(),
+            sdkCallId:        e.callId,
+            contactName:      remoteLabel(e),
+            sipUri:           e.callerId || e.groupId,
+            callType:         mapCallType(e),
+            direction:        'incoming',
+            commencementMode: commencementModeRef.current,
+            state:            'ringing',
+            floorState:       'idle',
+            startedAt:        Date.now(),
+            needsManualJoin:  false,
+          };
+        });
+      }),
+
+      // State transitions for a call we already know about.
+      sdk.onCallUpdated((e: CallInfoEvent) => {
+        const next = mapCallState(e.state);
+        if (!next) return;
+        setActiveCall(prev => {
+          if (!prev) return prev;
+          // startCall() creates the local call before the SDK has issued an id,
+          // so adopt the first id that arrives for our own outgoing call.
+          if (!prev.sdkCallId && e.outgoing && prev.direction === 'outgoing') {
+            prev = { ...prev, sdkCallId: e.callId };
+          }
+          if (prev.sdkCallId !== e.callId) return prev;
+          const isManual = prev.commencementMode === 'manual';
+          // Entering 'active' is when the call really starts, so restart the
+          // timer — and in manual mode hold the user at the Join banner.
+          if (next === 'active') {
+            return {
+              ...prev,
+              state:           isManual ? 'connecting' : 'active',
+              needsManualJoin: isManual,
+              startedAt:       Date.now(),
+            };
+          }
+          return { ...prev, state: next };
+        });
+      }),
+
+      sdk.onCallTerminated((e: CallTerminatedEvent) => {
+        setActiveCall(prev => {
+          if (!prev || prev.sdkCallId !== e.callId) return prev;
+          // A call that never went active has no talk time to report.
+          archive(prev, prev.state === 'ringing' ? 0 : undefined);
+          return null;
+        });
+      }),
+
+      sdk.onFloorUpdated((e: FloorUpdatedEvent) => {
+        setActiveCall(prev => {
+          if (!prev || prev.sdkCallId !== e.callId) return prev;
+          // ownerId is an MC id; compare against the logged-in user to tell
+          // "we hold the floor" from "someone else does".
+          const mcId = AuthSettings.getLastUsername() ?? '';
+          const weOwnIt = !!e.ownerId && !!mcId && e.ownerId.includes(mcId);
+          return { ...prev, floorState: mapFloorState(e.status, weOwnIt) };
+        });
+      }),
+    ];
+    return () => subs.forEach(s => s.remove());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [created, archive]);
 
   const startCall = useCallback((
     contactName: string,
@@ -124,23 +301,15 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     const mode = commencement ?? commencementMode;
     // End any existing call first (shouldn't normally happen but be safe)
     setActiveCall(prev => {
-      if (prev) {
-        const now = Date.now();
-        const record: CallRecord = {
-          id:              prev.id,
-          contactName:     prev.contactName,
-          sipUri:          prev.sipUri,
-          direction:       prev.direction,
-          callType:        prev.callType,
-          commencementMode: prev.commencementMode,
-          startedAt:       prev.startedAt,
-          endedAt:         now,
-          duration:        Math.round((now - prev.startedAt) / 1000),
-        };
-        setCallHistory(h => [record, ...h]);
-      }
+      if (prev) archive(prev);
       return null;
     });
+
+    // Ask the SDK to place the call. It answers with onCallUpdated, which drives
+    // the real state; until then the UI shows 'connecting'. Without an SDK the
+    // call stays local so the screens remain usable offline.
+    const sdk = sdkRef.current;
+    if (sdk) sdk.startPrivateCall(sipUri);
 
     const call: ActiveCall = {
       id:               uuid(),
@@ -149,33 +318,23 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
       callType,
       direction:        'outgoing',
       commencementMode: mode,
-      state:            mode === 'auto' ? 'active' : 'connecting',
+      // A real call is never instantly up — wait for the SDK to say ACTIVE.
+      state:            sdk ? 'connecting' : (mode === 'auto' ? 'active' : 'connecting'),
       floorState:       'idle',
       startedAt:        Date.now(),
       needsManualJoin:  false,
     };
     setActiveCall(call);
-  }, [commencementMode]);
+  }, [commencementMode, archive, sdkRef]);
 
   const endCall = useCallback(() => {
     setActiveCall(prev => {
       if (!prev) return null;
-      const now = Date.now();
-      const record: CallRecord = {
-        id:              prev.id,
-        contactName:     prev.contactName,
-        sipUri:          prev.sipUri,
-        direction:       prev.direction,
-        callType:        prev.callType,
-        commencementMode: prev.commencementMode,
-        startedAt:       prev.startedAt,
-        endedAt:         now,
-        duration:        Math.round((now - prev.startedAt) / 1000),
-      };
-      setCallHistory(h => [record, ...h]);
+      if (prev.sdkCallId) sdkRef.current?.terminateCall(prev.sdkCallId);
+      archive(prev);
       return null;
     });
-  }, []);
+  }, [archive, sdkRef]);
 
   const setFloorState = useCallback((state: FloorState) => {
     setActiveCall(prev => prev ? { ...prev, floorState: state } : null);
@@ -194,6 +353,12 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
   const acceptCall = useCallback(() => {
     setActiveCall(prev => {
       if (!prev || prev.state !== 'ringing') return prev;
+      // Real calls are answered through the SDK; the resulting ACTIVE arrives
+      // via onCallUpdated, so only move to 'connecting' optimistically here.
+      if (prev.sdkCallId) {
+        sdkRef.current?.answerCall(prev.sdkCallId);
+        return { ...prev, state: 'connecting' };
+      }
       const isManual = commencementMode === 'manual';
       return {
         ...prev,
@@ -202,27 +367,16 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
         startedAt:       Date.now(), // reset timer to call-accepted moment
       };
     });
-  }, [commencementMode]);
+  }, [commencementMode, sdkRef]);
 
   const rejectCall = useCallback(() => {
     setActiveCall(prev => {
       if (!prev || prev.state !== 'ringing') return prev;
-      const now = Date.now();
-      const record: CallRecord = {
-        id:               prev.id,
-        contactName:      prev.contactName,
-        sipUri:           prev.sipUri,
-        direction:        prev.direction,
-        callType:         prev.callType,
-        commencementMode: prev.commencementMode,
-        startedAt:        prev.startedAt,
-        endedAt:          now,
-        duration:         0,
-      };
-      setCallHistory(h => [record, ...h]);
+      if (prev.sdkCallId) sdkRef.current?.rejectCall(prev.sdkCallId);
+      archive(prev, 0);
       return null;
     });
-  }, []);
+  }, [archive, sdkRef]);
 
   // ───────────────────────────────────────────────────────────────────────────
   // MOCK / SIMULATION HELPERS

@@ -16,7 +16,7 @@ import { makeOutgoingCallStyles } from './styles';
 export function OutgoingCallScreen() {
   const { c } = useAppContext();
   const { activeCall, endCall, simulateAnswer } = useCallContext();
-  const { setScreen } = useNavigation();
+  const { setScreen, leaveCallScreen } = useNavigation();
   const insets = useSafeAreaInsets();
 
   const [isClosing, setIsClosing] = useState(false);
@@ -58,7 +58,8 @@ export function OutgoingCallScreen() {
       Animated.timing(blinkAnim, { toValue: 0, duration: 250, useNativeDriver: true }),
     ]).start(() => {
       endCall();
-      setScreen('contacts');
+      // Back to wherever the call was placed from, not a fixed tab.
+      leaveCallScreen();
     });
   };
 

@@ -24,9 +24,16 @@ export function IncomingCallOverlay() {
     if (activeCall?.state === 'ringing') {
       // ÖNEMLİ DÜZELTME: Yeni çağrı geldiğinde slider'ı sıfırla
       slideX.setValue(0);
-      
-      Vibration.vibrate([0, 400, 200, 400], true);
-      return () => Vibration.cancel();
+
+      // Ringing must never be able to take the app down: vibration depends on a
+      // permission and on hardware that may be absent or restricted, and it is
+      // the least important part of announcing a call.
+      try {
+        Vibration.vibrate([0, 400, 200, 400], true);
+      } catch {
+        // Silent — the visual overlay still announces the call.
+      }
+      return () => { try { Vibration.cancel(); } catch {} };
     }
   }, [activeCall?.state, slideX]);
 
@@ -114,7 +121,9 @@ export function IncomingCallOverlay() {
           </View>
         </View>
 
-        <TouchableOpacity style={s.declineBtn} onPress={() => { rejectCall(); setScreen('contacts'); }} activeOpacity={0.6}>
+        {/* Declining just dismisses the overlay — the user never left their
+            screen, so navigating anywhere would be a surprise. */}
+        <TouchableOpacity style={s.declineBtn} onPress={rejectCall} activeOpacity={0.6}>
           <Text style={s.declineText}>Decline Call</Text>
         </TouchableOpacity>
       </View>
