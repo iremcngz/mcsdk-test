@@ -1,9 +1,13 @@
 /**
  * features/talk/components/GroupSelector.tsx
  *
- * Horizontal scroller of group avatars at the top of TalkScreen. Highlights
- * the selected group, colors active calls (talking = green, occupied = red,
- * active = primary), and shows a pulsing badge for incoming calls.
+ * Horizontal scroller of group avatars at the top of TalkScreen, listing only
+ * the groups the user is affiliated with. Highlights the selected group, colors
+ * active calls (talking = green, occupied = red, active = primary), and shows a
+ * pulsing badge for incoming calls.
+ *
+ * The trailing dashed slot opens the AffiliationEditor, so the strip doubles as
+ * the entry point for changing which groups appear here.
  */
 
 import React from 'react';
@@ -18,22 +22,31 @@ interface GroupSelectorProps {
   styles: TalkStyles;
   c: ThemePalette;
   orderedGroups: string[];
+  /** Group id → display label from the group profile. Falls back to the id. */
+  groupLabels: Record<string, string>;
   groupCalls: Record<string, GroupCallState>;
   selectedGroup: string;
   incomingCalls: Set<string>;
   incomingPulse: Animated.Value;
   onSelectGroup: (group: string) => void;
+  onEditAffiliation: () => void;
+  editLabel: string;
+  emptyLabel: string;
 }
 
 export function GroupSelector({
   styles,
   c,
   orderedGroups,
+  groupLabels,
   groupCalls,
   selectedGroup,
   incomingCalls,
   incomingPulse,
   onSelectGroup,
+  onEditAffiliation,
+  editLabel,
+  emptyLabel,
 }: GroupSelectorProps) {
   return (
     <ScrollView
@@ -41,6 +54,11 @@ export function GroupSelector({
       contentContainerStyle={styles.groupsContainer}
       horizontal
       showsHorizontalScrollIndicator={false}>
+      {orderedGroups.length === 0 && (
+        <View style={styles.affEmptyWrap}>
+          <Text style={styles.affEmptyText}>{emptyLabel}</Text>
+        </View>
+      )}
       {orderedGroups.map(group => {
         const gs = groupCalls[group];
         const groupColor = gs?.callActive
@@ -49,11 +67,14 @@ export function GroupSelector({
             : c.primary)
           : undefined;
         const isActiveGroup = group === selectedGroup;
-        const avatarSize = isActiveGroup ? 72 : 52;
+        const avatarSize = isActiveGroup ? 68 : 52;
         const iconPersonSize = isActiveGroup ? 1.2 : 1;
         return (
           <View key={group} style={[styles.groupCol, isActiveGroup && { marginRight: 22 }]}>
-            <View style={[styles.groupAvatarWrap, !isActiveGroup && { opacity: 0.55 }]}>
+            <View style={[
+              styles.groupAvatarWrap,
+              !isActiveGroup && { opacity: 0.55 },
+            ]}>
               <TouchableOpacity
                 onPress={() => onSelectGroup(group)}
                 activeOpacity={0.8}
@@ -92,14 +113,30 @@ export function GroupSelector({
                 <Animated.View testID={`talk-incoming-badge-${group}`} pointerEvents="none" style={[styles.incomingBadge, { opacity: incomingPulse }]} />
               )}
             </View>
-            <Text style={[
-              styles.groupLabel,
-              isActiveGroup && styles.groupLabelActive,
-              isActiveGroup && { fontSize: 13, fontWeight: '900', marginTop: 6 },
-            ]}>{group}</Text>
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.groupLabel,
+                isActiveGroup && styles.groupLabelActive,
+                isActiveGroup && { fontSize: 13, fontWeight: '900', marginTop: 6 },
+                { maxWidth: isActiveGroup ? 84 : 64 },
+              ]}>{groupLabels[group] ?? group}</Text>
           </View>
         );
       })}
+
+      <View style={styles.groupCol}>
+        <TouchableOpacity
+          onPress={onEditAffiliation}
+          activeOpacity={0.8}
+          style={styles.affEditButton}
+          testID="talk-aff-edit">
+          <Text style={styles.affEditIcon}>✎</Text>
+        </TouchableOpacity>
+        <Text numberOfLines={1} style={[styles.affEditLabel, { maxWidth: 64 }]}>
+          {editLabel}
+        </Text>
+      </View>
     </ScrollView>
   );
 }

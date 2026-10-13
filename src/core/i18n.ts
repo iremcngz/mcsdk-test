@@ -74,6 +74,8 @@ export interface Translations {
   inputCaListPath: string;
   inputSipRxThreads: string;
   inputSipWorkerThreads: string;
+  /** Accepted range shown under a numeric parameter field. */
+  inputRangeHint: (min: number, max: number) => string;
   inputIdmsUrl: string;
   inputBmsUrl: string;
   inputCmsUrl: string;
@@ -148,6 +150,27 @@ export interface Translations {
   talkMockAccept: string;
   talkMockOccupy: string;
   talkMockReset: string;
+
+  // ── Affiliation editor
+  talkAffEdit: string;
+  talkAffTitle: string;
+  talkAffSubtitle: string;
+  talkAffEmpty: string;
+  talkAffNotRegistered: string;
+  talkAffNoneAffiliated: string;
+  talkAffSelectAll: string;
+  talkAffClearAll: string;
+  talkAffApply: string;
+  talkAffCancel: string;
+  talkAffNoChanges: string;
+  talkAffDiffAdd: (n: number) => string;
+  talkAffDiffRemove: (n: number) => string;
+  talkAffCount: (affiliated: number, total: number) => string;
+  /** Service chip labels — short, they sit inside 3 chips per row. */
+  talkSvcPtt: string;
+  talkSvcVideo: string;
+  talkSvcData: string;
+  talkAffServicesHint: string;
   talkMicEnable: string;
   talkMicEnabled: string;
   talkMicDenied: string;
@@ -276,7 +299,7 @@ const tr: Translations = {
   switchMtlsEnabled: 'mTLS Etkin',
   switchMockEnabled:  'Mock Modu',
 
-  inputLevel:          'Seviye (0-5)',
+  inputLevel:          'Seviye',
   inputPjLevel:        'PJ Seviye',
   inputPort:           'Port',
   inputUdpPort:        'UDP Port',
@@ -287,6 +310,7 @@ const tr: Translations = {
   inputCaListPath:     'CA Listesi Yolu',
   inputSipRxThreads:   'SIP Rx Thread',
   inputSipWorkerThreads: 'SIP Worker Thread',
+  inputRangeHint:      (min, max) => `${min}–${max} arası`,
   inputIdmsUrl:        'IDMS URL',
   inputBmsUrl:         'BMS URL',
   inputCmsUrl:         'CMS URL',
@@ -354,6 +378,25 @@ const tr: Translations = {
   talkMockAccept:        'Push accepted',
   talkMockOccupy:        'Other talking',
   talkMockReset:         'Reset',
+
+  talkAffEdit:           'Grupları düzenle',
+  talkAffTitle:          'Grup İlişkilendirme',
+  talkAffSubtitle:       'İlişkilendirmek istediğiniz grupları seçin',
+  talkAffEmpty:          'Tanımlı grup yok.',
+  talkAffNotRegistered:  'Grup listesi kayıt tamamlanınca gelir.',
+  talkAffNoneAffiliated: 'İlişkili grup yok — düzenle ile grup ekleyin.',
+  talkAffSelectAll:      'Tümünü seç',
+  talkAffClearAll:       'Temizle',
+  talkAffApply:          'Uygula',
+  talkAffCancel:         'İptal',
+  talkAffNoChanges:      'Değişiklik yok',
+  talkAffDiffAdd:        n => `+${n} ilişkilendir`,
+  talkAffDiffRemove:     n => `−${n} ayır`,
+  talkAffCount:          (affiliated, total) => `${affiliated}/${total} grup ilişkili`,
+  talkSvcPtt:            'PTT',
+  talkSvcVideo:          'Video',
+  talkSvcData:           'Veri',
+  talkAffServicesHint:   'Grubun desteklediği servisler',
   talkMicEnable:         'Mikrofonu etkinleştir',
   talkMicEnabled:        'Mikrofon etkin',
   talkMicDenied:         'Mikrofon izni reddedildi',
@@ -481,7 +524,7 @@ const en: Translations = {
   switchMtlsEnabled: 'mTLS Enabled',
   switchMockEnabled:  'Mock Mode',
 
-  inputLevel:           'Level (0-5)',
+  inputLevel:           'Level',
   inputPjLevel:         'PJ Level',
   inputPort:            'Port',
   inputUdpPort:         'UDP Port',
@@ -492,6 +535,7 @@ const en: Translations = {
   inputCaListPath:      'CA List Path',
   inputSipRxThreads:    'SIP Rx Threads',
   inputSipWorkerThreads: 'SIP Worker Threads',
+  inputRangeHint:       (min, max) => `${min}–${max}`,
   inputIdmsUrl:         'IDMS URL',
   inputBmsUrl:          'BMS URL',
   inputCmsUrl:          'CMS URL',
@@ -559,6 +603,25 @@ const en: Translations = {
   talkMockAccept:        'Grant push',
   talkMockOccupy:        'Other talking',
   talkMockReset:         'Reset',
+
+  talkAffEdit:           'Edit groups',
+  talkAffTitle:          'Group Affiliation',
+  talkAffSubtitle:       'Select the groups you want to be affiliated with',
+  talkAffEmpty:          'No provisioned groups.',
+  talkAffNotRegistered:  'The group list arrives once registration completes.',
+  talkAffNoneAffiliated: 'No affiliated groups — use edit to add some.',
+  talkAffSelectAll:      'Select all',
+  talkAffClearAll:       'Clear',
+  talkAffApply:          'Apply',
+  talkAffCancel:         'Cancel',
+  talkAffNoChanges:      'No changes',
+  talkAffDiffAdd:        n => `+${n} affiliate`,
+  talkAffDiffRemove:     n => `−${n} deaffiliate`,
+  talkAffCount:          (affiliated, total) => `${affiliated}/${total} groups affiliated`,
+  talkSvcPtt:            'PTT',
+  talkSvcVideo:          'Video',
+  talkSvcData:           'Data',
+  talkAffServicesHint:   'Services the group supports',
   talkMicEnable:         'Enable microphone',
   talkMicEnabled:        'Microphone enabled',
   talkMicDenied:         'Microphone permission denied',

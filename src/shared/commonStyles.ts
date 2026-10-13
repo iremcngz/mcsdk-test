@@ -81,6 +81,15 @@ export function makeCommonStyles(c: ThemePalette) {
       paddingVertical: 4,
     },
     inputLabel: { fontSize: 13, color: c.textSecondary, flex: 1 },
+    // Label + its range hint. Takes the flex the label used to own so the
+    // input keeps its width.
+    inputLabelBlock: { flex: 1, paddingRight: 8 },
+    /** The label inside inputLabelBlock — the block owns the flex now. */
+    inputLabelInBlock: { fontSize: 13, color: c.textSecondary },
+    /** Accepted range, shown under the label so the rule is visible before typing. */
+    inputHint: { fontSize: 11, color: c.textMuted, marginTop: 1 },
+    /** Same hint, promoted to a warning once the field holds a rejected value. */
+    inputHintError: { color: c.warn, fontWeight: '700' },
     input: {
       backgroundColor: c.inputBg,
       color: c.textPrimary,
@@ -90,7 +99,10 @@ export function makeCommonStyles(c: ThemePalette) {
       fontSize: 13,
       minWidth: 100,
       textAlign: 'right',
+      borderWidth: 1,
+      borderColor: 'transparent',
     },
+    inputError: { borderColor: c.warn },
 
     // ── Step indicators ──────────────────────────────────────────────────────
     stepRow:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
