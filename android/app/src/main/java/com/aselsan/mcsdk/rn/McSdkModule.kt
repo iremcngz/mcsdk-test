@@ -14,7 +14,10 @@ import com.aselsan.mcsdk.LogListener
 import com.aselsan.mcsdk.McSdk
 import com.aselsan.mcsdk.RegistrationPhase
 import com.aselsan.mcsdk.RegistrationState
+import com.aselsan.mcsdk.SdkAffiliateRequest
 import com.aselsan.mcsdk.SdkError
+import com.aselsan.mcsdk.SdkGroupInfo
+import com.aselsan.mcsdk.SdkIdentityInfo
 import com.aselsan.mcsdk.SdkListener
 import com.aselsan.mcsdk.SdkParams
 import com.aselsan.mcsdk.TerminationInfo
@@ -38,6 +41,9 @@ private const val EVENT_CALL_UPDATED    = "McSdkCallUpdated"
 private const val EVENT_CALL_TERMINATED = "McSdkCallTerminated"
 private const val EVENT_CALL_SELECTED   = "McSdkCallSelected"
 private const val EVENT_FLOOR_UPDATED   = "McSdkFloorUpdated"
+private const val EVENT_IDENTITY_UPDATED     = "McSdkIdentityUpdated"
+private const val EVENT_GROUPS_UPDATED       = "McSdkGroupsUpdated"
+private const val EVENT_AFFILIATIONS_UPDATED = "McSdkAffiliationsUpdated"
 
 class McSdkModule(
     private val context: ReactApplicationContext,
@@ -206,6 +212,41 @@ class McSdkModule(
     @ReactMethod fun rejectCall(callId: String)      { sdk?.rejectCall(callId) }
     @ReactMethod fun terminateCall(callId: String)   { sdk?.terminateCall(callId) }
 
+    // ── Affiliation ───────────────────────────────────────────────────────────
+
+    /**
+     * Explicit affiliation (TS 24.379 §9.2.1.2 state-replacing PUBLISH).
+     *
+     * The SDK's affiliate() is state-REPLACING: the array is the complete desired
+     * set, not a delta, so JS must send every group it wants affiliated on every
+     * call. An empty array de-affiliates everything, which is what deaffiliate()
+     * expresses explicitly.
+     *
+     * JSON shape: [{groupId, ptt, video, data}, ...]
+     */
+    @ReactMethod
+    fun affiliate(requestsJson: String) {
+        val sdk = sdk ?: return
+        try {
+            val arr = org.json.JSONArray(requestsJson)
+            val requests = Array(arr.length()) { i ->
+                val obj = arr.getJSONObject(i)
+                SdkAffiliateRequest(
+                    obj.optString("groupId"),
+                    obj.optBoolean("ptt", false),
+                    obj.optBoolean("video", false),
+                    obj.optBoolean("data", false),
+                )
+            }
+            sdk.affiliate(requests)
+        } catch (e: Exception) {
+            Log.e("McSdkBridge", "affiliate parse error: ${e.message}", e)
+        }
+    }
+
+    @ReactMethod
+    fun deaffiliate() { sdk?.deaffiliate() }
+
     // ── Floor ─────────────────────────────────────────────────────────────────
 
     @ReactMethod fun requestFloor(callId: String)    { sdk?.requestFloor(callId) }
@@ -337,6 +378,53 @@ class McSdkModule(
             })
         } catch (e: Exception) {
             Log.e("McSdkBridge", "onDocumentsUpdated serialise error: ${e.message}", e)
+        }
+    }
+
+    // ── SdkListener: Identity, Groups & Affiliation (added in SDK dbb25f5) ────
+
+    /**
+     * The user's MC identity — which services are registered (authorized).
+     * The access token is deliberately NOT forwarded to JS: it is a credential
+     * the UI has no use for, and the SDK already holds it for its own requests.
+     */
+    override fun onIdentityUpdated(identity: SdkIdentityInfo) {
+        emit(EVENT_IDENTITY_UPDATED, Arguments.createMap().apply {
+            putBoolean("isPtt",   identity.isPtt)
+            putBoolean("isVideo", identity.isVideo)
+            putBoolean("isData",  identity.isData)
+        })
+    }
+
+    /**
+     * Groups the user MAY affiliate to (from the provisioned user profiles).
+     * Here the flags mean "this service supports the group".
+     */
+    override fun onGroupsUpdated(groups: List<SdkGroupInfo>) {
+        emit(EVENT_GROUPS_UPDATED, Arguments.createMap().apply {
+            putArray("groups", groupListToArray(groups))
+        })
+    }
+
+    /**
+     * The currently affiliated set. Same shape as onGroupsUpdated, but the flags
+     * mean "the affiliation covers this service".
+     */
+    override fun onAffiliationsUpdated(groups: List<SdkGroupInfo>) {
+        emit(EVENT_AFFILIATIONS_UPDATED, Arguments.createMap().apply {
+            putArray("groups", groupListToArray(groups))
+        })
+    }
+
+    private fun groupListToArray(groups: List<SdkGroupInfo>) = Arguments.createArray().apply {
+        for (g in groups) {
+            pushMap(Arguments.createMap().apply {
+                putString("groupId", g.groupId)
+                putString("name",    g.name)
+                putBoolean("isPtt",   g.isPtt)
+                putBoolean("isVideo", g.isVideo)
+                putBoolean("isData",  g.isData)
+            })
         }
     }
 

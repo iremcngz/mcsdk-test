@@ -252,3 +252,58 @@ export interface FloorUpdatedEvent {
     status:        McSdkFloorStatus;
     queuePosition: number;
 }
+
+// ── Identity, Groups & Affiliation (added in SDK dbb25f5) ─────────────────────
+
+/**
+ * Mirrors GroupInfo (core/Modules/Session/GroupInfo.h) — the only group shape the
+ * SDK emits. Carried by BOTH McSdkGroupsUpdated and McSdkAffiliationsUpdated, and
+ * the service flags mean different things in each:
+ *
+ *   - onGroupsUpdated:       the service SUPPORTS this group (what you may ask for)
+ *   - onAffiliationsUpdated: the affiliation COVERS this service (what you have)
+ */
+export interface McSdkGroupInfo {
+    /** Group MC ID — the identifier used for calls and affiliation requests. */
+    groupId: string;
+    /** Human-readable group name; may be empty, in which case fall back to groupId. */
+    name:    string;
+    isPtt:   boolean;
+    isVideo: boolean;
+    isData:  boolean;
+}
+
+/**
+ * Mirrors AffiliateRequest (core/Modules/Session/AffiliateRequest.h) — one group
+ * and the services to affiliate it to.
+ *
+ * Note that Sdk::Affiliate is state-REPLACING: the array passed to affiliate() is
+ * the complete desired set, never a delta.
+ */
+export interface McSdkAffiliateRequest {
+    groupId: string;
+    ptt:     boolean;
+    video:   boolean;
+    data:    boolean;
+}
+
+/**
+ * Mirrors IdentityInfo (core/Modules/Session/IdentityInfo.h) minus the access
+ * token, which the bridge does not forward — it is a credential the UI has no
+ * use for. Flags are the MC services the user is registered (authorized) for.
+ */
+export interface IdentityUpdatedEvent {
+    isPtt:   boolean;
+    isVideo: boolean;
+    isData:  boolean;
+}
+
+/** Payload of McSdkGroupsUpdated — groups the user MAY affiliate to. */
+export interface GroupsUpdatedEvent {
+    groups: McSdkGroupInfo[];
+}
+
+/** Payload of McSdkAffiliationsUpdated — the groups currently affiliated. */
+export interface AffiliationsUpdatedEvent {
+    groups: McSdkGroupInfo[];
+}

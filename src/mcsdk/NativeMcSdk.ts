@@ -45,6 +45,12 @@ export interface Spec extends TurboModule {
     rejectCall(callId: string): void;
     terminateCall(callId: string): void;
 
+    // Affiliation (Android only until the iOS xcframework is rebuilt).
+    // requestsJson is a JSON-encoded McSdkAffiliateRequest[] (same pattern as
+    // setDocuments). State-replacing: the array is the complete desired set.
+    affiliate(requestsJson: string): void;
+    deaffiliate(): void;
+
     // Floor control
     requestFloor(callId: string): void;
     releaseFloor(callId: string): void;
