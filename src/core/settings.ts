@@ -45,6 +45,45 @@ export function initUserStorage(username: string): void {
   userStorage = new MMKV({ id: `user-${username}` });
 }
 
+// ── MC client id ───────────────────────────────────────────────────────────────
+// TS 24.379 requires the client to identify itself with a stable URN of the form
+// "urn:uuid:<uuid>". It surfaces in the PUBLISH poc-settings body (as the
+// <mcptt-client-id> element and the <entity id> attribute) and is passed to the
+// SDK via setIdentity().
+//
+// It identifies the *client instance*, not the user, so it lives in global
+// storage: it must survive logout and stay the same across users on this device,
+// and it must NOT be regenerated on each launch (the server treats a new id as a
+// different client instance).
+
+const CLIENT_ID_KEY = 'device.mcClientId';
+
+/** RFC 4122 version 4 UUID. Math.random is adequate here — this is an instance
+ *  label, not a secret, and avoiding crypto keeps it free of a polyfill. */
+function uuidV4(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+export const DeviceIdentity = {
+  /** Stable "urn:uuid:<uuid>" for this install; generated once, then reused. */
+  getMcClientId(): string {
+    const existing = globalStorage.getString(CLIENT_ID_KEY);
+    if (existing) return existing;
+    const generated = `urn:uuid:${uuidV4()}`;
+    globalStorage.set(CLIENT_ID_KEY, generated);
+    return generated;
+  },
+
+  /** Forces a new client id on the next read. For testing/support only. */
+  resetMcClientId(): void {
+    globalStorage.delete(CLIENT_ID_KEY);
+  },
+} as const;
+
 // ── App-level settings (theme, language) ──────────────────────────────────────
 
 export type AppTheme = 'dark' | 'light';

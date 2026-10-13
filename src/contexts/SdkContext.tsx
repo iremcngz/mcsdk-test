@@ -15,7 +15,7 @@ import React, {
   useState,
 } from 'react';
 import { McSdk, type McSdkParams, type LogEvent, type RegistrationEvent, type StoreDocumentsEvent } from '../mcsdk';
-import { SdkSettings, type SdkSettingsSchema } from '../core/settings';
+import { DeviceIdentity, SdkSettings, type SdkSettingsSchema } from '../core/settings';
 import { AppLogger, SdkLogger } from '../core/logger';
 import { useIpMonitor, type IpInfo } from '../core/netMonitor';
 import { useAppContext } from './AppContext';
@@ -262,13 +262,16 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         }
       });
 
-      // Automatically set identity from stored credentials
+      // Automatically set identity from stored credentials. The client id is a
+      // stable per-install "urn:uuid:<uuid>" (TS 24.379) — the SDK puts it in the
+      // PUBLISH poc-settings body, where an empty value is rejected.
       const lastUser = AuthSettings.getLastUsername();
       if (lastUser) {
         const creds = await getCredentials(lastUser);
         if (creds) {
-          sdkRef.current.setIdentity(creds.username, creds.password);
-          addLog(`setIdentity(${creds.username}) called`);
+          const clientId = DeviceIdentity.getMcClientId();
+          sdkRef.current.setIdentity(creds.username, creds.password, clientId);
+          addLog(`setIdentity(${creds.username}, clientId=${clientId}) called`);
           currentMcIdRef.current = creds.username;
         }
       }

@@ -125,6 +125,8 @@ jest.mock('../src/core/settings', () => ({
     },
     AppSettings:         { getTheme: jest.fn().mockReturnValue('dark'), setTheme: jest.fn(), getLanguage: jest.fn().mockReturnValue('en'), setLanguage: jest.fn() },
     LogRotationSettings: { load: jest.fn().mockReturnValue({ maxFileSize: 5, maxFiles: 3 }), save: jest.fn() },
+    // handleCreate reads this to pass a stable client id to setIdentity().
+    DeviceIdentity:      { getMcClientId: jest.fn().mockReturnValue('urn:uuid:test-client-id'), resetMcClientId: jest.fn() },
     initUserStorage:     jest.fn(),
     clearUserStorage:    jest.fn(),
 }));
