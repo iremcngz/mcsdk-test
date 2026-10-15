@@ -18,7 +18,7 @@ const DOC_UE_INIT: McSdkDocument = {
     uri:       'http://bms.example.com/ue-init',
     etag:      '"etag-1"',
     content:   '<UeInit/>',
-    type:      DocumentType.UeInitialConfig,
+    type:      DocumentType.UeInitConfig,
     fetchedAt: 1700000000000,
 };
 const DOC_UE_CONFIG: McSdkDocument = {
@@ -128,7 +128,7 @@ describe('getDocumentsByMcId — field mapping', () => {
     it('casts type as DocumentType enum integer', async () => {
         const docs = await db.getDocumentsByMcId('alice@mc.example.com');
         const ueInit = docs.find(d => d.uri === DOC_UE_INIT.uri);
-        expect(ueInit?.type).toBe(DocumentType.UeInitialConfig);
+        expect(ueInit?.type).toBe(DocumentType.UeInitConfig);
         expect(typeof ueInit?.type).toBe('number');
     });
 
@@ -183,7 +183,7 @@ describe('getAllDocuments — multi-user Map', () => {
         await db.saveDocuments('alice@mc.example.com', [DOC_UE_INIT]);
         const map = await db.getAllDocuments();
         const doc = map.get('alice@mc.example.com')![0];
-        expect(doc.type).toBe(DocumentType.UeInitialConfig);
+        expect(doc.type).toBe(DocumentType.UeInitConfig);
         expect(doc.fetchedAt).toBe(DOC_UE_INIT.fetchedAt);
         expect(doc.uri).toBe(DOC_UE_INIT.uri);
     });
@@ -232,35 +232,39 @@ describe('clearDocumentsByMcId', () => {
 // 5.  DocumentType enum values
 // =============================================================================
 
+// These ordinals are the bridge contract: McSdkModule emits doc.type.ordinal,
+// so each value must equal its position in the C++ enum
+// (core/Modules/Session/Document/Document.h). Asserted one by one because a
+// single extra member shifts everything after it, which is how a cached group
+// document once read back as McdataUserProfile.
 describe('DocumentType enum', () => {
     it('Unknown = 0', () => expect(DocumentType.Unknown).toBe(0));
-    it('UeInitialConfig = 1', () => expect(DocumentType.UeInitialConfig).toBe(1));
-    it('UeInitConfig = 2', () => expect(DocumentType.UeInitConfig).toBe(2));
-    it('UserAdditions = 3', () => expect(DocumentType.UserAdditions).toBe(3));
-    it('McpttUeConfig = 4', () => expect(DocumentType.McpttUeConfig).toBe(4));
-    it('McpttServiceConfig = 5', () => expect(DocumentType.McpttServiceConfig).toBe(5));
-    it('McpttUserProfile = 6', () => expect(DocumentType.McpttUserProfile).toBe(6));
-    it('McvideoUeConfig = 7', () => expect(DocumentType.McvideoUeConfig).toBe(7));
-    it('McvideoServiceConfig = 8', () => expect(DocumentType.McvideoServiceConfig).toBe(8));
-    it('McvideoUserProfile = 9', () => expect(DocumentType.McvideoUserProfile).toBe(9));
-    it('McdataUeConfig = 10', () => expect(DocumentType.McdataUeConfig).toBe(10));
-    it('McdataServiceConfig = 11', () => expect(DocumentType.McdataServiceConfig).toBe(11));
-    it('McdataUserProfile = 12', () => expect(DocumentType.McdataUserProfile).toBe(12));
-    it('GroupConfig = 13', () => expect(DocumentType.GroupConfig).toBe(13));
+    it('UeInitConfig = 1', () => expect(DocumentType.UeInitConfig).toBe(1));
+    it('UserAdditions = 2', () => expect(DocumentType.UserAdditions).toBe(2));
+    it('McpttUeConfig = 3', () => expect(DocumentType.McpttUeConfig).toBe(3));
+    it('McpttServiceConfig = 4', () => expect(DocumentType.McpttServiceConfig).toBe(4));
+    it('McpttUserProfile = 5', () => expect(DocumentType.McpttUserProfile).toBe(5));
+    it('McvideoUeConfig = 6', () => expect(DocumentType.McvideoUeConfig).toBe(6));
+    it('McvideoServiceConfig = 7', () => expect(DocumentType.McvideoServiceConfig).toBe(7));
+    it('McvideoUserProfile = 8', () => expect(DocumentType.McvideoUserProfile).toBe(8));
+    it('McdataUeConfig = 9', () => expect(DocumentType.McdataUeConfig).toBe(9));
+    it('McdataServiceConfig = 10', () => expect(DocumentType.McdataServiceConfig).toBe(10));
+    it('McdataUserProfile = 11', () => expect(DocumentType.McdataUserProfile).toBe(11));
+    it('GroupConfig = 12', () => expect(DocumentType.GroupConfig).toBe(12));
 });
 
 describe('migrateLegacyDocumentType', () => {
-    it('maps legacy UE_INIT(1) to UeInitialConfig', () =>
-        expect(migrateLegacyDocumentType(1)).toBe(DocumentType.UeInitialConfig));
-    it('maps legacy UE_CONFIG(2) to UeInitConfig', () =>
-        expect(migrateLegacyDocumentType(2)).toBe(DocumentType.UeInitConfig));
+    it('maps legacy UE_INIT(1) to UeInitConfig', () =>
+        expect(migrateLegacyDocumentType(1)).toBe(DocumentType.UeInitConfig));
+    it('maps legacy UE_CONFIG(2) to McpttUeConfig', () =>
+        expect(migrateLegacyDocumentType(2)).toBe(DocumentType.McpttUeConfig));
     it('keeps UserAdditions(3) in place', () =>
         expect(migrateLegacyDocumentType(3)).toBe(DocumentType.UserAdditions));
-    it('maps legacy SERVICE_CONFIG(4) to McpttServiceConfig(5)', () =>
+    it('maps legacy SERVICE_CONFIG(4) to McpttServiceConfig(4)', () =>
         expect(migrateLegacyDocumentType(4)).toBe(DocumentType.McpttServiceConfig));
-    it('maps legacy USER_PROFILE(5) to McpttUserProfile(6)', () =>
+    it('maps legacy USER_PROFILE(5) to McpttUserProfile(5)', () =>
         expect(migrateLegacyDocumentType(5)).toBe(DocumentType.McpttUserProfile));
-    it('maps legacy GROUP_PROFILE(6) to GroupConfig(13)', () =>
+    it('maps legacy GROUP_PROFILE(6) to GroupConfig(12)', () =>
         expect(migrateLegacyDocumentType(6)).toBe(DocumentType.GroupConfig));
     it('returns Unknown for out-of-range ordinals', () => {
         expect(migrateLegacyDocumentType(0)).toBe(DocumentType.Unknown);

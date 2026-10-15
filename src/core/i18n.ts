@@ -60,7 +60,6 @@ export interface Translations {
   switchTlsEnabled: string;
   switchIpv6Enabled: string;
   switchMtlsEnabled: string;
-  switchMockEnabled: string;
 
   // ── Input row labels
   inputLevel: string;
@@ -297,7 +296,6 @@ const tr: Translations = {
   switchTlsEnabled:  'TLS Etkin',
   switchIpv6Enabled: 'IPv6 Etkin',
   switchMtlsEnabled: 'mTLS Etkin',
-  switchMockEnabled:  'Mock Modu',
 
   inputLevel:          'Seviye',
   inputPjLevel:        'PJ Seviye',
@@ -522,7 +520,6 @@ const en: Translations = {
   switchTlsEnabled:  'TLS Enabled',
   switchIpv6Enabled: 'IPv6 Enabled',
   switchMtlsEnabled: 'mTLS Enabled',
-  switchMockEnabled:  'Mock Mode',
 
   inputLevel:           'Level',
   inputPjLevel:         'PJ Level',

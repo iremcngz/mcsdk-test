@@ -203,7 +203,6 @@ export function HomeScreen() {
         {renderInput(tr.inputBmsUrl,  sdk.bmsUrl,  sdk.setBmsUrl,  'default')}
         {renderInput(tr.inputCmsUrl,  sdk.cmsUrl,  sdk.setCmsUrl,  'default')}
         {renderInput(tr.inputGmsUrl,  sdk.gmsUrl,  sdk.setGmsUrl,  'default')}
-        {renderSwitch(tr.switchMockEnabled, sdk.mcxMock, sdk.setMcxMock)}
       </View>
 
       {/* ── Action Buttons ─────────────────────────────────────────────────── */}

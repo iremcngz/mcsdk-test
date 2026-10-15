@@ -39,11 +39,18 @@ export interface Spec extends TurboModule {
     sendSds(target: string, body: string): void;
 
     // Calling (Android only until the iOS xcframework is rebuilt)
-    startPrivateCall(mcId: string): void;
+    // autoCommence: Answer-Mode header on the INVITE (RFC 5373).
+    // fullDuplex: TS 24.379 §11.1.2, a private call with no floor control.
+    startPrivateCall(mcId: string, autoCommence: boolean, fullDuplex: boolean): void;
     startGroupCall(groupId: string): void;
     answerCall(callId: string): void;
     rejectCall(callId: string): void;
     terminateCall(callId: string): void;
+
+    // Call priority. Re-INVITEs the call at the provisioned emergency floor
+    // priority; later floor requests inherit it.
+    setEmergency(callId: string, emergency: boolean): void;
+    setImminentPeril(callId: string, imminentPeril: boolean): void;
 
     // Affiliation (Android only until the iOS xcframework is rebuilt).
     // requestsJson is a JSON-encoded McSdkAffiliateRequest[] (same pattern as

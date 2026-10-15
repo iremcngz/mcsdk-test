@@ -14,6 +14,7 @@ import type {
     SdsReceivedEvent,
     SdsErrorEvent,
     AlarmEvent,
+    SdkErrorEvent,
     LogEvent,
     RegistrationEvent,
     McSdkDocument,
@@ -35,6 +36,7 @@ export const McSdkEvents = {
     SdsReceived:     'McSdkSdsReceived',
     SdsError:        'McSdkSdsError',
     Alarm:           'McSdkAlarm',
+    SdkError:        'McSdkSdkError',
     Log:             'McSdkLog',
     Registration:    'McSdkRegistration',
     StoreDocuments:  'McSdkStoreDocuments',
@@ -131,7 +133,6 @@ export class McSdk {
             sipRxThreads:    clamp(Th.sipRxThreadCount, 1, 64, 1),
             sipWorkerThreads: clamp(Th.sipWorkerThreadCount, 1, 64, 1),
             bmsUrl:          M.bmsUrl ?? '',
-            mock:            (M.mock ?? false) ? 1 : 0,
             // Mcx fields added in SDK 072fad0 — read by Android only.
             mcdataSds:       (M.mcdataSds ?? true) ? 1 : 0,
             mcdataFd:        (M.mcdataFd ?? true) ? 1 : 0,
@@ -147,7 +148,23 @@ export class McSdk {
             cmsUrl:          M.cmsUrl ?? '',
             gmsUrl:          M.gmsUrl ?? '',
         };
-        NativeMcSdk.setParams(JSON.stringify(flat));
+
+        // Protocol tuning is sent only when the caller actually set it: the
+        // bridge overwrites a field only if the key is present, so an absent key
+        // keeps the SDK's own default rather than a guess made here.
+        const tuning: Record<string, number> = {};
+        if (M.sessionExpires !== undefined)
+            tuning.sessionExpires = clamp(M.sessionExpires, 1, 4294967295, 1800);
+        if (M.affiliationExpires !== undefined)
+            tuning.affiliationExpires = clamp(M.affiliationExpires, 1, 4294967295, 4294967295);
+        if (M.affiliateBeforeSubscribe !== undefined)
+            tuning.affiliateBeforeSubscribe = M.affiliateBeforeSubscribe ? 1 : 0;
+        if (M.xcapExpires !== undefined)
+            tuning.xcapExpires = clamp(M.xcapExpires, 1, 4294967295, 36000);
+        if (H.requestTimeout !== undefined)
+            tuning.httpRequestTimeout = clamp(H.requestTimeout, 1, 600, 10);
+
+        NativeMcSdk.setParams(JSON.stringify({ ...flat, ...tuning }));
     }
 
     async init(): Promise<boolean> {
@@ -240,11 +257,33 @@ export class McSdk {
     // ── Calling ────────────────────────────────────────────────────────────────
     // Available on Android only until the iOS xcframework is rebuilt.
 
-    startPrivateCall(mcId: string): void   { NativeMcSdk.startPrivateCall(mcId); }
+    /**
+     * `fullDuplex` selects TS 24.379 §11.1.2 — a private call with no floor
+     * control, where audio flows both ways while the call is selected and
+     * requestFloor() does not apply. The default is half-duplex PTT (§11.1.1).
+     *
+     * `autoCommence` sets the Answer-Mode header (RFC 5373): true auto-answers
+     * at the far end, false rings for manual pickup.
+     */
+    startPrivateCall(mcId: string, autoCommence = true, fullDuplex = false): void {
+        NativeMcSdk.startPrivateCall(mcId, autoCommence, fullDuplex);
+    }
     startGroupCall(groupId: string): void  { NativeMcSdk.startGroupCall(groupId); }
     answerCall(callId: string): void       { NativeMcSdk.answerCall(callId); }
     rejectCall(callId: string): void       { NativeMcSdk.rejectCall(callId); }
     terminateCall(callId: string): void    { NativeMcSdk.terminateCall(callId); }
+
+    // ── Call priority ──────────────────────────────────────────────────────────
+    // Re-INVITEs the call at the provisioned emergency floor priority; floor
+    // requests made afterwards inherit it, so there is no priority argument on
+    // requestFloor(). No-op unless the call is active and actually changing.
+
+    setEmergency(callId: string, emergency: boolean): void {
+        NativeMcSdk.setEmergency(callId, emergency);
+    }
+    setImminentPeril(callId: string, imminentPeril: boolean): void {
+        NativeMcSdk.setImminentPeril(callId, imminentPeril);
+    }
 
     // ── Floor control ──────────────────────────────────────────────────────────
 
@@ -321,6 +360,14 @@ export class McSdk {
 
     onLog(handler: (e: LogEvent) => void) {
         return emitter().addListener(McSdkEvents.Log, handler);
+    }
+
+    /**
+     * SDK-level failures (SdkListener::onSdkError). Covers the whole SdkError
+     * set — IDENTITY_NOT_SET, NOT_REGISTERED, SIP_*, HTTP_*, FLOOR_*.
+     */
+    onSdkError(handler: (e: SdkErrorEvent) => void) {
+        return emitter().addListener(McSdkEvents.SdkError, handler);
     }
 
     onRegistration(handler: (e: RegistrationEvent) => void) {

@@ -14,7 +14,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { McSdk, type McSdkParams, type LogEvent, type RegistrationEvent, type StoreDocumentsEvent } from '../mcsdk';
+import { McSdk, type McSdkParams, type LogEvent, type RegistrationEvent, type SdkErrorEvent, type StoreDocumentsEvent } from '../mcsdk';
 import { DeviceIdentity, SdkSettings, type SdkSettingsSchema } from '../core/settings';
 import { AppLogger, SdkLogger } from '../core/logger';
 import { useIpMonitor, type IpInfo } from '../core/netMonitor';
@@ -119,7 +119,6 @@ export interface SdkContextValue {
   bmsUrl:  string; setBmsUrl:  (v: string)  => void;
   cmsUrl:  string; setCmsUrl:  (v: string)  => void;
   gmsUrl:  string; setGmsUrl:  (v: string)  => void;
-  mcxMock: boolean; setMcxMock: (v: boolean) => void;
 }
 
 const SdkContext = React.createContext<SdkContextValue | null>(null);
@@ -193,8 +192,6 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     setBmsUrl:           (v: string)  => updateParam('bmsUrl', v),
     setCmsUrl:           (v: string)  => updateParam('cmsUrl', v),
     setGmsUrl:           (v: string)  => updateParam('gmsUrl', v),
-    // Context exposes this as `mcxMock`; the schema field is `mock`.
-    setMcxMock:          (v: boolean) => updateParam('mock', v),
   }), [updateParam]);
 
   // ── Log buffers ────────────────────────────────────────────────────────────
@@ -240,10 +237,18 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         ]);
       });
 
+      // Every SdkError the engine raises. These were discarded by the bridge
+      // until now, so a failure like IDENTITY_NOT_SET left no trace outside
+      // logcat.
+      sdkRef.current.onSdkError((e: SdkErrorEvent) => {
+        addLog(`onSdkError: ${e.error}`, 'error');
+      });
+
       sdkRef.current.onRegistration((e: RegistrationEvent) => {
         setRegistrationProgress(e.progress);
         setRegistrationPhase(phaseLabel(e.phase));
         setRegistrationState(stateLabel(e.state));
+
       });
 
       // Subscribe to BMS document cache events.
@@ -254,6 +259,9 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         const mcId = currentMcIdRef.current;
         if (!mcId) return;
         try {
+          // TEMP TRACE (docs-flow): the SDK handing documents back to be cached.
+          console.log(`[docs-flow] 5. onDocumentsUpdated for "${mcId}":`,
+            `${e.docs.length} docs, types=${e.docs.map(d => d.type).join(',')}`);
           await saveDocuments(mcId, e.docs);
           updateCachedDocs(mcId, e.docs);
           addLog(`onDocumentsUpdated: saved ${e.docs.length} doc(s) for ${mcId}`);
@@ -262,23 +270,52 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         }
       });
 
-      // Automatically set identity from stored credentials. The client id is a
-      // stable per-install "urn:uuid:<uuid>" (TS 24.379) — the SDK puts it in the
-      // PUBLISH poc-settings body, where an empty value is rejected.
-      const lastUser = AuthSettings.getLastUsername();
-      if (lastUser) {
-        const creds = await getCredentials(lastUser);
-        if (creds) {
-          const clientId = DeviceIdentity.getMcClientId();
-          sdkRef.current.setIdentity(creds.username, creds.password, clientId);
-          addLog(`setIdentity(${creds.username}, clientId=${clientId}) called`);
-          currentMcIdRef.current = creds.username;
-        }
-      }
+      // Identity is NOT set here — see applyIdentity(), called from handleInit().
+      // Sdk::SetIdentity routes through Sdk::PostWork, which drops the work and
+      // raises SdkError::NotInitialized while impl->running is false, i.e. until
+      // Init() has completed. Calling it at Create time looks like it works (the
+      // SDK logs "Sdk::SetIdentity") but Session::McId stays empty, and the only
+      // symptom is "Identity not set" from Register() much later.
     } catch (err: any) {
       addLog(`Create failed: ${err.message}`, 'error');
     }
-  }, [addLog, updateCachedDocs]);
+    // tr is read for the foreground-service notification strings; depending on
+    // the whole bundle keeps handleCreate correct when the language changes.
+  }, [addLog, updateCachedDocs, tr]);
+
+  /**
+   * Sends the stored credentials to the SDK. Must run after init(): everything
+   * on Sdk goes through PostWork, which silently discards work until the engine
+   * is running.
+   *
+   * Returns the mcId on success, or null when there was nothing to send — the
+   * caller needs that to decide whether register() is worth attempting.
+   */
+  const applyIdentity = useCallback(async (sdk: McSdk): Promise<string | null> => {
+    // Both guards used to fall through silently, so a missing identity only
+    // surfaced later as the SDK's own "Identity not set" at register() time,
+    // which reads like a hung registration rather than a skipped step.
+    const lastUser = AuthSettings.getLastUsername();
+    if (!lastUser) {
+      addLog('setIdentity() skipped — no stored username. Log in first.', 'warn');
+      return null;
+    }
+    const creds = await getCredentials(lastUser);
+    if (!creds) {
+      addLog(`setIdentity() skipped — no stored credentials for "${lastUser}".`, 'warn');
+      return null;
+    }
+    // A stable per-install "urn:uuid:<uuid>" (TS 24.379). The SDK embeds it in
+    // the PUBLISH poc-settings body, where an empty value is rejected with
+    // 400 "Invalid Info XML".
+    const clientId = DeviceIdentity.getMcClientId();
+    sdk.setIdentity(creds.username, creds.password, clientId);
+    addLog(`setIdentity(${creds.username}, clientId=${clientId}) called`);
+    currentMcIdRef.current = creds.username;
+    // TEMP TRACE (docs-flow): the mcId that will key the document lookup.
+    console.log(`[docs-flow] 2. setIdentity -> currentMcId="${creds.username}"`);
+    return creds.username;
+  }, [addLog]);
 
   const handleSetParams = useCallback(() => {
     if (!sdkRef.current) {
@@ -318,7 +355,6 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
           bmsUrl:  params.bmsUrl,
           cmsUrl:  params.cmsUrl,
           gmsUrl:  params.gmsUrl,
-          mock:    params.mock,
         },
       };
       sdkRef.current.setParams(mcParams);
@@ -346,27 +382,53 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
       setInitialized(result);
       addLog(`init() returned: ${result}`, result ? 'info' : 'error');
       if (result) {
+        // Order matters, and the SDK enforces it only by failing late:
+        //   init() → setIdentity() → setDocuments() → register()
+        // Everything after init goes through the engine's FIFO queue, so the
+        // identity is in Session by the time Register() reads McId.
+        const mcId = await applyIdentity(sdkRef.current);
+
         // Restore cached BMS documents before registration (FIFO queue —
         // setDocuments is processed by the engine before Register()).
-        const mcId = currentMcIdRef.current;
         if (mcId) {
           try {
             const docs = cachedDocsMap.get(mcId) ?? [];
+            // TEMP TRACE (docs-flow): which mcId is looked up, what the map holds
+            // for it, and the type ordinals actually handed to the SDK.
+            console.log(`[docs-flow] 3. lookup mcId="${mcId}" in cachedDocsMap`,
+              `(map has: ${[...cachedDocsMap.keys()].join(',') || 'nothing'})`,
+              `-> ${docs.length} docs`);
             if (docs.length > 0) {
+              console.log('[docs-flow] 4. setDocuments() types:',
+                docs.map(d => d.type).join(','));
               sdkRef.current.setDocuments(docs);
               addLog(`setDocuments(): ${docs.length} cached doc(s) provided to SDK`);
+            } else {
+              console.log('[docs-flow] 4. setDocuments() SKIPPED — nothing cached for this mcId');
             }
           } catch (err: any) {
             addLog(`setDocuments() cache read failed — ${err.message}`, 'warn');
           }
         }
-        sdkRef.current.register();
-        addLog('register() called → waiting for registration callbacks...');
+        // Registering without an identity fails inside the SDK with
+        // SdkError::IdentityNotSet (RegistrationMachine::Register bails when
+        // Session::McId is empty). applyIdentity already told us whether one
+        // was sent, so report the actual cause rather than letting the SDK
+        // reject a request the app knows is incomplete.
+        if (!mcId) {
+          addLog(
+            'register() not called — no identity to send. Log in, then Create → Set Parameters → Init.',
+            'error',
+          );
+        } else {
+          sdkRef.current.register();
+          addLog('register() called → waiting for registration callbacks...');
+        }
       }
     } catch (err: any) {
       addLog(`init() threw: ${err.message}`, 'error');
     }
-  }, [addLog, cachedDocsMap, paramsSet]);
+  }, [addLog, applyIdentity, cachedDocsMap, paramsSet]);
 
   const handleDestroy = useCallback(() => {
     if (!sdkRef.current) {
@@ -389,7 +451,6 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   // The flat per-field API is rebuilt here by spreading `params` (the single
   // state object) and `setters` (the stable derived setters). Consumers still
   // read sdk.logLevel / call sdk.setLogLevel(...) exactly as before; the
-  // `mcxMock` field maps onto the schema's `mock` key.
   const value: SdkContextValue = useMemo(() => ({
     sdkRef,
     created, initialized, paramsSet,
@@ -398,7 +459,6 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     registrationProgress, registrationPhase, registrationState,
     handleCreate, handleSetParams, handleInit, handleDestroy,
     ...params,
-    mcxMock: params.mock,
     ...setters,
   }), [
     created, initialized, paramsSet,

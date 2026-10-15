@@ -126,6 +126,7 @@ const makeSdkInstance = () => ({
   listAlarms:     jest.fn().mockReturnValue(''),
   onLog:          jest.fn(),
   onAlarm:        jest.fn(),
+  onSdkError:     jest.fn(),
   onRegistration: jest.fn(),
   raiseAlarm:     jest.fn(),
   resolveAlarm:   jest.fn(),
@@ -360,7 +361,9 @@ describe('handleSetParams', () => {
     const { Http, Sip, Tls } = sdk.setParams.mock.calls[0][0];
     expect(Http.port).toBe(8008);
     expect(Sip.udpPort).toBe(5060);
-    expect(Sip.tcpEnabled).toBe(false);
+    // SIP over TCP is on by default: over UDP the server never sends the
+    // affiliation subscription's initial NOTIFY and registration stalls.
+    expect(Sip.tcpEnabled).toBe(true);
     expect(Sip.tlsEnabled).toBe(false);
     expect(Tls.mTlsEnabled).toBe(false);
     expect(Tls.certPath).toBe('cert/client.crt');
@@ -809,6 +812,17 @@ describe('Registration progress bar', () => {
   });
 
   it('register() is called exactly once after init resolves true', async () => {
+    // handleInit now refuses to register without an identity (the SDK would
+    // reject it with SdkError::IdentityNotSet anyway), so the credentials that
+    // make handleCreate call setIdentity have to be in place for this path.
+    AuthSettings.setLastUsername('sip:alice@mc.example.com');
+    MockGetUserByUsername.mockResolvedValue({
+      id: 1,
+      username: 'sip:alice@mc.example.com',
+      password: 'test-pass',
+      updated_at: 0,
+      last_login_at: 0,
+    } as any);
     const sdk = await renderCreateAndSetParams();
     sdk.init.mockResolvedValueOnce(true);
     await act(async () => {
@@ -816,6 +830,21 @@ describe('Registration progress bar', () => {
     });
     await waitFor(() => expect(screen.getAllByText('INITIALIZED')[0]).toBeTruthy());
     expect(sdk.register).toHaveBeenCalledTimes(1);
+  });
+
+  it('register() is NOT called when the identity was never set', async () => {
+    // No stored username → handleCreate skips setIdentity, so registering
+    // would fail inside the SDK with IDENTITY_NOT_SET. The guard in handleInit
+    // catches it first and reports the real cause.
+    AuthSettings.setLastUsername('');
+    MockGetUserByUsername.mockResolvedValue(null as any);
+    const sdk = await renderCreateAndSetParams();
+    sdk.init.mockResolvedValueOnce(true);
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(screen.getAllByText('INITIALIZED')[0]).toBeTruthy());
+    expect(sdk.register).not.toHaveBeenCalled();
   });
 
   it('register() is NOT called when init resolves false', async () => {

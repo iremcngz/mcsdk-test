@@ -135,7 +135,6 @@ export interface SdkSettingsSchema {
   bmsUrl:  string;
   cmsUrl:  string;
   gmsUrl:  string;
-  mock:    boolean;
 }
 
 export const SDK_DEFAULTS: SdkSettingsSchema = {
@@ -146,7 +145,11 @@ export const SDK_DEFAULTS: SdkSettingsSchema = {
   rxTxEnabled:      true,
   httpPort:         '8008',
   sipUdpPort:       '5060',
-  sipTcpEnabled:    false,
+  // SIP over TCP, on by default. Over UDP the MCX server accepts the
+  // affiliation SUBSCRIBE with 200 OK but never sends the initial NOTIFY, so the
+  // subscription never reaches ACTIVE and registration stalls in
+  // SipAffiliating (AffiliationModule gates the phase on that state).
+  sipTcpEnabled:    true,
   sipTcpPort:       '5060',
   sipTlsEnabled:    false,
   sipTlsPort:       '5061',
@@ -158,10 +161,11 @@ export const SDK_DEFAULTS: SdkSettingsSchema = {
   sipRxThreads:     '1',
   sipWorkerThreads: '1',
   idmsUrl: '',
-  bmsUrl:  '',
+  // Required: the SDK has no default for it, and registration cannot start
+  // without it (the IDMS/CMS/GMS endpoints are all read from the BMS documents).
+  bmsUrl:  'http://10.11.100.109',
   cmsUrl:  '',
   gmsUrl:  '',
-  mock:    false,
 };
 
 function sdkKey(k: keyof SdkSettingsSchema): string {
@@ -178,7 +182,11 @@ export const SdkSettings = {
       rxTxEnabled:      userStorage.getBoolean(sdkKey('rxTxEnabled'))   ?? SDK_DEFAULTS.rxTxEnabled,
       httpPort:         userStorage.getString(sdkKey('httpPort'))       ?? SDK_DEFAULTS.httpPort,
       sipUdpPort:       userStorage.getString(sdkKey('sipUdpPort'))     ?? SDK_DEFAULTS.sipUdpPort,
-      sipTcpEnabled:    userStorage.getBoolean(sdkKey('sipTcpEnabled')) ?? SDK_DEFAULTS.sipTcpEnabled,
+      // Forced on rather than read back: registration needs SIP over TCP, and a
+      // stored `false` from before this was the default would silently stall the
+      // SipAffiliating phase again. The settings switch still works for the
+      // current session; it just does not persist an off state across restarts.
+      sipTcpEnabled:    true,
       sipTcpPort:       userStorage.getString(sdkKey('sipTcpPort'))     ?? SDK_DEFAULTS.sipTcpPort,
       sipTlsEnabled:    userStorage.getBoolean(sdkKey('sipTlsEnabled')) ?? SDK_DEFAULTS.sipTlsEnabled,
       sipTlsPort:       userStorage.getString(sdkKey('sipTlsPort'))     ?? SDK_DEFAULTS.sipTlsPort,
@@ -190,10 +198,12 @@ export const SdkSettings = {
       sipRxThreads:     userStorage.getString(sdkKey('sipRxThreads'))   ?? SDK_DEFAULTS.sipRxThreads,
       sipWorkerThreads: userStorage.getString(sdkKey('sipWorkerThreads'))?? SDK_DEFAULTS.sipWorkerThreads,
       idmsUrl:          userStorage.getString(sdkKey('idmsUrl'))        ?? SDK_DEFAULTS.idmsUrl,
-      bmsUrl:           userStorage.getString(sdkKey('bmsUrl'))         ?? SDK_DEFAULTS.bmsUrl,
+      // `|| default`, not `??`: an empty string is a stored value, so `??` would
+      // keep it and leave the SDK with no provisioning server. Installs that ran
+      // before bmsUrl had a default have exactly that empty string saved.
+      bmsUrl:           userStorage.getString(sdkKey('bmsUrl')) || SDK_DEFAULTS.bmsUrl,
       cmsUrl:           userStorage.getString(sdkKey('cmsUrl'))         ?? SDK_DEFAULTS.cmsUrl,
       gmsUrl:           userStorage.getString(sdkKey('gmsUrl'))         ?? SDK_DEFAULTS.gmsUrl,
-      mock:             userStorage.getBoolean(sdkKey('mock'))          ?? SDK_DEFAULTS.mock,
     };
   },
 
@@ -220,7 +230,6 @@ export const SdkSettings = {
     userStorage.set(sdkKey('bmsUrl'),           values.bmsUrl);
     userStorage.set(sdkKey('cmsUrl'),           values.cmsUrl);
     userStorage.set(sdkKey('gmsUrl'),           values.gmsUrl);
-    userStorage.set(sdkKey('mock'),             values.mock);
   },
 
   reset(): void {

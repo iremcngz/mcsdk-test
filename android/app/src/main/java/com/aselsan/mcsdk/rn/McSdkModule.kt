@@ -6,7 +6,6 @@ import com.aselsan.mcsdk.AlarmSeverity
 import com.aselsan.mcsdk.CallInfo
 import com.aselsan.mcsdk.Document
 import com.aselsan.mcsdk.DocumentType
-import com.aselsan.mcsdk.Documents
 import com.aselsan.mcsdk.FloorInfo
 import com.aselsan.mcsdk.Identity
 import com.aselsan.mcsdk.LogLevel
@@ -14,10 +13,10 @@ import com.aselsan.mcsdk.LogListener
 import com.aselsan.mcsdk.McSdk
 import com.aselsan.mcsdk.RegistrationPhase
 import com.aselsan.mcsdk.RegistrationState
-import com.aselsan.mcsdk.SdkAffiliateRequest
+import com.aselsan.mcsdk.AffiliateRequest
 import com.aselsan.mcsdk.SdkError
-import com.aselsan.mcsdk.SdkGroupInfo
-import com.aselsan.mcsdk.SdkIdentityInfo
+import com.aselsan.mcsdk.GroupInfo
+import com.aselsan.mcsdk.IdentityInfo
 import com.aselsan.mcsdk.SdkListener
 import com.aselsan.mcsdk.SdkParams
 import com.aselsan.mcsdk.TerminationInfo
@@ -29,6 +28,7 @@ import com.facebook.react.bridge.ReactMethod
 import org.json.JSONObject
 
 // Event name constants (must match src/index.ts McSdkEvents)
+private const val EVENT_SDK_ERROR       = "McSdkSdkError"
 private const val EVENT_SDS_SENT        = "McSdkSdsSent"
 private const val EVENT_SDS_RECEIVED    = "McSdkSdsReceived"
 private const val EVENT_SDS_ERROR       = "McSdkSdsError"
@@ -137,8 +137,34 @@ class McSdkModule(
             Mcx.pocExpires      = d.optLong("pocExpires", 4294967295L)
             Mcx.userAgent       = d.optString("userAgent", "Mission 809")
             Mcx.bmsUrl          = d.optString("bmsUrl", "")
-            Mcx.mock            = d.optInt("mock", 0) != 0
+            // Mcx.mock is gone as of SDK 85d75fd ("remove mock register") — the
+            // server-less registration path was deleted, so there is no flag to
+            // set. A "mock" key in paramsJson is now simply ignored.
             Mcx.imei            = d.optString("imei", "0001-0001-000001")
+            // Protocol tuning added alongside the affiliation work. SdkParams()
+            // is pre-filled by nativeFillDefaults(), so each is only overwritten
+            // when JS actually sends it — the fallbacks below mirror the C++
+            // defaults in Modules/Params/ParamTypes.h so an explicit JS value and
+            // a missing one cannot disagree.
+            if (d.has("sessionExpires"))
+                Mcx.sessionExpires = d.optInt("sessionExpires", 1800)
+            if (d.has("affiliationExpires"))
+                Mcx.affiliationExpires = d.optLong("affiliationExpires", 4294967295L)
+            // Publishes the initial affiliation before the SUBSCRIBE instead of
+            // after it is confirmed. Useful against a server that accepts the
+            // SUBSCRIBE but never sends the initial NOTIFY.
+            if (d.has("affiliateBeforeSubscribe"))
+                Mcx.affiliateBeforeSubscribe = d.optInt("affiliateBeforeSubscribe", 0) != 0
+            if (d.has("xcapExpires"))
+                Mcx.xcapExpires = d.optLong("xcapExpires", 36000L)
+            if (d.has("httpRequestTimeout"))
+                Http.requestTimeout = d.optInt("httpRequestTimeout", 10)
+            // IDMS session-token renewal (added in SDK d518f40). Left at the
+            // SDK's own defaults unless JS overrides them — SdkParams() is
+            // already filled by nativeFillDefaults().
+            if (d.has("idmsRenewMargin"))   Idms.renewMargin   = d.optInt("idmsRenewMargin")
+            if (d.has("idmsRetryInterval")) Idms.retryInterval = d.optInt("idmsRetryInterval")
+            if (d.has("idmsRetryCount"))    Idms.retryCount    = d.optInt("idmsRetryCount")
         }
         sdk?.setParams(p)
     }
@@ -206,11 +232,46 @@ class McSdkModule(
 
     // ── Calling ───────────────────────────────────────────────────────────────
 
-    @ReactMethod fun startPrivateCall(mcId: String)  { sdk?.startPrivateCall(mcId) }
+    /**
+     * autoCommence picks the Answer-Mode header on the INVITE (RFC 5373):
+     * true auto-answers at the far end, false rings for manual pickup.
+     *
+     * fullDuplex selects TS 24.379 §11.1.2 "private call without floor control"
+     * — neither side arbitrates transmission, so there is no floor to request
+     * and audio flows both ways while the call is selected. The default (false)
+     * is §11.1.1 "with floor control", i.e. half-duplex PTT.
+     */
+    @ReactMethod
+    fun startPrivateCall(mcId: String, autoCommence: Boolean, fullDuplex: Boolean) {
+        sdk?.startPrivateCall(mcId, autoCommence, fullDuplex)
+    }
+
     @ReactMethod fun startGroupCall(groupId: String) { sdk?.startGroupCall(groupId) }
     @ReactMethod fun answerCall(callId: String)      { sdk?.answerCall(callId) }
     @ReactMethod fun rejectCall(callId: String)      { sdk?.rejectCall(callId) }
     @ReactMethod fun terminateCall(callId: String)   { sdk?.terminateCall(callId) }
+
+    // ── Call priority ─────────────────────────────────────────────────────────
+
+    /**
+     * Upgrades or downgrades an active call to/from emergency (TS 24.379
+     * §10.1.1.2.1.3 / §11.1.1.2.1.5). The SDK re-INVITEs with the provisioned
+     * emergency floor priority and <emergency-ind>, and subsequent floor
+     * requests inherit that priority — there is no separate priority argument
+     * on requestFloor().
+     *
+     * No-op unless the call is Active and not already in the requested state.
+     */
+    @ReactMethod fun setEmergency(callId: String, emergency: Boolean) {
+        sdk?.setEmergency(callId, emergency)
+    }
+
+    /** Same as setEmergency but raises <imminentperil-ind>. Imminent peril
+     *  shares the provisioned emergency priority — the SDK has no separate
+     *  field for it. */
+    @ReactMethod fun setImminentPeril(callId: String, imminentPeril: Boolean) {
+        sdk?.setImminentPeril(callId, imminentPeril)
+    }
 
     // ── Affiliation ───────────────────────────────────────────────────────────
 
@@ -231,7 +292,7 @@ class McSdkModule(
             val arr = org.json.JSONArray(requestsJson)
             val requests = Array(arr.length()) { i ->
                 val obj = arr.getJSONObject(i)
-                SdkAffiliateRequest(
+                AffiliateRequest(
                     obj.optString("groupId"),
                     obj.optBoolean("ptt", false),
                     obj.optBoolean("video", false),
@@ -259,11 +320,34 @@ class McSdkModule(
 
     // ── Identity & Registration ───────────────────────────────────────────────
 
+    /**
+     * Must be called AFTER init(). Sdk::SetIdentity goes through Sdk::PostWork,
+     * which drops the work and raises SdkError::NotInitialized while the engine
+     * is not running — the SDK still logs "Sdk::SetIdentity", so a too-early
+     * call looks successful while Session::McId stays empty and only Register()
+     * reports it, much later, as "Identity not set".
+     *
+     * The values are logged because that failure is invisible otherwise. The
+     * password is reduced to its length: it must never reach logcat, and an
+     * empty-vs-present distinction is all that is useful for diagnosis.
+     */
     @ReactMethod
     fun setIdentity(mcId: String, password: String, clientId: String) {
+        Log.d(
+            "McSdkBridge",
+            "setIdentity: mcId='$mcId' clientId='$clientId' passwordLen=${password.length}",
+        )
         val identity = Identity().apply {
             this.mcId = mcId
-            this.password = password
+            // SDK ad2ed22 split the single password into idmsPassword (identity
+            // server login) and sipPassword (SIP digest auth), because the two
+            // servers can be provisioned with different secrets. This deployment
+            // uses one credential for both, so the app still collects a single
+            // password and it is sent as both. Splitting them later means adding
+            // a second field to the login screen and the users table — nothing
+            // here has to change.
+            this.idmsPassword = password
+            this.sipPassword = password
             this.clientId = clientId
         }
         sdk?.setIdentity(identity)
@@ -292,8 +376,7 @@ class McSdkModule(
                     fetchedAt = obj.optLong("fetchedAt", 0L)
                 })
             }
-            val documents = Documents().apply { documents = docList }
-            sdk.setDocuments(documents)
+            sdk.setDocuments(docList)
         } catch (e: Exception) {
             Log.e("McSdkBridge", "setDocuments parse error: ${e.message}", e)
         }
@@ -320,7 +403,19 @@ class McSdkModule(
 
     override fun onTerminated() {}
 
-    override fun onSdkError(error: SdkError) {}
+    /**
+     * Every SDK-level failure arrives here, and until now the body was empty —
+     * so IDENTITY_NOT_SET, NOT_REGISTERED and the whole SIP, HTTP and FLOOR
+     * error sets were swallowed with no trace on the JS side. The only hint was
+     * a LOGW line in logcat, which makes a misconfigured registration look like
+     * a hang rather than a reported error.
+     */
+    override fun onSdkError(error: SdkError) {
+        Log.w("McSdkBridge", "onSdkError: ${error.name}")
+        emit(EVENT_SDK_ERROR, Arguments.createMap().apply {
+            putString("error", error.name)
+        })
+    }
 
     override fun onRegistrationProgress(state: RegistrationState, phase: RegistrationPhase, progress: Int) {
         emit(EVENT_REGISTRATION, Arguments.createMap().apply {
@@ -338,7 +433,19 @@ class McSdkModule(
         })
     }
 
-    override fun onRegistrationFailed() {}
+    /**
+     * Registration gave up. `phase` names the stage it died in, which is the
+     * only clue to why — the SDK does not carry a reason here. Forwarded to JS
+     * so the Log Console can show where the flow stopped (e.g. a rejected
+     * PUBLISH shows up as a failure late in the sequence, not at the start).
+     */
+    override fun onRegistrationFailed(phase: RegistrationPhase) {
+        emit(EVENT_REGISTRATION, Arguments.createMap().apply {
+            putString("state", "FAILED")
+            putString("phase", phase.name)
+            putInt("progress", 0)
+        })
+    }
 
     fun onSdsSent(target: String, body: String) {
         emit(EVENT_SDS_SENT, Arguments.createMap().apply {
@@ -388,7 +495,7 @@ class McSdkModule(
      * The access token is deliberately NOT forwarded to JS: it is a credential
      * the UI has no use for, and the SDK already holds it for its own requests.
      */
-    override fun onIdentityUpdated(identity: SdkIdentityInfo) {
+    override fun onIdentityUpdated(identity: IdentityInfo) {
         emit(EVENT_IDENTITY_UPDATED, Arguments.createMap().apply {
             putBoolean("isPtt",   identity.isPtt)
             putBoolean("isVideo", identity.isVideo)
@@ -400,7 +507,7 @@ class McSdkModule(
      * Groups the user MAY affiliate to (from the provisioned user profiles).
      * Here the flags mean "this service supports the group".
      */
-    override fun onGroupsUpdated(groups: List<SdkGroupInfo>) {
+    override fun onGroupsUpdated(groups: List<GroupInfo>) {
         emit(EVENT_GROUPS_UPDATED, Arguments.createMap().apply {
             putArray("groups", groupListToArray(groups))
         })
@@ -410,13 +517,13 @@ class McSdkModule(
      * The currently affiliated set. Same shape as onGroupsUpdated, but the flags
      * mean "the affiliation covers this service".
      */
-    override fun onAffiliationsUpdated(groups: List<SdkGroupInfo>) {
+    override fun onAffiliationsUpdated(groups: List<GroupInfo>) {
         emit(EVENT_AFFILIATIONS_UPDATED, Arguments.createMap().apply {
             putArray("groups", groupListToArray(groups))
         })
     }
 
-    private fun groupListToArray(groups: List<SdkGroupInfo>) = Arguments.createArray().apply {
+    private fun groupListToArray(groups: List<GroupInfo>) = Arguments.createArray().apply {
         for (g in groups) {
             pushMap(Arguments.createMap().apply {
                 putString("groupId", g.groupId)
@@ -464,12 +571,49 @@ class McSdkModule(
         })
     }
 
+    /**
+     * Floor state for one call. `status` is the headline; most other fields are
+     * only meaningful for a particular status — denyReason for DENIED,
+     * revokeReason for REVOKED, queuePosition/queuePriority while QUEUED.
+     *
+     * `talkers` carries every current talker (more than one in multi-talker
+     * groups); `ownerId` is just the first of them, kept because it is what the
+     * UI uses to tell "we hold the floor" from "someone else does".
+     *
+     * The Floor Indicator bitmap (TS 24.380 §8.2.3.15) is flattened into the
+     * named booleans the SDK exposes rather than shipping the raw bits, so JS
+     * does not have to know the bit layout.
+     */
     override fun onFloorUpdated(floorInfo: FloorInfo) {
         emit(EVENT_FLOOR_UPDATED, Arguments.createMap().apply {
             putString("callId", floorInfo.callId)
             putString("ownerId", floorInfo.ownerId)
             putString("status", floorInfo.status.name)
             putInt("queuePosition", floorInfo.queuePosition)
+            putInt("queuePriority", floorInfo.queuePriority)
+            putInt("grantedDuration", floorInfo.grantedDuration)
+            putBoolean("isEmergency", floorInfo.isEmergency)
+            putBoolean("isImminentPeril", floorInfo.isImminentPeril)
+            putString("denyReason", floorInfo.denyReason.name)
+            putString("revokeReason", floorInfo.revokeReason.name)
+            putBoolean("isMultiTalker", floorInfo.isMultiTalker)
+            putBoolean("overridingWithoutRevoke", floorInfo.overridingWithoutRevoke)
+            putBoolean("overriddenWithoutRevoke", floorInfo.overriddenWithoutRevoke)
+            // Floor Indicator bits, already decoded by the SDK's helpers.
+            putBoolean("isBroadcastCall", floorInfo.isBroadcastCall())
+            putBoolean("isSystemCall", floorInfo.isSystemCall())
+            putBoolean("isQueueingSupported", floorInfo.isQueueingSupported())
+            putBoolean("isDualFloor", floorInfo.isDualFloor())
+            putArray("talkers", Arguments.createArray().apply {
+                floorInfo.talkers.forEach { t ->
+                    pushMap(Arguments.createMap().apply {
+                        putString("id", t.id)
+                        // SSRC is an unsigned 32-bit value; WritableMap has no
+                        // uint type, so it goes over as a double to stay exact.
+                        putDouble("ssrc", t.ssrc.toDouble())
+                    })
+                }
+            })
         })
     }
 

@@ -178,7 +178,7 @@ const DOC_A: McSdkDocument = {
     uri:       'http://bms.example.com/ue-init',
     etag:      '"etag-a"',
     content:   '<UeInit/>',
-    type:      DocumentType.UeInitialConfig,
+    type:      DocumentType.UeInitConfig,
     fetchedAt: 1700000000000,
 };
 const DOC_B: McSdkDocument = {
@@ -209,6 +209,9 @@ describe('onDocumentsUpdated pipeline', () => {
     it('saveDocuments is called with mcId and incoming docs', async () => {
         const { result } = renderHook(() => useSdkContext(), { wrapper: sdkWrapper });
         await act(async () => { await result.current.handleCreate(); });
+        // setIdentity moved behind init(): Sdk::PostWork discards work until the
+        // engine is running, so currentMcIdRef is only populated after init().
+        await act(async () => { await result.current.handleInit(); });
 
         await act(async () => {
             emitNative('McSdkStoreDocuments', { docsJson: JSON.stringify([DOC_A, DOC_B]) });
@@ -221,6 +224,9 @@ describe('onDocumentsUpdated pipeline', () => {
     it('updateCachedDocs is called with mcId and incoming docs', async () => {
         const { result } = renderHook(() => useSdkContext(), { wrapper: sdkWrapper });
         await act(async () => { await result.current.handleCreate(); });
+        // setIdentity moved behind init(): Sdk::PostWork discards work until the
+        // engine is running, so currentMcIdRef is only populated after init().
+        await act(async () => { await result.current.handleInit(); });
 
         await act(async () => {
             emitNative('McSdkStoreDocuments', { docsJson: JSON.stringify([DOC_A]) });
@@ -233,6 +239,9 @@ describe('onDocumentsUpdated pipeline', () => {
     it('saveDocuments and updateCachedDocs are both called in same event', async () => {
         const { result } = renderHook(() => useSdkContext(), { wrapper: sdkWrapper });
         await act(async () => { await result.current.handleCreate(); });
+        // setIdentity moved behind init(): Sdk::PostWork discards work until the
+        // engine is running, so currentMcIdRef is only populated after init().
+        await act(async () => { await result.current.handleInit(); });
 
         await act(async () => {
             emitNative('McSdkStoreDocuments', { docsJson: JSON.stringify([DOC_A]) });
@@ -281,7 +290,7 @@ describe('handleInit uses cachedDocsMap', () => {
         const arg = MockNative.setDocuments.mock.calls[0][0] as string;
         const parsed = JSON.parse(arg);
         expect(typeof parsed[0].type).toBe('number');
-        expect(parsed[0].type).toBe(DocumentType.UeInitialConfig);
+        expect(parsed[0].type).toBe(DocumentType.UeInitConfig);
         expect(typeof parsed[0].fetchedAt).toBe('number');
         expect(parsed[0].fetchedAt).toBe(1700000000000);
     });
@@ -333,7 +342,7 @@ describe('getAllDocuments output shape', () => {
         mockGetAllDocuments.mockResolvedValueOnce(map);
         const result = await mockGetAllDocuments();
         const doc = result.get(ALICE_MCID)![0];
-        expect(doc.type).toBe(DocumentType.UeInitialConfig);
+        expect(doc.type).toBe(DocumentType.UeInitConfig);
         expect(doc.fetchedAt).toBe(1700000000000);
     });
 });

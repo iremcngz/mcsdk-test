@@ -107,7 +107,7 @@ const DOC_A: McSdkDocument = {
     uri:       'http://bms.example.com/docs/a',
     etag:      '"abc123"',
     content:   '<McData/>',
-    type:      DocumentType.UeInitialConfig,
+    type:      DocumentType.UserAdditions,
     fetchedAt: 1700000000000,
 };
 const DOC_B: McSdkDocument = {
