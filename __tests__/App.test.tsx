@@ -138,9 +138,6 @@ const makeSdkInstance = () => ({
   terminateCall: jest.fn(),
   requestFloor: jest.fn(),
   releaseFloor: jest.fn(),
-  selectCall: jest.fn(),
-  muteMicrophone: jest.fn(),
-  sendSds:        jest.fn(),
   setIdentity:        jest.fn(),
   setDocuments:       jest.fn(),   // Android: → JNI → C++  |  iOS: no-op bridge
   onStoreDocuments:   jest.fn(),
@@ -157,7 +154,6 @@ const makeSdkInstance = () => ({
   onIncomingCall:         jest.fn().mockReturnValue({ remove: jest.fn() }),
   onCallUpdated:          jest.fn().mockReturnValue({ remove: jest.fn() }),
   onCallTerminated:       jest.fn().mockReturnValue({ remove: jest.fn() }),
-  onCallSelected:         jest.fn().mockReturnValue({ remove: jest.fn() }),
   onFloorUpdated:         jest.fn().mockReturnValue({ remove: jest.fn() }),
 });
 
@@ -183,6 +179,18 @@ beforeEach(() => {
  * Returns the McSdk instance created inside handleCreate so individual tests
  * can inspect or override its methods.
  */
+/**
+ * Asserts a log line reaches the console, waiting for the batched flush.
+ *
+ * SdkContext queues log entries and moves them into state once per ~250 ms
+ * rather than once per event (the SDK emits ~450 a second), so a line is not on
+ * screen the instant the action that produced it returns. waitFor polls instead
+ * of sleeping a fixed 250 ms, which keeps the suite fast.
+ */
+async function expectLog(pattern: RegExp) {
+  await waitFor(() => expect(screen.getByText(pattern)).toBeTruthy());
+}
+
 async function renderAndCreate() {
   render(<App />);
   await act(async () => {
@@ -284,7 +292,7 @@ describe('handleCreate', () => {
 
   it('logs the success message', async () => {
     await renderAndCreate();
-    expect(screen.getByText(/McSdk\(\) → nativeCreate\(\) OK/)).toBeTruthy();
+    await expectLog(/McSdk\(\) → nativeCreate\(\) OK/);
   });
 
   it('registers the SDK log event listener', async () => {
@@ -309,7 +317,7 @@ describe('handleCreate', () => {
     await act(async () => {
       fireEvent.press(screen.getByText('① Create'));
     });
-    expect(screen.getByText(/Create failed: constructor boom/)).toBeTruthy();
+    await expectLog(/Create failed: constructor boom/);
     expect(screen.queryByText('CREATED')).toBeNull();
   });
 });
@@ -366,7 +374,13 @@ describe('handleSetParams', () => {
     expect(Sip.tcpEnabled).toBe(true);
     expect(Sip.tlsEnabled).toBe(false);
     expect(Tls.mTlsEnabled).toBe(false);
-    expect(Tls.certPath).toBe('cert/client.crt');
+    // Empty by default: the SDK passes these to OpenSSL as filesystem paths, so
+    // a path naming a file that is not on the device fails TLS setup outright
+    // (Error::SSLLoadingCerts) and IDMS login never leaves the handset. Empty
+    // falls back to the system certificate store.
+    expect(Tls.certPath).toBe('');
+    expect(Tls.privKeyPath).toBe('');
+    expect(Tls.caListPath).toBe('');
   });
 
   it('passes correct default Threading values', async () => {
@@ -395,7 +409,7 @@ describe('handleSetParams', () => {
     await act(async () => {
       fireEvent.press(screen.getByText('② Set Parameters'));
     });
-    expect(screen.getByText(/setParams\(\) called successfully/)).toBeTruthy();
+    await expectLog(/setParams\(\) called successfully/);
   });
 
   it('logs an error when sdk.setParams throws', async () => {
@@ -404,7 +418,7 @@ describe('handleSetParams', () => {
     await act(async () => {
       fireEvent.press(screen.getByText('② Set Parameters'));
     });
-    expect(screen.getByText(/setParams\(\) failed: native params error/)).toBeTruthy();
+    await expectLog(/setParams\(\) failed: native params error/);
     expect(screen.queryByText('PARAMS SET')).toBeNull();
   });
 
@@ -540,7 +554,7 @@ describe('handleDestroy', () => {
   it('logs the destroy success message', async () => {
     await renderAndCreate();
     await act(async () => { fireEvent.press(screen.getByText('Destroy')); });
-    expect(screen.getByText(/destroy\(\) called/)).toBeTruthy();
+    await expectLog(/destroy\(\) called/);
   });
 
   it('clears paramsSet and initialized flags after a full lifecycle', async () => {
@@ -569,7 +583,7 @@ describe('handleDestroy', () => {
     const sdk = await renderAndCreate();
     sdk.destroy.mockImplementation(() => { throw new Error('destroy failed'); });
     await act(async () => { fireEvent.press(screen.getByText('Destroy')); });
-    expect(screen.getByText(/destroy\(\) failed: destroy failed/)).toBeTruthy();
+    await expectLog(/destroy\(\) failed: destroy failed/);
   });
 });
 
@@ -591,7 +605,12 @@ describe('Log console', () => {
 
   it('hides the placeholder once a log entry exists', async () => {
     await renderAndCreate();
-    expect(screen.queryByText('Logs will appear here…')).toBeNull();
+    // waitFor, not a bare assertion: the placeholder goes away when the first
+    // batch of log entries lands in state, which is up to a flush interval
+    // after Create returns.
+    await waitFor(() =>
+      expect(screen.queryByText('Logs will appear here…')).toBeNull(),
+    );
   });
 
   it('Clear button removes all log entries and restores placeholder', async () => {

@@ -10,6 +10,7 @@
 
 import React, {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -17,6 +18,7 @@ import React, {
 import { McSdk, type McSdkParams, type LogEvent, type RegistrationEvent, type SdkErrorEvent, type StoreDocumentsEvent } from '../mcsdk';
 import { DeviceIdentity, SdkSettings, type SdkSettingsSchema } from '../core/settings';
 import { AppLogger, SdkLogger } from '../core/logger';
+import { MediaSession } from '../core/mediaSession';
 import { useIpMonitor, type IpInfo } from '../core/netMonitor';
 import { useAppContext } from './AppContext';
 import { getCredentials } from '../core/auth';
@@ -151,6 +153,9 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   const [registrationProgress, setRegistrationProgress] = useState(0);
   const [registrationPhase,    setRegistrationPhase]    = useState('');
   const [registrationState,    setRegistrationState]    = useState('');
+  // The media foreground service is started once per registration, not on every
+  // progress event — onRegistration fires repeatedly as the flow advances.
+  const serviceStartedRef = useRef(false);
 
   // ── SDK parameter state ────────────────────────────────────────────────────
   // All 25 SDK parameters live in a single object (shape = SdkSettingsSchema).
@@ -198,15 +203,79 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   const [logs,    setLogs]    = useState<LogEntry[]>([]);
   const [sdkLogs, setSdkLogs] = useState<SdkLogEntry[]>([]);
 
+  // Both buffers are batched rather than written per event. With the default
+  // params the SDK emits ~450 log events a second, and a setState per event
+  // copied the whole array each time — cost growing with length, so O(n²) over
+  // a session — and re-rendered the console every time. Measured on device:
+  // Choreographer skipping 57 frames and Davey! duration=1735ms, repeatedly.
+  //
+  // Entries accumulate in a ref (writing a ref does not render) and move into
+  // state once per FLUSH_MS, turning ~900 state updates a second into 8.
+  // Nothing is dropped; the console just trails real time by at most FLUSH_MS,
+  // which is imperceptible for a log view.
+  //
+  // File logging stays per-event on purpose: cache/logs is where the full,
+  // untruncated SIP bodies are read from, and anything still queued would be
+  // lost if the process died.
+  const FLUSH_MS    = 250;
+  const MAX_ENTRIES = 5000;
+
+  const pendingLogs    = useRef<LogEntry[]>([]);
+  const pendingSdkLogs = useRef<SdkLogEntry[]>([]);
+  const flushTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushLogs = useCallback(() => {
+    flushTimer.current = null;
+    // Capped: unbounded arrays made every copy more expensive than the last, so
+    // a long session degraded steadily. The file log stays uncapped.
+    if (pendingLogs.current.length) {
+      const batch = pendingLogs.current;
+      pendingLogs.current = [];
+      setLogs(prev => [...prev, ...batch].slice(-MAX_ENTRIES));
+    }
+    if (pendingSdkLogs.current.length) {
+      const batch = pendingSdkLogs.current;
+      pendingSdkLogs.current = [];
+      setSdkLogs(prev => [...prev, ...batch].slice(-MAX_ENTRIES));
+    }
+  }, []);
+
+  const scheduleFlush = useCallback(() => {
+    if (flushTimer.current === null) {
+      flushTimer.current = setTimeout(flushLogs, FLUSH_MS);
+    }
+  }, [flushLogs]);
+
+  // Flush on the way out instead of just clearing the timer: a batch queued in
+  // the last FLUSH_MS would otherwise never reach the console. React drops the
+  // setState if the provider is really going away — there is no console left to
+  // show it — but when this teardown is a re-mount rather than a shutdown it is
+  // the difference between keeping those lines and silently losing them.
+  useEffect(() => () => {
+    if (flushTimer.current !== null) {
+      clearTimeout(flushTimer.current);
+      flushLogs();
+    }
+  }, [flushLogs]);
+
   const addLog = useCallback((msg: string, level: LogEntry['level'] = 'info') => {
-    setLogs(prev => [...prev, { id: nextId++, time: stamp(), msg, level }]);
+    pendingLogs.current.push({ id: nextId++, time: stamp(), msg, level });
+    scheduleFlush();
     if (level === 'error')     { AppLogger.error(msg); }
     else if (level === 'warn') { AppLogger.warn(msg); }
     else                       { AppLogger.info(msg); }
-  }, []);
+  }, [scheduleFlush]);
 
-  const clearLogs    = useCallback(() => setLogs([]), []);
-  const clearSdkLogs = useCallback(() => setSdkLogs([]), []);
+  // Clearing drops what is queued too, or the next flush would refill the
+  // console with entries from before the clear.
+  const clearLogs = useCallback(() => {
+    pendingLogs.current = [];
+    setLogs([]);
+  }, []);
+  const clearSdkLogs = useCallback(() => {
+    pendingSdkLogs.current = [];
+    setSdkLogs([]);
+  }, []);
 
   // ── Network / IP monitor ───────────────────────────────────────────────────
   const handleIpChange = useCallback((prev: IpInfo, curr: IpInfo) => {
@@ -231,10 +300,10 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         const levelNames = ['VERBOSE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'];
         addLog(`[SDK ${levelNames[e.level] ?? e.level}] ${e.log}`, 'sdk');
         SdkLogger.write(e.level, e.log);
-        setSdkLogs(prev => [
-          ...prev,
-          { id: sdkLogId++, time: stamp(), level: e.level, msg: e.log },
-        ]);
+        pendingSdkLogs.current.push({
+          id: sdkLogId++, time: stamp(), level: e.level, msg: e.log,
+        });
+        scheduleFlush();
       });
 
       // Every SdkError the engine raises. These were discarded by the bridge
@@ -249,6 +318,28 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         setRegistrationPhase(phaseLabel(e.phase));
         setRegistrationState(stateLabel(e.state));
 
+        // Hold the microphone grant for as long as we are registered. Android
+        // 11+ cuts background mic access and AudioRecord does not report it —
+        // read() just returns silence — so a microphone foreground service is
+        // required before any audio work.
+        //
+        // Started on registration rather than at call setup on purpose:
+        // Android 14+ refuses to start a microphone-typed service from the
+        // background, which is exactly the situation an incoming call creates.
+        // Registration happens with the app on screen, so this is the one
+        // moment the start is reliably allowed.
+        const state = String(e.state).toUpperCase();
+        if (state.includes('REGISTERED') && !state.includes('UN')) {
+          if (!serviceStartedRef.current) {
+            serviceStartedRef.current = true;
+            MediaSession.startService(
+              tr.audioServiceTitle,
+              tr.audioServiceText,
+              tr.audioServiceChannel,
+            );
+            addLog('media foreground service started (mic grant held)');
+          }
+        }
       });
 
       // Subscribe to BMS document cache events.
@@ -259,9 +350,6 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         const mcId = currentMcIdRef.current;
         if (!mcId) return;
         try {
-          // TEMP TRACE (docs-flow): the SDK handing documents back to be cached.
-          console.log(`[docs-flow] 5. onDocumentsUpdated for "${mcId}":`,
-            `${e.docs.length} docs, types=${e.docs.map(d => d.type).join(',')}`);
           await saveDocuments(mcId, e.docs);
           updateCachedDocs(mcId, e.docs);
           addLog(`onDocumentsUpdated: saved ${e.docs.length} doc(s) for ${mcId}`);
@@ -281,7 +369,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     }
     // tr is read for the foreground-service notification strings; depending on
     // the whole bundle keeps handleCreate correct when the language changes.
-  }, [addLog, updateCachedDocs, tr]);
+  }, [addLog, scheduleFlush, updateCachedDocs, tr]);
 
   /**
    * Sends the stored credentials to the SDK. Must run after init(): everything
@@ -312,8 +400,6 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     sdk.setIdentity(creds.username, creds.password, clientId);
     addLog(`setIdentity(${creds.username}, clientId=${clientId}) called`);
     currentMcIdRef.current = creds.username;
-    // TEMP TRACE (docs-flow): the mcId that will key the document lookup.
-    console.log(`[docs-flow] 2. setIdentity -> currentMcId="${creds.username}"`);
     return creds.username;
   }, [addLog]);
 
@@ -393,18 +479,9 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         if (mcId) {
           try {
             const docs = cachedDocsMap.get(mcId) ?? [];
-            // TEMP TRACE (docs-flow): which mcId is looked up, what the map holds
-            // for it, and the type ordinals actually handed to the SDK.
-            console.log(`[docs-flow] 3. lookup mcId="${mcId}" in cachedDocsMap`,
-              `(map has: ${[...cachedDocsMap.keys()].join(',') || 'nothing'})`,
-              `-> ${docs.length} docs`);
             if (docs.length > 0) {
-              console.log('[docs-flow] 4. setDocuments() types:',
-                docs.map(d => d.type).join(','));
               sdkRef.current.setDocuments(docs);
               addLog(`setDocuments(): ${docs.length} cached doc(s) provided to SDK`);
-            } else {
-              console.log('[docs-flow] 4. setDocuments() SKIPPED — nothing cached for this mcId');
             }
           } catch (err: any) {
             addLog(`setDocuments() cache read failed — ${err.message}`, 'warn');
@@ -436,6 +513,11 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
       return;
     }
     try {
+      // Release the mic grant before tearing the SDK down: nothing is going to
+      // capture once the SDK is gone, and leaving the notification up would
+      // claim otherwise.
+      MediaSession.stopService();
+      serviceStartedRef.current = false;
       sdkRef.current.destroy();
       sdkRef.current = null;
       setCreated(false);
