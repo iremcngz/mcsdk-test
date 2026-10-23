@@ -25,6 +25,32 @@ const globalStorage = new MMKV({ id: 'app-global' });
 
 let userStorage = new MMKV({ id: 'app-anonymous' });
 
+/**
+ * Clears TLS paths left over from when they had non-empty defaults.
+ *
+ * These are handed to OpenSSL as filesystem paths, and the old defaults
+ * ('cert/client.crt', 'cert/ca.pem') named files that were never on the device,
+ * so TLS setup failed before the request was sent and IDMS login could not
+ * complete. The stored copy would survive the default change, hence the drop.
+ *
+ * Only removes values equal to those old defaults — a path the user typed is
+ * left alone. Runs per partition, after each storage switch.
+ */
+function dropStaleTlsPaths(): void {
+  // Keys spelled out rather than built from SDK_PREFIX/sdkKey(): both are
+  // declared further down the module and `const` does not hoist, so calling
+  // this during module load — which the stay-logged-in restore does — would
+  // throw.
+  const stale: Record<string, string> = {
+    'sdk.certPath':    'cert/client.crt',
+    'sdk.privKeyPath': 'cert/client.key',
+    'sdk.caListPath':  'cert/ca.pem',
+  };
+  for (const [key, old] of Object.entries(stale)) {
+    if (userStorage.getString(key) === old) userStorage.delete(key);
+  }
+}
+
 // Auto-restore on module load (runs synchronously before AppContext renders).
 const _lastUser = globalStorage.getString('auth.lastUsername');
 if (
@@ -34,15 +60,21 @@ if (
 ) {
   userStorage = new MMKV({ id: `user-${_lastUser}` });
 }
+// Covers the restore above as well as the plain anonymous start: a logged-in
+// launch never calls initUserStorage(), so clearing only there would miss the
+// partition the app actually reads.
+dropStaleTlsPaths();
 
 /** Switch to app-anonymous partition. Call on logout. */
 export function clearUserStorage(): void {
   userStorage = new MMKV({ id: 'app-anonymous' });
+  dropStaleTlsPaths();
 }
 
 /** Switch to the given user's partition. Call on successful login. */
 export function initUserStorage(username: string): void {
   userStorage = new MMKV({ id: `user-${username}` });
+  dropStaleTlsPaths();
 }
 
 // ── MC client id ───────────────────────────────────────────────────────────────
@@ -155,9 +187,17 @@ export const SDK_DEFAULTS: SdkSettingsSchema = {
   sipTlsPort:       '5061',
   sipIpv6Enabled:   false,
   mTlsEnabled:      false,
-  certPath:         'cert/client.crt',
-  privKeyPath:      'cert/client.key',
-  caListPath:       'cert/ca.pem',
+  // Empty on purpose. The SDK hands these straight to OpenSSL as filesystem
+  // paths, so a non-empty default has to name a file that exists on the device
+  // or the connection fails before it is made: httplib turns a failed
+  // SSL_CTX_load_verify_locations into Error::SSLLoadingCerts ("SSL certificate
+  // loading failed") and never sends the request. The old 'cert/ca.pem' default
+  // pointed at nothing and blocked IDMS login once the SDK started applying it
+  // (98fb4c6). Empty means httplib falls back to the system certificate store,
+  // which is the right default; set a real absolute path to pin a CA.
+  certPath:         '',
+  privKeyPath:      '',
+  caListPath:       '',
   sipRxThreads:     '1',
   sipWorkerThreads: '1',
   idmsUrl: '',
@@ -192,6 +232,11 @@ export const SdkSettings = {
       sipTlsPort:       userStorage.getString(sdkKey('sipTlsPort'))     ?? SDK_DEFAULTS.sipTlsPort,
       sipIpv6Enabled:   userStorage.getBoolean(sdkKey('sipIpv6Enabled'))?? SDK_DEFAULTS.sipIpv6Enabled,
       mTlsEnabled:      userStorage.getBoolean(sdkKey('mTlsEnabled'))   ?? SDK_DEFAULTS.mTlsEnabled,
+      // Dropped once, not read back: installs from before these defaults were
+      // emptied have 'cert/client.crt' / 'cert/ca.pem' saved, and a stored path
+      // naming a file that is not on the device fails TLS setup outright. The
+      // one-off clear below removes those so the empty default can take effect;
+      // a path typed in settings afterwards persists normally.
       certPath:         userStorage.getString(sdkKey('certPath'))       ?? SDK_DEFAULTS.certPath,
       privKeyPath:      userStorage.getString(sdkKey('privKeyPath'))    ?? SDK_DEFAULTS.privKeyPath,
       caListPath:       userStorage.getString(sdkKey('caListPath'))     ?? SDK_DEFAULTS.caListPath,

@@ -36,7 +36,6 @@ export interface Spec extends TurboModule {
     // fetches documents itself). Kept in the spec because the iOS xcframework
     // still implements it; the Android bridge no longer exports it.
     fetchDocument(url: string): void;
-    sendSds(target: string, body: string): void;
 
     // Calling (Android only until the iOS xcframework is rebuilt)
     // autoCommence: Answer-Mode header on the INVITE (RFC 5373).
@@ -61,10 +60,6 @@ export interface Spec extends TurboModule {
     // Floor control
     requestFloor(callId: string): void;
     releaseFloor(callId: string): void;
-
-    // Media
-    selectCall(callId: string): void;
-    muteMicrophone(muted: boolean): void;
 
     // Identity and registration
     setIdentity(mcId: string, password: string, clientId: string): void;

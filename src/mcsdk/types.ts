@@ -288,11 +288,6 @@ export interface CallTerminatedEvent {
     reason: McSdkTerminationReason;
 }
 
-/** Payload of McSdkCallSelected. */
-export interface CallSelectedEvent {
-    callId: string;
-}
-
 /** Why the floor control server said no. Meaningful when status is DENIED. */
 export type McSdkFloorDenyReason =
     | 'UNKNOWN'

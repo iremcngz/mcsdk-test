@@ -21,7 +21,6 @@ import type {
     StoreDocumentsEvent,
     CallInfoEvent,
     CallTerminatedEvent,
-    CallSelectedEvent,
     FloorUpdatedEvent,
 } from './types';
 
@@ -43,7 +42,6 @@ export const McSdkEvents = {
     IncomingCall:    'McSdkIncomingCall',
     CallUpdated:     'McSdkCallUpdated',
     CallTerminated:  'McSdkCallTerminated',
-    CallSelected:    'McSdkCallSelected',
     FloorUpdated:    'McSdkFloorUpdated',
     IdentityUpdated:      'McSdkIdentityUpdated',
     GroupsUpdated:        'McSdkGroupsUpdated',
@@ -250,10 +248,6 @@ export class McSdk {
         NativeMcSdk.fetchDocument(url);
     }
 
-    sendSds(target: string, body: string): void {
-        NativeMcSdk.sendSds(target, body);
-    }
-
     // ── Calling ────────────────────────────────────────────────────────────────
     // Available on Android only until the iOS xcframework is rebuilt.
 
@@ -289,11 +283,6 @@ export class McSdk {
 
     requestFloor(callId: string): void     { NativeMcSdk.requestFloor(callId); }
     releaseFloor(callId: string): void     { NativeMcSdk.releaseFloor(callId); }
-
-    // ── Media ──────────────────────────────────────────────────────────────────
-
-    selectCall(callId: string): void       { NativeMcSdk.selectCall(callId); }
-    muteMicrophone(muted: boolean): void   { NativeMcSdk.muteMicrophone(muted); }
 
     setIdentity(mcId: string, password: string, clientId: string = ''): void {
         NativeMcSdk.setIdentity(mcId, password, clientId);
@@ -332,10 +321,6 @@ export class McSdk {
 
     onCallTerminated(handler: (e: CallTerminatedEvent) => void) {
         return emitter().addListener(McSdkEvents.CallTerminated, handler);
-    }
-
-    onCallSelected(handler: (e: CallSelectedEvent) => void) {
-        return emitter().addListener(McSdkEvents.CallSelected, handler);
     }
 
     onFloorUpdated(handler: (e: FloorUpdatedEvent) => void) {

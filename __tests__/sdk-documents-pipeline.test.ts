@@ -64,9 +64,6 @@ jest.mock('../src/mcsdk/NativeMcSdk', () => {
         terminateCall: jest.fn(),
         requestFloor: jest.fn(),
         releaseFloor: jest.fn(),
-        selectCall: jest.fn(),
-        muteMicrophone: jest.fn(),
-        sendSds:         jest.fn(),
     };
     return { __esModule: true, default: mock };
 });

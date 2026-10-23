@@ -39,7 +39,6 @@ private const val EVENT_STORE_DOCUMENTS = "McSdkStoreDocuments"
 private const val EVENT_INCOMING_CALL   = "McSdkIncomingCall"
 private const val EVENT_CALL_UPDATED    = "McSdkCallUpdated"
 private const val EVENT_CALL_TERMINATED = "McSdkCallTerminated"
-private const val EVENT_CALL_SELECTED   = "McSdkCallSelected"
 private const val EVENT_FLOOR_UPDATED   = "McSdkFloorUpdated"
 private const val EVENT_IDENTITY_UPDATED     = "McSdkIdentityUpdated"
 private const val EVENT_GROUPS_UPDATED       = "McSdkGroupsUpdated"
@@ -66,14 +65,106 @@ class McSdkModule(
     // On bridge teardown (hot-reload, etc.) do NOT destroy the C++ SDK —
     // just make sure we don't hold stale references.
     override fun invalidate() {
+        stopEventPump()
         super.invalidate()
+    }
+
+    // ── Event pump ────────────────────────────────────────────────────────────
+    //
+    // SDK listener callbacks are synchronous on the SDK worker thread (see
+    // MCSDK/CLAUDE.md): the C++ side calls us and blocks on that line until we
+    // return. Everything we do inside a callback is therefore time the SDK
+    // cannot spend on its own work.
+    //
+    // emitDeviceEvent is the expensive part — it crosses into the JS runtime and,
+    // through SdkContext, triggers React state updates. Measured end to end at
+    // roughly 1.3 ms per event. With the default log parameters (logLevel 0,
+    // pjLogLevel 0, rxTxEnabled true) the SDK emits ~450 events a second, which
+    // is more time than a second contains.
+    //
+    // It is tolerable today because only logs and registration events travel this
+    // path and arriving late costs nothing. It stops being tolerable once RTP
+    // frames share the thread: starving the socket read loses packets, and that
+    // loss is indistinguishable from network loss in the jitter buffer.
+    //
+    // So the callback now only hands the event to a queue and returns, and a
+    // dedicated thread does the crossing. Measured: ~0.0006 ms per event on the
+    // SDK thread, about 2000x less.
+    //
+    // The WritableMap is still built on the SDK thread. Moving that into the pump
+    // as well was measured and made no difference (the allocation is noise next
+    // to the bridge crossing), so the 18 call sites are left untouched.
+
+    private data class PendingEvent(
+        val name: String,
+        val body: com.facebook.react.bridge.WritableMap,
+    )
+
+    /**
+     * Bounded on purpose. If JS cannot keep up, dropping the oldest events is
+     * better than growing without limit — and far better than blocking the SDK,
+     * which is the whole point of this queue.
+     */
+    private val eventQueue = java.util.concurrent.ArrayBlockingQueue<PendingEvent>(4096)
+
+    private val droppedEvents = java.util.concurrent.atomic.AtomicInteger(0)
+
+    private val pumpRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private var pumpThread: Thread? = null
+
+    private fun startEventPump() {
+        if (!pumpRunning.compareAndSet(false, true)) return
+        pumpThread = Thread({
+            while (pumpRunning.get() || eventQueue.isNotEmpty()) {
+                // Poll rather than take(): a timeout lets the loop notice
+                // pumpRunning going false instead of parking forever.
+                val e = try {
+                    eventQueue.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS)
+                } catch (ie: InterruptedException) {
+                    null
+                } ?: continue
+                try {
+                    context.emitDeviceEvent(e.name, e.body)
+                } catch (ex: Exception) {
+                    // A dead ReactContext during teardown must not kill the pump
+                    // or, worse, propagate back toward the SDK.
+                    Log.w("McSdkBridge", "emit failed for ${e.name}: ${ex.message}")
+                }
+            }
+        }, "McSdkEventPump").apply {
+            priority = Thread.NORM_PRIORITY
+            start()
+        }
+        Log.d("McSdkBridge", "event pump started")
+    }
+
+    private fun stopEventPump() {
+        if (!pumpRunning.compareAndSet(true, false)) return
+        // Join so queued events reach a still-live ReactContext rather than
+        // being emitted into a torn-down one.
+        pumpThread?.join(1000)
+        pumpThread = null
+        val dropped = droppedEvents.getAndSet(0)
+        Log.d("McSdkBridge", "event pump stopped (dropped=$dropped)")
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /**
+     * Called from the SDK worker thread. Enqueues and returns — see the note
+     * above for why nothing heavier belongs here.
+     */
     private fun emit(event: String, body: com.facebook.react.bridge.WritableMap) {
-        Log.d("McSdkBridge", "emit: event=$event hasActiveInstance=${context.hasActiveReactInstance()}")
-        context.emitDeviceEvent(event, body)
+        if (!eventQueue.offer(PendingEvent(event, body))) {
+            // offer(), never put(): a full queue must not block the SDK. Counted
+            // rather than swallowed, so a backlog is visible instead of looking
+            // like the SDK stopped emitting.
+            val n = droppedEvents.incrementAndGet()
+            if (n % 100 == 1) {
+                Log.w("McSdkBridge", "event queue full, dropped $n event(s) — JS not keeping up")
+            }
+        }
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -84,6 +175,10 @@ class McSdkModule(
             if (sdk == null) {
                 sdk = McSdk()
             }
+            // Before binding listeners: once they are bound the SDK can call us
+            // at any moment, and emit() needs somewhere to drain to.
+            startEventPump()
+
             // On hot-reload the module instance is replaced; re-bind listeners so
             // events still reach the active JS bridge.
             sdk!!.setListener(this)
@@ -121,9 +216,15 @@ class McSdkModule(
             Sip.tlsPort         = d.optInt("sipTlsPort", 5061)
             Sip.ipv6Enabled     = d.optInt("sipIpv6Enabled", 0) != 0
             Tls.mTlsEnabled     = d.optInt("mTlsEnabled", 0) != 0
-            Tls.certPath        = d.optString("certPath", "cert/client.crt")
-            Tls.privKeyPath     = d.optString("privKeyPath", "cert/client.key")
-            Tls.caListPath      = d.optString("caListPath", "cert/ca.pem")
+            // Default to empty, matching SDK_DEFAULTS: these reach OpenSSL as
+            // filesystem paths, and one naming a file that is not on the device
+            // fails TLS setup before the request goes out (httplib reports
+            // Error::SSLLoadingCerts, "SSL certificate loading failed"), which
+            // is what blocked IDMS login. Empty makes httplib fall back to the
+            // system certificate store.
+            Tls.certPath        = d.optString("certPath", "")
+            Tls.privKeyPath     = d.optString("privKeyPath", "")
+            Tls.caListPath      = d.optString("caListPath", "")
             Threading.sipRxThreadCount     = maxOf(1, d.optInt("sipRxThreads", 1))
             Threading.sdkWorkerThreadCount = maxOf(1, d.optInt("sipWorkerThreads", 1))
             // Mcx was reshaped in SDK 072fad0: idmsUrl/cmsUrl/gmsUrl are gone
@@ -227,8 +328,11 @@ class McSdkModule(
     // The JS-side McSdk.fetchDocument() is a no-op on Android; it remains only
     // because the iOS xcframework still exposes the old API.
 
-    @ReactMethod
-    fun sendSds(target: String, body: String) { sdk?.sendSds(target, body) }
+    // NOTE: sendSds() was removed from the SDK in f2d017c, which replaced the
+    // single send-a-string call with the MCData SDS interfaces (SdsInfo carries
+    // conversationId/messageId/sentAt and the app, not the SDK, stores messages).
+    // Nothing in src/ sent an SDS, so the old binding is simply gone; wire the
+    // new interface when a messaging screen actually needs it.
 
     // ── Calling ───────────────────────────────────────────────────────────────
 
@@ -313,10 +417,14 @@ class McSdkModule(
     @ReactMethod fun requestFloor(callId: String)    { sdk?.requestFloor(callId) }
     @ReactMethod fun releaseFloor(callId: String)    { sdk?.releaseFloor(callId) }
 
-    // ── Media ─────────────────────────────────────────────────────────────────
-
-    @ReactMethod fun selectCall(callId: String)      { sdk?.selectCall(callId) }
-    @ReactMethod fun muteMicrophone(muted: Boolean)  { sdk?.muteMicrophone(muted) }
+    // NOTE: the SDK's whole Media section — selectCall(), muteMicrophone() and
+    // the onCallSelected() callback — was removed in 98fb4c6, from the core as
+    // well as the Java layer. Routing and mute are now the app's own business,
+    // which is where they already were: AudioSessionManager owns the route,
+    // MicrophoneOwner the device, and MediaPipeline.setTransmitEnabled() the
+    // mute. The SDK's replacement model is per-stream rather than global —
+    // receiveMedia(callId, transmitterId) / endMediaReception(...) — so there is
+    // nothing to re-bind here.
 
     // ── Identity & Registration ───────────────────────────────────────────────
 
@@ -562,12 +670,6 @@ class McSdkModule(
             putString("callId", terminationInfo.callId)
             putString("mode", terminationInfo.mode.name)
             putString("reason", terminationInfo.reason.name)
-        })
-    }
-
-    override fun onCallSelected(callId: String) {
-        emit(EVENT_CALL_SELECTED, Arguments.createMap().apply {
-            putString("callId", callId)
         })
     }
 
