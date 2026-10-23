@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PermissionsAndroid, Platform, Pressable, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Animated, Pressable, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SoundLevel from 'react-native-sound-level';
+import { ensureMicPermission } from '../../core/permissions';
+import { MediaSession } from '../../core/mediaSession';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import { useNavigation } from '../../contexts/NavigationContext';
@@ -70,12 +72,10 @@ export function ActiveCallFullScreen() {
     if (isGranted && !isClosing) {
       setVoiceLevel(0);
       const start = async () => {
-        if (Platform.OS === 'android') {
-          const granted = await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-          );
-          if (granted !== PermissionsAndroid.RESULTS.GRANTED) return;
-        }
+        if ((await ensureMicPermission()) !== 'granted') return;
+        // One physical microphone: the media pipeline outranks the level meter,
+        // so a refusal means capture must not be started at all.
+        if (!(await MediaSession.claimMicForMeter())) return;
         SoundLevel.start();
         soundActiveRef.current = true;
         SoundLevel.onNewFrame = (data: { value: number }) => {
@@ -89,6 +89,7 @@ export function ActiveCallFullScreen() {
         SoundLevel.stop();
       }
       soundActiveRef.current = false;
+      MediaSession.releaseMicForMeter();
       setVoiceLevel(0);
     }
     return () => {
@@ -97,6 +98,7 @@ export function ActiveCallFullScreen() {
         SoundLevel.stop();
       }
       soundActiveRef.current = false;
+      MediaSession.releaseMicForMeter();
     };
   }, [isGranted, isClosing]);
 
@@ -127,6 +129,7 @@ export function ActiveCallFullScreen() {
       SoundLevel.stop();
     }
     soundActiveRef.current = false;
+    MediaSession.releaseMicForMeter();
 
     Animated.sequence([
       Animated.delay(500),

@@ -11,14 +11,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
-  PermissionsAndroid,
-  Platform,
   Pressable,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import SoundLevel from 'react-native-sound-level';
+import { ensureMicPermission } from '../../core/permissions';
+import { MediaSession } from '../../core/mediaSession';
 import { useAppContext } from '../../contexts/AppContext';
 import { useTalkContext, PushState } from '../../contexts/TalkContext';
 import { mapSoundLevel, useVoiceBars, VoiceMeterBars } from '../../shared/VoiceMeter';
@@ -353,12 +353,10 @@ const ringColor = pushState === 'occupied'
 
   const startSoundMonitoring = async () => {
     if (soundMonitoring) return;
-    if (Platform.OS === 'android') {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-      );
-      if (granted !== PermissionsAndroid.RESULTS.GRANTED) return;
-    }
+    if ((await ensureMicPermission()) !== 'granted') return;
+    // One physical microphone: the media pipeline outranks the level meter, so
+    // a refusal here means capture would fight it and must not be started.
+    if (!(await MediaSession.claimMicForMeter())) return;
     setVoiceLevel(0);
     setSoundMonitoring(true);
     SoundLevel.start();
@@ -370,6 +368,7 @@ const ringColor = pushState === 'occupied'
     if (soundActiveRef.current) {
       SoundLevel.stop();
     }
+    MediaSession.releaseMicForMeter();
     setVoiceLevel(0);
   };
 

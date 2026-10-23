@@ -707,3 +707,319 @@ npx jest --coverage       # Coverage raporu
 | **iOS `init` async** | Android senkron dönerken iOS Promise döner; UI buna uygun şekilde `async/await` kullanır |
 | **setListener ayrı adım** | Android original API'sında listener ayrı set edilmeli; iOS'ta `create()` içinde otomatik set edilir |
 | **Metrics Prometheus ayrıştırma** | `listMetrics()` SDK'nın Prometheus text formatında döndürdüğünü varsayar; format değişirse parser güncellenmeli |
+
+---
+
+## 18. Medya Katmanı — Ses Yakalama ve Oynatma
+
+### 18.1 Neden SDK'dan Bağımsız
+
+SDK'nın medya tarafı henüz yazılmadı. `RtpRtcpSession` (C++) mevcut ve gerçek, ama
+motora bağlanmamış; `MediaSession` iskelet halinde (`Start`/`Stop`/`ReadPcm`
+hepsi `(stub)`), ve Java/JNI yüzeyinde ses verisi taşıyan **hiçbir metot yok** —
+`origin/main`'de de yok.
+
+Dolayısıyla medya katmanı SDK'yı bekleyemezdi. Çözüm iki arayüz:
+
+```kotlin
+interface AudioFrameSink   { fun onFrame(payload: ByteArray, len: Int, timestamp: Int, marker: Boolean) }
+interface AudioFrameSource { fun setListener(l: Listener); fun start(codec: AudioCodec): Boolean }
+```
+
+Boru hattı yalnızca bu arayüzleri tanıyor. Hedef değiştirilerek aynı kod farklı
+ortamlarda çalışıyor:
+
+| Implementasyon | Ne yapar | Durum |
+|---|---|---|
+| `FileFrameSink` / `FileFrameSource` | Diske yaz / dosyadan oku | **Bugün** |
+| `UdpFrameSink` / `UdpSource` | Kendi RTP başlığıyla ağ | Planlı |
+| `SdkFrameSink` / `SdkFrameSource` | `sendEncodedFrame` / `onEncodedFrame` | SDK gelince (~10 satır) |
+
+### 18.2 Thread Mimarisi
+
+Dört thread, her birinin **kaçırma cezası** farklı — öncelik dağıtımı bu cezaya
+göre yapıldı.
+
+| Thread | Öncelik | Gecikirse |
+|---|---|---|
+| `AudioCapture` (mikrofon) | `URGENT_AUDIO` | Donanım tamponu taşar, **ses geri dönüşsüz kaybolur** |
+| `AudioPlayback` (hoparlör) | `URGENT_AUDIO` | `AudioTrack` boşalır, **kulakta tık** |
+| `FileFrameSource` (kaynak) | `AUDIO` | Jitter buffer soğurur — telafi edilebilir |
+| `FileFrameSink` yazıcı | `NORM_PRIORITY` | Ring buffer soğurur — yavaş olmasına izin var |
+
+İlk ikisi donanıma bağlı: mikrofon ve hoparlör durmuyor, yetişemezseniz veri
+kaybı veya boşluk oluyor ve telafisi yok. Diğer ikisi tampon arkasında.
+
+Herkese `URGENT_AUDIO` vermek ters etki yapardı — öncelik göreli bir şey, herkes
+acilse kimse acil değil. Kaynak thread'i `AUDIO`'da tutmak ayrıca gerçek durumu
+daha doğru taklit ediyor: SDK'ya geçildiğinde frame'ler SDK'nın ağ thread'inden
+gelecek ve onun önceliği bizim elimizde değil.
+
+**Gerçek zamanlı bölge kuralları** (`AudioCapture` ve `AudioPlayback` döngüleri):
+kilit yok, bellek ayırma yok, log yok. Tamponlar `start()`'ta bir kez ayrılıyor.
+İhlali ses kaybı veya tık olarak duyuluyor, hata olarak görünmüyor.
+
+### 18.3 Ses Alma (Uplink)
+
+```
+mikrofon → AudioRecord.read(320 örnek)   ← BLOKE EDER, ritmi CİHAZ belirler
+         → codec.encode()                  320 örnek → 61 bayt (AMR-WB)
+         → ring buffer (kilitsiz)           mikrofon thread'i hiç beklemez
+         → yazıcı thread'i → diske yaz      disk takılması buraya izole
+```
+
+**Ritim donanımdan gelir.** `read()` 320 örnek birikene kadar bloke ediyor, yani
+saniyede tam 50 kez dönüyor. Döngüde `sleep` yok — kendi zamanlayıcımızı kursak
+cihazın gerçek hızıyla ayrışırdı.
+
+**Kilitsiz ring buffer** (`RingBuffer.kt`, 16 KB): tek üretici / tek tüketici, iki
+atomik indeks. Üretici `head` yazar ve `tail` okur, tüketici tersi — hiçbir alan
+iki thread tarafından yazılmadığı için kilit gerekmiyor. `synchronized` olsaydı
+yazıcı diski beklerken mikrofon thread'i bloke olurdu, yani kaçındığımız şey geri
+gelirdi.
+
+Ölçüm (30 s gerçek ritim, yazıcıya 80 ms yapay disk takılmaları):
+
+```
+frames written : 1500      frames dropped : 0
+corrupt frames : 0         max write time : 46 µs   (bütçe 20000 µs)
+```
+
+Yazma süresi bütçenin **%0.23**'ü.
+
+**RTP timestamp — üretilen örnek sayısından, saat duvarından asla:**
+
+```kotlin
+timestamp.addAndGet(read)        // her frame için +320
+```
+
+Ses kartı saati ile sistem saati arasındaki ~%0.3 fark birikiyor. Ölçtüm: 10
+saniyede **30 ms sapma**, yani birkaç dakikada karşı tarafın jitter buffer'ı
+bozulur. Örnek sayarak sapma matematiksel olarak sıfır.
+
+Mute sırasında timestamp **ilerliyor** — RTP zamanı medya saati, boşluk karşı
+tarafa konuşmanın duraklamasını anlatıyor. Mute'tan çıkan ilk frame marker
+bitli.
+
+### 18.4 Ses Verme (Downlink)
+
+```
+FileFrameSource → 20 ms ritminde 61 bayt + timestamp
+                → JitterBuffer    sırala / dedup / gizle / 4 frame biriktir
+                → codec.decode()  61 bayt → 320 örnek
+                → AudioTrack.write()   ← BLOKE EDER, ritmi CİHAZ belirler
+```
+
+**Jitter buffer** downlink'in tek yeni kavramı (`JitterBuffer.kt`). Uplink'teki
+ring buffer sadece thread devri yapıyordu; burada ağ düzensizliği de soğuruluyor.
+
+Dört işi var:
+
+1. **Timestamp'e göre yerleştirme** — varış sırasına göre değil. Ters sırada
+   gelen frame kendi slotunu buluyor.
+2. **Priming** — `targetFrames = 4` (80 ms) birikene kadar `read()` sıfır dönüyor.
+   Bu kasıtlı gecikme, geç gelenler için bütçe.
+3. **Kayıp gizleme** — eksik frame yerine sessizlik değil, **önceki frame'in
+   tekrarı**. 20 ms tekrar, 20 ms boşluktan çok daha az duyulur; boşluk tık yapar.
+4. **Sayaçlar** — `late`, `duplicate`, `concealed`, `underrun`, `overflow`.
+
+Burada kilit var (`@Synchronized`), uplink'in aksine. Kilitsiz halka ancak FIFO
+ise çalışıyor; burada seyrek bir tabloya rastgele erişim var (frame 3 gelip 2'nin
+yerini boş bırakabiliyor), iki atomik indeksle ifade edilemez. Kabul edilebilir
+çünkü kritik bölge onlarca baytlık `arraycopy` ve üretici `AUDIO` önceliğinde.
+
+**`underrun` neden nadir:** bir frame bile çalındıysa sonraki her boşluk
+`concealed` oluyor. Gerçek `underrun` yalnızca akışın en başında, henüz hiç frame
+çalınmamışken mümkün.
+
+Oynatma, çalacak şey yokken **sessizlik yazıyor**, yazmayı atlamıyor — atlamak
+akışı erken koşturur ve sonrasını desenkronize eder.
+
+### 18.5 Codec'ler
+
+| | PCMU (G.711 µ-law) | AMR-WB (G.722.2) |
+|---|---|---|
+| Ne | Örnek başına tablo dönüşümü | Gerçek codec, durum tutuyor |
+| API | Saf Kotlin, ~15 satır | `MediaCodec` (asenkron kuyruk) |
+| Frame | Sabit 320 bayt | **Değişken**, 23.85 kbps'de ~61 bayt |
+| Frame in = frame out | Her zaman | **Hayır** — tamponluyor |
+
+PCMU ilk sırada çünkü boru hattını ve thread yapısını **codec karmaşıklığı
+olmadan** doğruluyor. Doğrulama: µ-law çıktısı sistem encoder'ıyla 16000 baytın
+tamamında birebir aynı; round-trip SNR 36.9 dB (G.711 spec ≈ 38 dB).
+
+AMR-WB üç yapısal fark getiriyor ve boru hattı bunları baştan tolere edecek
+şekilde yazıldı: `encode()`/`decode()` **0 dönebiliyor** (hata değil, henüz hazır
+değil), frame boyutu varsayılamıyor, encoder akış ortasında yeniden
+başlatılamıyor. `TIMEOUT_US = 0` — gerçek zamanlı thread'de tampon beklemek 20 ms
+bütçesini yerdi.
+
+Ölçülen gerçek kayıt:
+
+```
+captured = 1140   encoded = 1138   dropped = 0      ← 2 frame encoder tamponunda
+dosya = 69418 bayt = 1138 × 61                      ← bayt bayt tam
+ToC = 0x44 → FT = 8 (23.85 kbps), Q = 1             ← standarda uygun
+bağımsız decoder: 22.76 s (beklenen 22.80)          ← fark = o 2 frame
+PCMU olsaydı 364800 bayt → 5.3× daha büyük
+```
+
+**Payload formatı notu:** encoder'ın ham çıktısı yazılıyor, RFC 4867'nin RTP
+payload formatı **değil** — o bir payload başlığı gerektiriyor ve `octet-align`
+mi `bandwidth-efficient` mi olduğu SDP'de `a=fmtp` ile müzakere ediliyor. Yanlış
+seçim sesin çalınıp ama karşı tarafta **anlaşılmaz** olmasına yol açıyor. SDK'nın
+`SdpBuilder`'ı henüz `a=fmtp` üretemiyor (`Rtpmap`/`Ptime`/`Rtcp` var, `Fmtp`
+yok), dolayısıyla bu iş SDK tarafına ait.
+
+### 18.6 Ağ Simülasyonu — Record Ekranındaki Bozulmalar
+
+Dosya kaynağı mükemmel ritimde beslediği için kayıp, gecikme ve açlık
+kendiliğinden hiç oluşmuyor. Test edilebilmesi için kasıtlı bozma gerekiyor.
+
+**Dosya değişmiyor.** Bozulan şey yalnızca dosyanın jitter buffer'a **teslim
+ediliş biçimi** (`FileFrameSource.Impairment`). Aynı dosya `NORMAL` modunda yine
+kusursuz çalıyor — aksi halde test ettikçe kayıtlar tükenirdi.
+
+| Mod | Kod | Hangi sayaç | Ne duyulur |
+|---|---|---|---|
+| `NORMAL` | — | hepsi 0 | Normal |
+| `LOSS` | `frameNo % 10 == 7` → atla | `concealed` ~%10 | Hafif kekemeleşme |
+| `REORDER` | Bir frame tut, sonrakini yolla, sonra tutulanı | neredeyse hepsi 0 | **Normal** |
+| `JITTER` | `sleep(random 0-150 ms)` | `late` artar | Takılmalar |
+| `FREEZE` | `frameNo % 250 == 0` → `sleep(500)` | `concealed` sıçrar | Belirgin donma |
+| `DUPLICATE` | `frameNo % 8 == 3` → iki kez yolla | `duplicate` artar | Normal |
+
+`REORDER`'ın normal duyulması hata değil — **jitter buffer'ın işini yaptığının
+kanıtı**. Frame'ler ters sırada geliyor, timestamp'e göre doğru yere diziliyor.
+
+**Bozulmanın kanıtı** üç bağımsız kaynaktan geliyor:
+
+1. **Kaynak itirafı** — `sourceRead` (dosyadan okunan) ve `sourceDropped`
+   (kasıtlı atılan)
+2. **Jitter buffer** — `receivedFrames`, bağımsız olarak sayıyor
+3. **Kulak** — kekemeleşme, donma
+
+`sourceRead − sourceDropped = receivedFrames` tutuyorsa bozma iddia edildiği gibi
+gerçekleşti. `NORMAL`'da okunan ile alınan eşit — karşılaştırma noktası bu.
+
+UI oynatıcı kartında:
+
+```
+Dosyadan okunan: 1138   ·   Alınan frame: 1024   ·   Kasıtlı atılan: 114
+```
+
+JVM doğrulaması (500 frame):
+
+```
+NORMAL     read=500 delivered=500 dropped=0  | dup=0  conceal=5
+LOSS       read=500 delivered=450 dropped=50 | conceal=55     ← +50 kayıp kadar
+REORDER    read=500 delivered=500 dropped=0  | late=1         ← sıra düzeltildi
+DUPLICATE  read=500 delivered=563 dropped=0  | dup=63         ← kopyalar yakalandı
+```
+
+### 18.7 Köprü Kısıtı — Ses Verisi Geçmez
+
+`MediaBridgeModule`'de ses verisi taşıyan **hiçbir metot yok**, kasıtlı olarak.
+20 ms'lik frame saniyede 50 köprü geçişi demek, her biri serileştirilerek — RN
+köprüsü bunun için yapılmamış. PCM ve encoded frame'ler native katmanda doğup
+native katmanda ölüyor.
+
+JS'in gördüğü: `startCapture` / `stopCapture` / `startPlayback` / `stopPlayback` /
+`setRoute` / `setTransmitEnabled` ve saniyede bir yoklanan sayaçlar.
+
+### 18.8 Cihaz Oturumu ve Yönlendirme
+
+`AudioSessionManager` üç iş yapıyor: `MODE_IN_COMMUNICATION` (telefon ses yolunu
+açar, donanım AEC'sini devreye sokar), audio focus, ve yönlendirme.
+
+Ölçümle çıkan iki kritik bulgu:
+
+**`MODIFY_AUDIO_SETTINGS` izni zorunlu.** Manifest'te yokken mod sessizce
+reddediliyordu — `requested=3, effective=0`. İzin eklendikten sonra
+`effective=3`. Bu izin olmadan ne mod ne yönlendirme çalışıyor.
+
+**Bluetooth çağrı sesi SCO/HFP üzerinden gider, A2DP değil.** Kulaklık bağlı
+olsa bile SCO **el ile başlatılmalı** — `startBluetoothSco()`. Ölçüm: Jabra
+Elite 4 `HeadsetService: Connected` iken bile
+`setForceUse(FOR_COMMUNICATION, FORCE_NONE)` ve boş SCO istemci listesi, yani ses
+hoparlörden çıkıyordu.
+
+SCO **asenkron**: `startBluetoothSco()` yalnızca talep ediyor, ses
+`SCO_AUDIO_STATE_CONNECTED` broadcast'i gelene kadar (birkaç yüz ms) eski rotada
+kalıyor. Bu yüzden `scoConnected` bayrağı dışa açık — varsaymak yerine ölçülüyor,
+UI de beklerken bunu gösteriyor.
+
+Ayrıca eski API yolunda (< API 31) yönlendirme **modun bir özelliği**: mod
+kurulmadan yapılan seçim sessizce düşüyor. Bu yüzden seçim hatırlanıp
+`acquireSession()` içinde mod kurulduktan sonra yeniden uygulanıyor.
+
+### 18.9 Oturum Referans Sayımı
+
+Capture ve playback bağımsız başlatılıp durdurulabiliyor ama aynı ses oturumunu
+paylaşıyorlar. `enterCallMode()` cihaz genelinde bir ayar olduğu için biri
+durunca diğerinin altından çekilmemeli:
+
+```kotlin
+private fun acquireSession(): Boolean {
+    if (sessionUsers > 0) { sessionUsers++; return true }
+    if (!session.enterCallMode()) return false
+    sessionUsers = 1
+    session.reapplyRouting()
+    return true
+}
+```
+
+Beş senaryo doğrulandı: tek yön, iki yön (her iki durma sırası), fazladan
+`release` (idempotent), focus reddi.
+
+### 18.10 Teşhis Sırası
+
+Bir sorunda sırayla bakılacak sayaçlar:
+
+| # | Kontrol | Sorun |
+|---|---|---|
+| 1 | `droppedFrames > 0`? | Yazıcı yetişemiyor (ring buffer taşıyor) |
+| 2 | `capturedFrames` < süre/20ms? | Mikrofon thread'i gecikiyor (donanım tamponu taşıyor) |
+| 3 | `encodedFrames` << `capturedFrames`? | Encoder frame beslenemiyor |
+| 4 | `underrun > 0`? | Kaynak jitter buffer'ı besleyemiyor |
+| 5 | Üçü temiz, ses bozuk? | Codec yapılandırması veya seviye |
+
+Kritik ayrım: **ring buffer kaybı encoder durumunu bozmaz** (frame encode edildi,
+sonra atıldı), **donanım tamponu kaybı bozar** (encoder hiç görmedi, iç tahmini
+gerçek sesle ayrışıyor). AMR-WB durum tutan bir codec olduğu için bu fark önemli.
+
+**UI donması ses katmanının kanıtı değildir.** Mevcut log boru hattı saniyede
+~450 köprü olayı üretip 1.7 s ana thread blokları yaratıyor (`Choreographer:
+Skipped 57 frames`). Gerçek zamanlı yolu ölçen şey `droppedFrames` sayacı.
+
+### 18.11 Dosya Haritası
+
+| Dosya | Sorumluluk |
+|---|---|
+| `AudioCodec.kt` | Arayüz + `PcmuCodec` (encode/decode, tablo) |
+| `AmrWbCodec.kt` | `MediaCodec` encoder + decoder, ayrı instance'lar |
+| `RingBuffer.kt` | Kilitsiz SPSC bayt kuyruğu (uplink thread devri) |
+| `AudioFrameSink.kt` | Çıkış arayüzü — SDK'yı soyutlar |
+| `FileFrameSink.kt` | Ring buffer + yazıcı thread'i |
+| `AudioCapture.kt` | `AudioRecord` + mikrofon thread'i, RTP timestamp |
+| `AudioFrameSource.kt` | Giriş arayüzü |
+| `FileFrameSource.kt` | Dosya okuma, çerçeveleme, ritim, bozma modları |
+| `JitterBuffer.kt` | Sıralama, dedup, gizleme, priming |
+| `AudioPlayback.kt` | `AudioTrack` + oynatma thread'i, kendini durdurma |
+| `MediaPipeline.kt` | Sıralama, oturum sayımı, temizlik |
+| `AudioSessionManager.kt` | Ses modu, focus, yönlendirme, SCO, AEC/NS |
+| `MicrophoneOwner.kt` | Tek mikrofon için öncelikli sahiplik (MEDIA > METER) |
+| `MediaForegroundService.kt` | Ekran kapalıyken mikrofon iznini tutar |
+| `MediaBridgeModule.kt` | JS köprüsü — komut ve sayaç, **veri yok** |
+
+### 18.12 Medya Katmanı Kısıtlamaları
+
+| Kısıtlama | Açıklama |
+|---|---|
+| **SDK medya API'si yok** | `sendEncodedFrame` / `onEncodedFrame` / `onMediaNegotiated` / `setAudioCodecs` yok; `SdpBuilder::Fmtp()` de yok |
+| **RTP payload formatı** | Ham encoder çıktısı yazılıyor; RFC 4867 başlığı ve `octet-align` müzakeresi SDK işi |
+| **PCMU 16 kHz'de** | G.711 standartta 8 kHz; tek örnekleme hızı tutmak için 16 kHz kullanıldı, gerçek çağrıda resampler gerekir |
+| **AMR-WB yalnızca mod 8** | 23.85 kbps sabit; `mode-set` müzakeresi yok |
+| **Kayıp gizleme basit** | Önceki frame tekrarı; gerçek codec interpolasyon yapar |
+| **Downlink tek akış** | Çoklu çağrı için `selectCall` ve akış başına jitter buffer gerekir |
+| **Ses seviyesi düşük** | `VOICE_COMMUNICATION` + AGC zinciri peak'i ~%8-13'te tutuyor; decode zinciri değil, capture kaynağı |

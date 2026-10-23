@@ -6,6 +6,25 @@
          granted at install; without it Vibration.vibrate() throws and takes
          the app down the moment a call arrives. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Android 11+ cuts background microphone access, and AudioRecord does not
+         report it — read() just returns silence. A microphone-typed foreground
+         service is the only way to hold the grant, so PTT needs these. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- AudioSessionManager watches for a cellular call taking over the audio
+         device so the floor can be dropped. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- Required to set MODE_IN_COMMUNICATION and to route audio (speaker /
+         earpiece / Bluetooth SCO). Without it the mode change is silently
+         refused — measured on API 28: AudioManager.mode stayed 0 and the
+         speakerphone flag would not take. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Bluetooth call audio runs over SCO/HFP, not A2DP, and SCO has to be
+         started explicitly. BLUETOOTH is the legacy (<= API 30) grant;
+         BLUETOOTH_CONNECT replaced it and is runtime-requested on 31+. -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+                     android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
@@ -20,6 +39,15 @@
       android:theme="@style/AppTheme"
       android:usesCleartextTraffic="${usesCleartextTraffic}"
       android:supportsRtl="true">
+      <!-- Holds the microphone grant while the app is off screen. Started from
+           the foreground at registration, never lazily on an incoming call:
+           Android 14+ refuses to start a microphone-typed service from the
+           background, which is exactly when a lazy start would happen. -->
+      <service
+        android:name="com.aselsan.mcsdk.rn.media.MediaForegroundService"
+        android:foregroundServiceType="microphone"
+        android:exported="false" />
+
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"

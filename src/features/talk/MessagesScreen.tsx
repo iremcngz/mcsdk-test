@@ -4,7 +4,6 @@ import {
   FlatList,
   Image,
   NativeModules,
-  PermissionsAndroid,
   Platform,
   Text,
   TextInput,
@@ -12,6 +11,7 @@ import {
   View,
   KeyboardAvoidingView,
 } from 'react-native';
+import { ensureCameraPermission } from '../../core/permissions';
 import { useAppContext } from '../../contexts/AppContext';
 import { makeMessagesStyles } from './messagesStyles';
 
@@ -65,22 +65,8 @@ export function MessagesScreen({ group, onClose }: MessagesScreenProps) {
   const nativeImagePicker = NativeModules.ImagePicker;
   const nativeDocPicker = NativeModules.RNDocumentPicker;
 
-  const requestCameraPermission = async (): Promise<boolean> => {
-    if (Platform.OS !== 'android') return true;
-    try {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.CAMERA,
-        {
-          title: 'Camera Permission',
-          message: 'This app needs camera access to take photos.',
-          buttonPositive: 'Allow',
-        },
-      );
-      return granted === PermissionsAndroid.RESULTS.GRANTED;
-    } catch {
-      return false;
-    }
-  };
+  const requestCameraPermission = async (): Promise<boolean> =>
+    (await ensureCameraPermission()) === 'granted';
 
   const handleCamera = async () => {
     if (!nativeImagePicker?.launchCamera) {

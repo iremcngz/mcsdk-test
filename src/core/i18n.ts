@@ -245,6 +245,74 @@ export interface Translations {
   mockFloorIdle: string;
   mockFloorGranted: string;
   mockRemoteHangup: string;
+
+  // ── Audio session
+  /** Ongoing notification shown while the mic foreground service runs. */
+  audioServiceTitle: string;
+  audioServiceText: string;
+  /** Notification channel name, visible in the system notification settings. */
+  audioServiceChannel: string;
+  /** Microphone permission was denied but can be asked for again. */
+  micPermissionDenied: string;
+  /** Denied with "don't ask again" — only the settings app can undo it. */
+  micPermissionBlocked: string;
+  /** An interruption took the audio device away mid-call. */
+  audioInterrupted: (reason: string) => string;
+
+  // ── Audio capture diagnostics (Audio tab)
+  tabAudio: string;
+  audioTitle: string;
+  audioDeviceSection: string;
+  audioHwAec: string;
+  audioHwNs: string;
+  audioMicPermission: string;
+  audioMicHolder: string;
+  audioService: string;
+  audioCodec: string;
+  audioSink: string;
+  audioStart: string;
+  audioStop: string;
+  audioStatusIdle: string;
+  audioStatusRecording: string;
+  audioCountersSection: string;
+  audioElapsed: string;
+  audioFramesCaptured: string;
+  audioFramesEncoded: string;
+  audioFramesDropped: string;
+  audioBytes: string;
+  audioTransmitting: string;
+  audioRecordingsSection: string;
+  audioNoRecordings: string;
+  audioPresent: string;
+  audioAbsent: string;
+  audioNone: string;
+  audioRunning: string;
+  audioStopped: string;
+  /** Hint under the counters: how to verify the produced file. */
+  audioPullHint: string;
+
+  // ── Audio playback (downlink)
+  audioPlaybackSection: string;
+  audioPlay: string;
+  audioStopPlay: string;
+  audioStatusPlaying: string;
+  audioOutput: string;
+  audioSpeaker: string;
+  audioEarpiece: string;
+  audioBluetooth: string;
+  audioScoConnecting: string;
+  audioImpairment: string;
+  audioSourceRead: string;
+  audioSourceDropped: string;
+  audioImpairHint: string;
+  audioReceived: string;
+  audioDecoded: string;
+  audioWritten: string;
+  audioConcealed: string;
+  audioUnderrun: string;
+  audioLate: string;
+  audioJitterDepth: string;
+  audioPlaybackHint: string;
 }
 
 const tr: Translations = {
@@ -469,6 +537,65 @@ const tr: Translations = {
   mockFloorIdle:      'Floor Serbest Bırak',
   mockFloorGranted:   'Floor Ver (Kendinize)',
   mockRemoteHangup:   'Karşı Taraf Kapattı',
+
+  audioServiceTitle:    'MCX telsiz etkin',
+  audioServiceText:     'Çağrı almaya hazır',
+  audioServiceChannel:  'MCX çağrı servisi',
+  micPermissionDenied:  'Mikrofon izni verilmedi — çağrılarda ses iletilemez.',
+  micPermissionBlocked: 'Mikrofon izni kalıcı olarak reddedildi. Uygulama ayarlarından açmanız gerekiyor.',
+  audioInterrupted:     reason => `Ses yolu kesildi (${reason})`,
+
+  tabAudio:               'Ses',
+  audioTitle:             'Ses Yakalama',
+  audioDeviceSection:     'Cihaz',
+  audioHwAec:             'Donanım AEC',
+  audioHwNs:              'Donanım NS',
+  audioMicPermission:     'Mikrofon izni',
+  audioMicHolder:         'Mikrofon sahibi',
+  audioService:           'Ses servisi',
+  audioCodec:             'Codec',
+  audioSink:              'Çıkış',
+  audioStart:             '● KAYDI BAŞLAT',
+  audioStop:              '■ DURDUR',
+  audioStatusIdle:        'durdu',
+  audioStatusRecording:   'kaydediyor',
+  audioCountersSection:   'Sayaçlar',
+  audioElapsed:           'Süre',
+  audioFramesCaptured:    'Yakalanan frame',
+  audioFramesEncoded:     'Encode edilen',
+  audioFramesDropped:     'Düşen frame',
+  audioBytes:             'Yazılan bayt',
+  audioTransmitting:      'Gönderim',
+  audioRecordingsSection: 'Kayıtlar',
+  audioNoRecordings:      'Henüz kayıt yok',
+  audioPresent:           'var',
+  audioAbsent:            'yok',
+  audioNone:              '—',
+  audioRunning:           'çalışıyor',
+  audioStopped:           'durdu',
+  audioPullHint:          'Düşen frame 0 olmalı. Dosyayı adb ile çekip çözerek doğrulayın.',
+
+  audioPlaybackSection:   'Oynatma',
+  audioPlay:              '▶ OYNAT',
+  audioStopPlay:          '■ OYNATMAYI DURDUR',
+  audioStatusPlaying:     'oynatıyor',
+  audioOutput:            'Çıkış',
+  audioSpeaker:           'Hoparlör',
+  audioEarpiece:          'Ahize',
+  audioBluetooth:         'Bluetooth',
+  audioScoConnecting:     'Bluetooth bağlanıyor…',
+  audioImpairment:        'Ağ simülasyonu',
+  audioSourceRead:        'Dosyadan okunan',
+  audioSourceDropped:     'Kasıtlı atılan',
+  audioImpairHint:        'Dosya değişmez — yalnızca jitter buffer\'a teslim bozulur. Okunan ile alınan arasındaki fark kanıttır.',
+  audioReceived:          'Alınan frame',
+  audioDecoded:           'Decode edilen',
+  audioWritten:           'Cihaza yazılan',
+  audioConcealed:         'Gizlenen (tekrar)',
+  audioUnderrun:          'Underrun',
+  audioLate:              'Geç gelen',
+  audioJitterDepth:       'Jitter derinliği',
+  audioPlaybackHint:      'Underrun 0 olmalı. İlk testleri kulaklıkla yapın — hoparlörde yankı olabilir.',
 };
 
 const en: Translations = {
@@ -693,6 +820,65 @@ const en: Translations = {
   mockFloorIdle:      'Release Floor',
   mockFloorGranted:   'Grant Floor (Self)',
   mockRemoteHangup:   'Remote Hangup',
+
+  audioServiceTitle:    'MCX radio active',
+  audioServiceText:     'Ready to receive calls',
+  audioServiceChannel:  'MCX call service',
+  micPermissionDenied:  'Microphone permission denied — calls will carry no audio.',
+  micPermissionBlocked: 'Microphone permission is permanently denied. Enable it in the app settings.',
+  audioInterrupted:     reason => `Audio path interrupted (${reason})`,
+
+  tabAudio:               'Audio',
+  audioTitle:             'Audio Capture',
+  audioDeviceSection:     'Device',
+  audioHwAec:             'Hardware AEC',
+  audioHwNs:              'Hardware NS',
+  audioMicPermission:     'Microphone permission',
+  audioMicHolder:         'Microphone holder',
+  audioService:           'Audio service',
+  audioCodec:             'Codec',
+  audioSink:              'Sink',
+  audioStart:             '● START RECORDING',
+  audioStop:              '■ STOP',
+  audioStatusIdle:        'idle',
+  audioStatusRecording:   'recording',
+  audioCountersSection:   'Counters',
+  audioElapsed:           'Elapsed',
+  audioFramesCaptured:    'Frames captured',
+  audioFramesEncoded:     'Frames encoded',
+  audioFramesDropped:     'Frames dropped',
+  audioBytes:             'Bytes written',
+  audioTransmitting:      'Transmitting',
+  audioRecordingsSection: 'Recordings',
+  audioNoRecordings:      'No recordings yet',
+  audioPresent:           'present',
+  audioAbsent:            'absent',
+  audioNone:              '—',
+  audioRunning:           'running',
+  audioStopped:           'stopped',
+  audioPullHint:          'Dropped frames must stay 0. Pull the file and decode it to verify.',
+
+  audioPlaybackSection:   'Playback',
+  audioPlay:              '▶ PLAY',
+  audioStopPlay:          '■ STOP PLAYBACK',
+  audioStatusPlaying:     'playing',
+  audioOutput:            'Output',
+  audioSpeaker:           'Speaker',
+  audioEarpiece:          'Earpiece',
+  audioBluetooth:         'Bluetooth',
+  audioScoConnecting:     'Connecting Bluetooth…',
+  audioImpairment:        'Network simulation',
+  audioSourceRead:        'Read from file',
+  audioSourceDropped:     'Withheld on purpose',
+  audioImpairHint:        'The file is never modified — only delivery to the jitter buffer is degraded. Read vs received is the evidence.',
+  audioReceived:          'Frames received',
+  audioDecoded:           'Frames decoded',
+  audioWritten:           'Written to device',
+  audioConcealed:         'Concealed (repeat)',
+  audioUnderrun:          'Underrun',
+  audioLate:              'Late',
+  audioJitterDepth:       'Jitter depth',
+  audioPlaybackHint:      'Underrun must stay 0. Use a headset for first tests — the speaker may echo.',
 };
 
 export function getTranslation(language: AppLanguage): Translations {
