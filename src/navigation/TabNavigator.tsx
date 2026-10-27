@@ -26,6 +26,7 @@ import { AudioScreen }    from '../features/audio/AudioScreen';
 import { OutgoingCallScreen } from '../features/calls/OutgoingCallScreen';
 import { ActiveCallFullScreen } from '../features/calls/ActiveCallFullScreen';
 import { IncomingCallOverlay } from '../features/calls/IncomingCallOverlay';
+import { CallEndBanner } from '../features/calls/CallEndBanner';
 
 const TABS: { id: Screen; icon: string }[] = [
   { id: 'home',     icon: '🏠' },
@@ -415,6 +416,9 @@ export function TabNavigator() {
           })}
         </View>
       )}
+
+      {/* ── How the last call ended, if it ended without the user ─────── */}
+      <CallEndBanner />
 
       {/* ── Incoming call overlay (on top of everything) ─────────────── */}
       <IncomingCallOverlay />

@@ -96,6 +96,12 @@ The queue is bounded and `offer()` is used rather than `put()`: a full queue mus
 the SDK, so events are dropped and counted in `droppedEvents` (warned once per 100). Silently
 swallowing them would read as "the SDK stopped emitting".
 
+The pump also logs every event it hands to JS as one `McSdkBridge` line,
+`event=<name> key=value …` (capped at 300 chars), so logcat shows what the SDK actually told
+the app — e.g. a termination's `mode`/`reason`, which the SDK's own lines do not print. It is
+logged on the pump, never in `emit()`, to keep the cost off the SDK thread, and `McSdkLog` is
+skipped (it is the ~450/s stream, and its text is already in logcat under the `SDK` tag).
+
 This mattered because RTP frames will share that thread once media lands — starving the
 socket read loses packets, and in the jitter buffer that loss is indistinguishable from
 network loss.
@@ -165,6 +171,9 @@ Do not assume a screen is wired just because it renders convincingly.
 - `TalkScreen` push-to-talk is driven by fixed timeouts (`MOCK_CALL_SETUP_MS`,
   `MOCK_FLOOR_GRANT_MS`, `MOCK_AUTO_ACCEPT_MS`), not by real floor callbacks.
 - The `VoiceMeter` shows the *local* microphone level, not anything on the wire.
+- The active-call **mute** button only flips `CallContext.micMuted`; there is no call uplink
+  to gate yet. The **speaker** button next to it is real: it calls `MediaSession.setRoute`
+  and is put back on the earpiece when the call ends.
 - `CallContext.simulate*` helpers create purely local calls (no `sdkCallId`) for testing the
   UI offline. Real SDK calls carry `sdkCallId`; that field is what tells them apart.
 

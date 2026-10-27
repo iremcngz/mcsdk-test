@@ -203,11 +203,39 @@ export interface Translations {
   callHistoryEmpty: string;
   callHistoryCount: (n: number) => string;
   btnEndCall: string;
+  /** Loudspeaker toggle on the active-call screen. */
+  callSpeaker: string;
+  /** Microphone mute toggle on the active-call screen. */
+  callMute: string;
   btnRequestFloor: string;
   btnReleaseFloor: string;
   floorIdle: string;
   floorGranted: string;
   floorBusy: string;
+  /** Full-screen PTT label while no one holds the floor. */
+  floorPressHold: string;
+  /** Floor Request sent, no answer yet. */
+  floorRequesting: string;
+  /** Queued for the floor; n is our place, 0 when the server gave none. */
+  floorQueued: (n: number) => string;
+  /** Who is talking while the floor is busy. */
+  floorTalker: (id: string) => string;
+  floorChannelOpen: string;
+  floorChannelBusy: string;
+  // Why a request or grant ended without the floor (CallContext floorNotice).
+  floorDenied: string;
+  floorDeniedOtherTalker: string;
+  floorDeniedReceiveOnly: string;
+  floorDeniedQueueFull: string;
+  floorDeniedRetryLater: string;
+  floorRevoked: string;
+  floorRevokedTooLong: string;
+  floorRevokedPreempted: string;
+  floorRequestTimeout: string;
+  floorQueueTimeout: string;
+  floorGrantExpired: string;
+  /** The floor control channel could not be set up or used. */
+  floorErrorUnreachable: string;
   commencementAuto: string;
   commencementManual: string;
   btnJoinCall: string;
@@ -219,6 +247,20 @@ export interface Translations {
   callDirectionOut: string;
   callDirectionIn: string;
   callDuration: (s: number) => string;
+  // How a call ended (CallRecord.end); shown after the call and in history.
+  callEndRemote: string;
+  callEndLocal: string;
+  callEndConnectionLost: string;
+  callEndBusy: string;
+  callEndDeclined: string;
+  callEndUnavailable: string;
+  callEndForbidden: string;
+  callEndNoAnswer: string;
+  callEndPreempted: string;
+  callEndCancelledRemote: string;
+  callEndRejectedLocal: string;
+  callEndCancelledLocal: string;
+  callEndUnknown: string;
   btnClearHistory: string;
   btnCallBack: string;
   cardCommencement: string;
@@ -517,11 +559,31 @@ const tr: Translations = {
   callHistoryEmpty:   'Henüz tamamlanan arama yok.',
   callHistoryCount:   n => `${n} arama`,
   btnEndCall:         'Aramayı Bitir',
+  callSpeaker:        'Hoparlör',
+  callMute:           'Sessiz',
   btnRequestFloor:    'Kat Al',
   btnReleaseFloor:    'Katı Bırak',
   floorIdle:          'Kat Al',
   floorGranted:       'Konuşuluyor',
   floorBusy:          'Hat Meşgul',
+  floorPressHold:     'Basılı Tut',
+  floorRequesting:    'İstek gönderildi…',
+  floorQueued:        (n: number) => (n > 0 ? `Sıradasınız: ${n}` : 'Sıradasınız'),
+  floorTalker:        (id: string) => `Konuşan: ${id}`,
+  floorChannelOpen:   'Kanal açık',
+  floorChannelBusy:   'Kanal kullanımda',
+  floorDenied:            'Konuşma isteği reddedildi',
+  floorDeniedOtherTalker: 'Reddedildi: başka biri konuşuyor',
+  floorDeniedReceiveOnly: 'Bu çağrıda yalnızca dinleyebilirsiniz',
+  floorDeniedQueueFull:   'Reddedildi: sıra dolu',
+  floorDeniedRetryLater:  'Reddedildi: biraz sonra tekrar deneyin',
+  floorRevoked:           'Konuşma hakkı geri alındı',
+  floorRevokedTooLong:    'Konuşma süresi doldu',
+  floorRevokedPreempted:  'Daha öncelikli biri konuşmaya başladı',
+  floorRequestTimeout:    'Sunucu cevap vermedi',
+  floorQueueTimeout:      'Sırada bekleme süresi doldu',
+  floorGrantExpired:      'Sıranız geldi ama alınmadı',
+  floorErrorUnreachable:  'Floor sunucusuna ulaşılamıyor',
   commencementAuto:   'OTOMATİK',
   commencementManual: 'MANUEL',
   btnJoinCall:        'Aramaya Katıl',
@@ -539,6 +601,19 @@ const tr: Translations = {
     if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
     return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   },
+  callEndRemote:          'Çağrı uzak taraftan sonlandırıldı',
+  callEndLocal:           'Çağrıyı siz sonlandırdınız',
+  callEndConnectionLost:  'Bağlantı koptu',
+  callEndBusy:            'Karşı taraf meşgul',
+  callEndDeclined:        'Karşı taraf reddetti',
+  callEndUnavailable:     'Karşı tarafa ulaşılamıyor',
+  callEndForbidden:       'Ağ çağrıya izin vermedi',
+  callEndNoAnswer:        'Cevap verilmedi',
+  callEndPreempted:       'Daha öncelikli bir çağrı nedeniyle sonlandı',
+  callEndCancelledRemote: 'Arayan vazgeçti',
+  callEndRejectedLocal:   'Çağrıyı reddettiniz',
+  callEndCancelledLocal:  'Çağrıyı iptal ettiniz',
+  callEndUnknown:         'Çağrı sonlandı',
   btnClearHistory:    'Geçmişi Temizle',
   btnCallBack:        'Geri Ara',
   cardCommencement:   'Başlangıç Modu',
@@ -818,11 +893,31 @@ const en: Translations = {
   callHistoryEmpty:   'No completed calls yet.',
   callHistoryCount:   n => `${n} call${n === 1 ? '' : 's'}`,
   btnEndCall:         'End Call',
+  callSpeaker:        'Speaker',
+  callMute:           'Mute',
   btnRequestFloor:    'Request Floor',
   btnReleaseFloor:    'Release Floor',
   floorIdle:          'Request Floor',
   floorGranted:       'Speaking',
   floorBusy:          'Floor Busy',
+  floorPressHold:     'Press & Hold',
+  floorRequesting:    'Requesting…',
+  floorQueued:        (n: number) => (n > 0 ? `Queued: ${n}` : 'Queued'),
+  floorTalker:        (id: string) => `Talking: ${id}`,
+  floorChannelOpen:   'Channel is open',
+  floorChannelBusy:   'Channel is currently in use',
+  floorDenied:            'Floor request denied',
+  floorDeniedOtherTalker: 'Denied: someone else is talking',
+  floorDeniedReceiveOnly: 'You can only listen in this call',
+  floorDeniedQueueFull:   'Denied: the queue is full',
+  floorDeniedRetryLater:  'Denied: try again shortly',
+  floorRevoked:           'Floor taken back',
+  floorRevokedTooLong:    'Talk time limit reached',
+  floorRevokedPreempted:  'A higher-priority talker took over',
+  floorRequestTimeout:    'No answer from the server',
+  floorQueueTimeout:      'Waited too long in the queue',
+  floorGrantExpired:      'Your turn passed before it was taken',
+  floorErrorUnreachable:  'Cannot reach the floor server',
   commencementAuto:   'AUTO',
   commencementManual: 'MANUAL',
   btnJoinCall:        'Join Call',
@@ -840,6 +935,19 @@ const en: Translations = {
     if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
     return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   },
+  callEndRemote:          'Call ended by the remote side',
+  callEndLocal:           'You ended the call',
+  callEndConnectionLost:  'Connection lost',
+  callEndBusy:            'The other party is busy',
+  callEndDeclined:        'The other party declined',
+  callEndUnavailable:     'The other party cannot be reached',
+  callEndForbidden:       'The network refused the call',
+  callEndNoAnswer:        'No answer',
+  callEndPreempted:       'Ended for a higher-priority call',
+  callEndCancelledRemote: 'The caller hung up',
+  callEndRejectedLocal:   'You declined the call',
+  callEndCancelledLocal:  'You cancelled the call',
+  callEndUnknown:         'Call ended',
   btnClearHistory:    'Clear History',
   btnCallBack:        'Call Back',
   cardCommencement:   'Commencement Mode',

@@ -9,6 +9,7 @@ import { useCallContext } from '../../contexts/CallContext';
 import { useNavigation } from '../../contexts/NavigationContext';
 import { mapSoundLevel, useVoiceBars, VoiceMeterBars } from '../../shared/VoiceMeter';
 import { makeActiveCallFullScreenStyles } from './styles';
+import { floorNoticeText, floorTalkerText, useTransientText } from './floorText';
 
 /**
  * features/calls/ActiveCallFullScreen.tsx
@@ -19,8 +20,11 @@ import { makeActiveCallFullScreenStyles } from './styles';
  * which renders the same call compactly inside the Calls tab.
  */
 export function ActiveCallFullScreen() {
-  const { c, theme } = useAppContext();
-  const { activeCall, endCall, setFloorState } = useCallContext();
+  const { c, theme, tr } = useAppContext();
+  const {
+    activeCall, endCall, requestFloor, releaseFloor,
+    speakerOn, toggleSpeaker, micMuted, toggleMute,
+  } = useCallContext();
   const { leaveCallScreen } = useNavigation();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions(); 
@@ -37,36 +41,47 @@ export function ActiveCallFullScreen() {
   const isDark = theme === 'dark';
   const isHalfDuplex = activeCall?.callType === 'half_duplex';
   const floorState = activeCall?.floorState ?? 'idle';
-  const pushDisabled = floorState === 'busy';
   const isGranted = floorState === 'granted';
+  const callState = activeCall?.state;
+  const startedAt = activeCall?.startedAt;
 
-  const pushButtonColor = floorState === 'busy' ? (isDark ? '#1e293b' : '#e2e8f0') : (isDark ? '#0f172a' : '#f1f5f9');
+  // Busy dims the button against the screen; the ring carries the state.
+  const pushButtonColor = floorState === 'busy' ? c.border : c.surface;
 
-  const ringColor = floorState === 'busy'
-    ? (c.error || '#ef4444')
-    : floorState === 'granted'
-      ? (c.success || '#10b981')
-      : c.primary;
+  const ringColor =
+    floorState === 'busy'    ? c.error   :
+    floorState === 'granted' ? c.success :
+    floorState === 'queued'  ? c.warn    :
+    c.primary;
 
-  const pushStatusLabel = floorState === 'busy'
-    ? 'Occupied'
-    : floorState === 'granted'
-      ? 'Talking...'
-      : 'Press & Hold';
+  const pushStatusLabel =
+    floorState === 'busy'       ? tr.floorBusy :
+    floorState === 'granted'    ? tr.floorGranted :
+    floorState === 'requesting' ? tr.floorRequesting :
+    floorState === 'queued'     ? tr.floorQueued(activeCall?.queuePosition ?? 0) :
+    tr.floorPressHold;
 
+  const floorDetail =
+    floorState === 'busy'    ? (activeCall ? floorTalkerText(tr, activeCall) : tr.floorChannelBusy) :
+    floorState === 'granted' ? undefined :
+    tr.floorChannelOpen;
+  const floorNotice = useTransientText(floorNoticeText(tr, activeCall?.floorNotice));
+
+  // Depends on the two fields it reads, not on activeCall: every floor update
+  // replaces that object, and would restart the timer each time.
   useEffect(() => {
-    if (!activeCall || activeCall.state !== 'active' || isClosing) {
+    if (callState !== 'active' || startedAt === undefined || isClosing) {
       setElapsed(0);
       return;
     }
     const tick = () =>
-      setElapsed(Math.round((Date.now() - activeCall.startedAt) / 1000));
+      setElapsed(Math.round((Date.now() - startedAt) / 1000));
     tick();
     intervalRef.current = setInterval(tick, 1000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [activeCall?.state, activeCall?.startedAt, isClosing]);
+  }, [callState, startedAt, isClosing]);
 
   useEffect(() => {
     if (isGranted && !isClosing) {
@@ -185,13 +200,18 @@ export function ActiveCallFullScreen() {
             />
             <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
               <Pressable
-                onPressIn={() => { if (!pushDisabled && !isClosing) setFloorState('granted'); }}
-                onPressOut={() => { if (floorState === 'granted' && !isClosing) setFloorState('idle'); }}
-                disabled={pushDisabled || isClosing}
+                // Press asks, release lets go — in every floor state. Asking
+                // while someone else talks is legitimate (the server denies or
+                // queues it), and releasing before the grant withdraws the
+                // request. The floor state itself follows the server.
+                onPressIn={() => { if (!isClosing) requestFloor(); }}
+                onPressOut={releaseFloor}
+                disabled={isClosing}
+                testID="ptt-button"
                 style={[
                   s.pushButton,
                   { backgroundColor: pushButtonColor },
-                  (pushDisabled || isClosing) && s.pushButtonDisabled,
+                  isClosing && s.pushButtonDisabled,
                 ]}>
                 <View style={s.voiceMeterContainer}>
                   <VoiceMeterBars
@@ -206,23 +226,57 @@ export function ActiveCallFullScreen() {
               </Pressable>
             </Animated.View>
           </View>
-          <Text style={s.pushStat}>
-            {floorState === 'busy' ? 'Channel is currently in use' : 'Channel is open'}
-          </Text>
+          {/* Always rendered at a fixed height, empty or not: this column is
+              centred, so a line coming or going would move the PTT button. */}
+          <Text style={s.pushStat} numberOfLines={1} testID="floor-detail">{floorDetail ?? ''}</Text>
+          <Text style={s.floorNotice} numberOfLines={2} testID="floor-notice">{floorNotice ?? ''}</Text>
         </View>
       ) : (
         <View style={s.centerBody} /> 
       )}
 
+      {/* Mute · End call · Speaker. Mute is UI state only until call audio
+          flows (see CallContext.micMuted); the speaker switches the real route. */}
       <View style={s.actionsContainer}>
-        <TouchableOpacity 
-          style={[s.endCallButton, isClosing && { opacity: 0.5 }]} 
-          onPress={handleEndCall} 
-          activeOpacity={0.8}
-          disabled={isClosing}>
-          <Text style={s.endCallIcon}>📞</Text>
-        </TouchableOpacity>
-        <Text style={s.endCallLabel}>End Call</Text>
+        <View style={s.actionItem}>
+          <TouchableOpacity
+            style={[s.sideButton, micMuted && s.sideButtonActive]}
+            onPress={toggleMute}
+            activeOpacity={0.8}
+            disabled={isClosing}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: micMuted }}
+            testID="mute-button">
+            <Text style={s.sideIcon}>{micMuted ? '🔇' : '🎙️'}</Text>
+          </TouchableOpacity>
+          <Text style={s.endCallLabel}>{tr.callMute}</Text>
+        </View>
+
+        <View style={s.actionItem}>
+          <TouchableOpacity
+            style={[s.endCallButton, isClosing && { opacity: 0.5 }]}
+            onPress={handleEndCall}
+            activeOpacity={0.8}
+            disabled={isClosing}
+            testID="end-call-button">
+            <Text style={s.endCallIcon}>📞</Text>
+          </TouchableOpacity>
+          <Text style={s.endCallLabel}>{tr.btnEndCall}</Text>
+        </View>
+
+        <View style={s.actionItem}>
+          <TouchableOpacity
+            style={[s.sideButton, speakerOn && s.sideButtonActive]}
+            onPress={toggleSpeaker}
+            activeOpacity={0.8}
+            disabled={isClosing}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: speakerOn }}
+            testID="speaker-button">
+            <Text style={s.sideIcon}>{speakerOn ? '🔊' : '🔈'}</Text>
+          </TouchableOpacity>
+          <Text style={s.endCallLabel}>{tr.callSpeaker}</Text>
+        </View>
       </View>
     </Animated.View>
   );

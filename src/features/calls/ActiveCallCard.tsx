@@ -5,10 +5,12 @@
  * Calls tab by CallsTab. Distinct from ActiveCallFullScreen, which shows the
  * same call full-screen via the 'callactive' route.
  *
- * Floor button color/behavior:
- *   idle    → blue   (c.primary)  → tap to request floor
- *   granted → green  (c.success)  → tap to release floor
- *   busy    → red    (c.error)    → disabled (other party speaking)
+ * Floor button color/behavior (state follows the server via onFloorUpdated):
+ *   idle       → blue   (c.primary) → tap to request floor
+ *   requesting → blue   (c.primary) → tap to withdraw the request
+ *   queued     → orange (c.warn)    → tap to leave the queue
+ *   granted    → green  (c.success) → tap to release floor
+ *   busy       → red    (c.error)   → tap to request (server denies or queues)
  *
  * Commencement modes:
  *   auto   → call goes active immediately (state === 'active')
@@ -20,13 +22,15 @@ import { Animated, Text, TouchableOpacity, View } from 'react-native';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import type { FloorState } from './types';
+import { floorNoticeText, floorTalkerText, useTransientText } from './floorText';
 import { makeCallStyles, makeMockActiveCallControlsStyles } from './styles';
 
 export function ActiveCallCard() {
   const { c, tr } = useAppContext();
-  const { activeCall, endCall, setFloorState, joinCall,
+  const { activeCall, endCall, requestFloor, releaseFloor, joinCall,
           simulateFloorBusy, simulateFloorIdle } = useCallContext();
   const s = useMemo(() => makeCallStyles(c), [c]);
+  const floorNotice = useTransientText(floorNoticeText(tr, activeCall?.floorNotice));
 
   // ── Elapsed timer ──────────────────────────────────────────────────────────
   const [elapsed, setElapsed] = useState(0);
@@ -34,31 +38,41 @@ export function ActiveCallCard() {
   const blinkAnim = useRef(new Animated.Value(1)).current;
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Depends on the two fields it reads, not on activeCall: every floor update
+  // replaces that object, and would restart the timer each time.
+  const callState = activeCall?.state;
+  const startedAt = activeCall?.startedAt;
   useEffect(() => {
-    if (!activeCall || activeCall.state !== 'active' || isClosing) {
+    if (callState !== 'active' || startedAt === undefined || isClosing) {
       setElapsed(0);
       return;
     }
     const tick = () =>
-      setElapsed(Math.round((Date.now() - activeCall.startedAt) / 1000));
+      setElapsed(Math.round((Date.now() - startedAt) / 1000));
     tick();
     intervalRef.current = setInterval(tick, 1000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [activeCall?.state, activeCall?.startedAt, isClosing]);
+  }, [callState, startedAt, isClosing]);
 
   if (!activeCall) return null;
 
   // ── Floor button config ────────────────────────────────────────────────────
+  // A tap toggles: with no request out it asks (also while someone else talks —
+  // the server denies or queues it); with one pending or the floor held it lets
+  // go, which withdraws a pending request.
   const floorConfig: Record<FloorState, {
     bg: string; icon: string; label: string; onPress: (() => void) | undefined;
   }> = {
-    idle:    { bg: c.primary,  icon: '🎙️', label: tr.floorIdle,    onPress: () => setFloorState('granted') },
-    granted: { bg: c.success,  icon: '🎙️', label: tr.floorGranted, onPress: () => setFloorState('idle')    },
-    busy:    { bg: c.error,    icon: '🔇', label: tr.floorBusy,    onPress: undefined                       },
+    idle:       { bg: c.primary, icon: '🎙️', label: tr.floorIdle,       onPress: requestFloor },
+    requesting: { bg: c.primary, icon: '⏳', label: tr.floorRequesting, onPress: releaseFloor },
+    queued:     { bg: c.warn,    icon: '⏳', label: tr.floorQueued(activeCall.queuePosition ?? 0), onPress: releaseFloor },
+    granted:    { bg: c.success, icon: '🎙️', label: tr.floorGranted,    onPress: releaseFloor },
+    busy:       { bg: c.error,   icon: '🔇', label: tr.floorBusy,       onPress: requestFloor },
   };
   const floor = floorConfig[activeCall.floorState];
+  const floorDetail = activeCall.floorState === 'busy' ? floorTalkerText(tr, activeCall) : undefined;
 
   const handleEndCall = () => {
     if (isClosing) return;
@@ -127,10 +141,14 @@ export function ActiveCallCard() {
             style={[s.floorButton, { backgroundColor: floor.bg }, isClosing && { opacity: 0.5 }]}
             onPress={isClosing ? undefined : floor.onPress}
             disabled={!floor.onPress || isClosing}
-            activeOpacity={floor.onPress && !isClosing ? 0.75 : 1}>
+            activeOpacity={floor.onPress && !isClosing ? 0.75 : 1}
+            testID="floor-button">
             <Text style={s.floorButtonIcon}>{floor.icon}</Text>
             <Text style={s.floorButtonLabel}>{floor.label}</Text>
           </TouchableOpacity>
+          {/* Fixed height, empty or not, so nothing below shifts as they change. */}
+          <Text style={s.floorDetail} numberOfLines={1} testID="floor-detail">{floorDetail ?? ''}</Text>
+          <Text style={s.floorNotice} numberOfLines={2} testID="floor-notice">{floorNotice ?? ''}</Text>
         </View>
       )}
 

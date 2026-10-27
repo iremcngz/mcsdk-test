@@ -126,7 +126,8 @@ const makeSdkInstance = () => ({
   listAlarms:     jest.fn().mockReturnValue(''),
   onLog:          jest.fn(),
   onAlarm:        jest.fn(),
-  onSdkError:     jest.fn(),
+  // SdkContext logs it; CallContext also subscribes, for floor errors.
+  onSdkError:     jest.fn().mockReturnValue({ remove: jest.fn() }),
   onRegistration: jest.fn(),
   raiseAlarm:     jest.fn(),
   resolveAlarm:   jest.fn(),

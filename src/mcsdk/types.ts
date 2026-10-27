@@ -266,7 +266,7 @@ export type McSdkTerminationMode =
 
 export type McSdkTerminationReason =
     | 'UNKNOWN' | 'BUSY' | 'NO_ANSWER' | 'UNAVAILABLE' | 'CONNECTION_LOST'
-    | 'PREEMPTED';
+    | 'PREEMPTED' | 'NORMAL' | 'DECLINED' | 'FORBIDDEN';
 
 /** Mirrors CallInfo. Payload of McSdkIncomingCall and McSdkCallUpdated. */
 export interface CallInfoEvent {
@@ -286,6 +286,13 @@ export interface CallTerminatedEvent {
     callId: string;
     mode:   McSdkTerminationMode;
     reason: McSdkTerminationReason;
+    /** The SIP status that ended the call (200 for a BYE); 0 if there was none. */
+    sipCode:   number;
+    /**
+     * PJSIP's text for it: always "Normal call clearing" for a BYE, otherwise
+     * the final response's reason phrase. A BYE's Reason header is not in it.
+     */
+    sipReason: string;
 }
 
 /** Why the floor control server said no. Meaningful when status is DENIED. */

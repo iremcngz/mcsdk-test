@@ -124,6 +124,9 @@ class McSdkModule(
                 } catch (ie: InterruptedException) {
                     null
                 } ?: continue
+                // Logged here on the pump, never in emit(): this thread is not
+                // the SDK's. Before the crossing, since the map is consumed by it.
+                if (e.name != EVENT_LOG) logEvent(e)
                 try {
                     context.emitDeviceEvent(e.name, e.body)
                 } catch (ex: Exception) {
@@ -137,6 +140,21 @@ class McSdkModule(
             start()
         }
         Log.d("McSdkBridge", "event pump started")
+    }
+
+    /**
+     * One logcat line per event reaching JS — what the SDK actually told the
+     * app, which its own log lines do not show (e.g. a termination's mode and
+     * reason). McSdkLog is left out: ~450/s, and its text is already in logcat
+     * under the SDK tag. Capped so a large document or group list stays one line.
+     */
+    private fun logEvent(e: PendingEvent) {
+        val body = try {
+            e.body.toHashMap().entries.joinToString(" ") { (k, v) -> "$k=$v" }
+        } catch (ex: Exception) {
+            "<unreadable: ${ex.message}>"
+        }
+        Log.d("McSdkBridge", "event=${e.name} ${body.take(300)}")
     }
 
     private fun stopEventPump() {
@@ -670,6 +688,11 @@ class McSdkModule(
             putString("callId", terminationInfo.callId)
             putString("mode", terminationInfo.mode.name)
             putString("reason", terminationInfo.reason.name)
+            // PJSIP's final cause for the dialog: 200 "Normal call clearing"
+            // for any BYE, otherwise the final response's code and reason
+            // phrase. A Reason header on the BYE is not parsed into it.
+            putInt("sipCode", terminationInfo.sipCode)
+            putString("sipReason", terminationInfo.sipReason)
         })
     }
 

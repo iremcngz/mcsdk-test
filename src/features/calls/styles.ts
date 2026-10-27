@@ -129,6 +129,24 @@ export function makeCallStyles(c: ThemePalette) {
       color: '#fff',
       marginTop: 2,
     },
+    // Fixed heights (one and two lines): the slots stay put when empty.
+    floorDetail: {
+      fontSize: 13,
+      lineHeight: 18,
+      height: 18,
+      fontWeight: '600',
+      color: c.textSecondary,
+      textAlign: 'center',
+    },
+    floorNotice: {
+      fontSize: 13,
+      lineHeight: 18,
+      height: 36,
+      fontWeight: '600',
+      color: c.warn,
+      textAlign: 'center',
+      paddingHorizontal: 24,
+    },
 
     // ── Join button ──────────────────────────────────────────────────────────
     joinButton: {
@@ -244,6 +262,11 @@ export function makeCallStyles(c: ThemePalette) {
     historyMetaText: {
       fontSize: 12,
       color: c.textSecondary,
+    },
+    historyEndText: {
+      fontSize: 12,
+      color: c.textMuted,
+      marginTop: 2,
     },
     callBackBtn: {
       paddingHorizontal: 10,
@@ -622,10 +645,10 @@ export function makeActiveCallFullScreenStyles(
       borderRadius: 40,
       backgroundColor: c.surface,
       borderWidth: 3,
-      borderColor: isGranted ? (c.success || '#10b981') : c.primary,
+      borderColor: isGranted ? c.success : c.primary,
       alignItems: 'center',
       justifyContent: 'center',
-      shadowColor: isGranted ? (c.success || '#10b981') : c.primary,
+      shadowColor: isGranted ? c.success : c.primary,
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.2,
       shadowRadius: 8,
@@ -704,33 +727,73 @@ export function makeActiveCallFullScreenStyles(
       minHeight: 4,
     },
     pushButtonStatus: {
-      color: isDark ? '#ffffff' : c.textPrimary,
+      color: c.textPrimary,
       fontSize: 16,
       fontWeight: '700',
       letterSpacing: 0.5,
       textAlign: 'center',
     },
+    // pushStat and floorNotice have fixed heights (one and two lines) so the
+    // centred column, and the PTT button in it, never changes height.
     pushStat: {
       color: c.textSecondary,
       fontSize: 14,
+      lineHeight: 20,
+      height: 20,
       fontWeight: '500',
       textAlign: 'center',
       marginTop: 28,
       letterSpacing: 0.5,
     },
+    floorNotice: {
+      color: c.warn,
+      fontSize: 14,
+      lineHeight: 20,
+      height: 40,
+      fontWeight: '600',
+      textAlign: 'center',
+      marginTop: 12,
+    },
     actionsContainer: {
-      alignItems: 'center',
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'flex-start',
       paddingHorizontal: 24,
+      gap: 32,
+    },
+    // One column per action: the button, its label under it.
+    actionItem: {
+      alignItems: 'center',
       gap: 12,
+      minWidth: 64,
+    },
+    // Mute and speaker either side of end call: smaller, and filled when on.
+    sideButton: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      marginTop: 8,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sideButtonActive: {
+      backgroundColor: c.primary,
+      borderColor: c.primary,
+    },
+    sideIcon: {
+      fontSize: 26,
     },
     endCallButton: {
       width: 80,
       height: 80,
       borderRadius: 40,
-      backgroundColor: c.error || '#ef4444',
+      backgroundColor: c.error,
       alignItems: 'center',
       justifyContent: 'center',
-      shadowColor: c.error || '#ef4444',
+      shadowColor: c.error,
       shadowOffset: { width: 0, height: 6 },
       shadowOpacity: 0.4,
       shadowRadius: 16,
@@ -745,6 +808,36 @@ export function makeActiveCallFullScreenStyles(
       fontSize: 14,
       fontWeight: '600',
       color: c.textSecondary,
+    },
+  });
+}
+
+/** CallEndBanner: a pill over the top of whatever screen the call left to. */
+export function makeCallEndBannerStyles(c: ThemePalette, insets: EdgeInsets) {
+  return StyleSheet.create({
+    banner: {
+      position: 'absolute',
+      top: insets.top + 12,
+      left: 16,
+      right: 16,
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.warn,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
+      elevation: 8,
+    },
+    text: {
+      color: c.textPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'center',
     },
   });
 }

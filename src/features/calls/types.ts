@@ -1,8 +1,8 @@
 /**
  * features/calls/types.ts — Shared types for the Calls feature.
- *
- * All values are UI-only; no MCSDK wiring until SDK exposes the relevant APIs.
  */
+
+import type { McSdkTerminationMode, McSdkTerminationReason } from '../../mcsdk';
 
 export type CallType = 'half_duplex' | 'full_duplex';
 
@@ -17,12 +17,14 @@ export type CallDirection = 'outgoing' | 'incoming';
 export type CallState = 'idle' | 'ringing' | 'connecting' | 'active' | 'ending';
 
 /**
- * Floor arbitration state.
- *   idle    → no one holds the floor      → primary (blue) button
- *   granted → current user has the floor  → success  (green) button
- *   busy    → another party is speaking   → error    (red)   button (locked)
+ * Floor arbitration state, from the local participant's point of view.
+ *   idle       → no one holds the floor          → primary (blue) button
+ *   requesting → Floor Request sent, no answer yet
+ *   queued     → the server queued our request (or our turn came: GRANT_PENDING)
+ *   granted    → current user has the floor      → success  (green) button
+ *   busy       → another party is speaking       → error    (red)   button
  */
-export type FloorState = 'idle' | 'granted' | 'busy';
+export type FloorState = 'idle' | 'requesting' | 'queued' | 'granted' | 'busy';
 
 /**
  * How the call is joined:
@@ -46,6 +48,16 @@ export interface ActiveCall {
   commencementMode: CommencementMode;
   state: CallState;
   floorState: FloorState;
+  /** Who is talking while floorState is 'busy' (the server's granted party). */
+  floorOwner?: string;
+  /** Our place in the floor queue while floorState is 'queued'. */
+  queuePosition?: number;
+  /**
+   * Why the last request ended without the floor, as the SDK's `STATUS` or
+   * `STATUS:REASON` (e.g. `DENIED:ANOTHER_CLIENT_HAS_PERMISSION`). Cleared when
+   * the next request starts.
+   */
+  floorNotice?: string;
   startedAt: number;        // Unix ms
   /** True when mode is manual and the user has not yet pressed "Join" */
   needsManualJoin: boolean;
@@ -63,4 +75,18 @@ export interface CallRecord {
   endedAt: number;          // Unix ms
   /** Duration in whole seconds */
   duration: number;
+  /** How the call ended. Absent when nothing said (a call replaced by another). */
+  end?: CallEnd;
+}
+
+/**
+ * How a call ended: the SDK's TerminationInfo for one it ended, or what the
+ * user did for one ended here.
+ */
+export interface CallEnd {
+  mode:   McSdkTerminationMode;
+  reason: McSdkTerminationReason;
+  /** SIP code and PJSIP's text for it; only from the SDK, and 0/'' if none. */
+  sipCode?:   number;
+  sipReason?: string;
 }

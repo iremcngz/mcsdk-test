@@ -22,12 +22,16 @@ import type {
   CallTerminatedEvent,
   FloorUpdatedEvent,
   McSdkCallState,
+  McSdkError,
   McSdkFloorStatus,
+  SdkErrorEvent,
 } from '../mcsdk';
 import { useSdkContext } from './SdkContext';
-import { AuthSettings } from '../core/settings';
+import { MediaSession } from '../core/mediaSession';
+import { displayMcId } from '../features/calls/mcId';
 import type {
   ActiveCall,
+  CallEnd,
   CallRecord,
   CallState,
   CallType,
@@ -72,21 +76,52 @@ function mapCallState(state: McSdkCallState): CallState | null {
 }
 
 /**
- * Maps FloorInfo.status onto the UI's three-way floor state. `ownerId` decides
- * between "we hold it" and "someone else does" for GRANTED/TAKEN.
+ * Maps FloorInfo.status onto the UI's floor state. The status is already from
+ * our side: GRANTED means we hold the floor and TAKEN means someone else does.
+ * `ownerId` cannot decide it — the SDK only sets it on Floor Taken, so on our
+ * own grant it is empty or still names the previous talker.
  */
-function mapFloorState(status: McSdkFloorStatus, weOwnIt: boolean): FloorState {
+function mapFloorState(status: McSdkFloorStatus): FloorState {
   switch (status) {
     case 'GRANTED':
-      return weOwnIt ? 'granted' : 'busy';
+      return 'granted';
     case 'TAKEN':
       return 'busy';
     case 'REQUESTED':
+      return 'requesting';
     case 'QUEUED':
     case 'GRANT_PENDING':
-      return 'idle';
+      return 'queued';
     default:
+      // IDLE, RELEASED, and every way a request or grant ends without the
+      // floor: DENIED, REVOKED, the timeouts, GRANT_EXPIRED.
       return 'idle';
+  }
+}
+
+/** Floor channel failures the user should hear about: PTT cannot work at all. */
+const USER_FACING_FLOOR_ERRORS: ReadonlySet<McSdkError> = new Set<McSdkError>([
+  'FLOOR_CHANNEL_FAILED',
+  'FLOOR_SDP_INVALID',
+  'FLOOR_SEND_FAILED',
+]);
+
+/**
+ * Why a request or grant ended without the floor, as `STATUS` or
+ * `STATUS:REASON`. Undefined for statuses that are not such an ending.
+ */
+function floorNoticeFor(e: FloorUpdatedEvent): string | undefined {
+  switch (e.status) {
+    case 'DENIED':
+      return `DENIED:${e.denyReason}`;
+    case 'REVOKED':
+      return `REVOKED:${e.revokeReason}`;
+    case 'REQUEST_TIMEOUT':
+    case 'QUEUE_TIMEOUT':
+    case 'GRANT_EXPIRED':
+      return e.status;
+    default:
+      return undefined;
   }
 }
 
@@ -95,9 +130,10 @@ function mapCallType(e: CallInfoEvent): CallType {
   return e.type === 'AMBIENT_LISTENING' ? 'full_duplex' : 'half_duplex';
 }
 
-/** Best available human label for the remote party. */
+/** Best available human label for the remote party: its MC ID, not the URI. */
 function remoteLabel(e: CallInfoEvent): string {
-  return e.groupId || e.callerId || e.calleeId || 'Unknown';
+  const uri = e.groupId || e.callerId || e.calleeId;
+  return uri ? displayMcId(uri) : 'Unknown';
 }
 
 // ── Context shape ─────────────────────────────────────────────────────────────
@@ -128,6 +164,27 @@ interface CallContextValue {
    * Simulates floor grant/release until SDK provides real callbacks.
    */
   setFloorState: (state: FloorState) => void;
+
+  /**
+   * Ask for the floor of the active call (PTT pressed). For an SDK call this
+   * only sends the request; floorState follows the server's answer.
+   */
+  requestFloor: () => void;
+
+  /** Give up the floor, or withdraw a pending request (PTT released). */
+  releaseFloor: () => void;
+
+  /** Call audio on the loudspeaker (true) or the earpiece. Resets when the call ends. */
+  speakerOn: boolean;
+  /** Switches the audio route between loudspeaker and earpiece. */
+  toggleSpeaker: () => void;
+
+  /**
+   * Microphone muted. UI state only for now: no call audio flows yet, so there
+   * is no uplink to gate. Resets when the call ends.
+   */
+  micMuted: boolean;
+  toggleMute: () => void;
 
   /**
    * Manually join a call that is in manual-commencement mode.
@@ -191,12 +248,52 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
   const commencementModeRef = useRef(commencementMode);
   useEffect(() => { commencementModeRef.current = commencementMode; }, [commencementMode]);
 
+  // Read by the floor commands, which must address the call as it is now rather
+  // than as it was when the callback was created.
+  const activeCallRef = useRef(activeCall);
+  useEffect(() => { activeCallRef.current = activeCall; }, [activeCall]);
+
+  // True between requestFloor() and releaseFloor(): the user still wants the
+  // floor (PTT held, or toggled on). Read when a queued request's turn comes.
+  const floorWantedRef = useRef(false);
+  useEffect(() => { if (!activeCall) floorWantedRef.current = false; }, [activeCall]);
+
+  // ── Audio route and mute ────────────────────────────────────────────────────
+  // Per call: the next call starts on the earpiece and unmuted. The route is
+  // device-wide, so it is put back when the call goes rather than left on the
+  // speaker for whatever plays next.
+  const [speakerOn, setSpeakerOn] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
+  const speakerOnRef = useRef(false);
+
+  const toggleSpeaker = useCallback(() => {
+    const next = !speakerOnRef.current;
+    speakerOnRef.current = next;
+    MediaSession.setRoute(next ? 'SPEAKER' : 'EARPIECE');
+    setSpeakerOn(next);
+  }, []);
+
+  const toggleMute = useCallback(() => setMicMuted(m => !m), []);
+
+  useEffect(() => {
+    if (activeCall) return;
+    if (speakerOnRef.current) {
+      speakerOnRef.current = false;
+      MediaSession.setRoute('EARPIECE');
+    }
+    setSpeakerOn(false);
+    setMicMuted(false);
+  }, [activeCall]);
+
   const setCommencementMode = useCallback((m: CommencementMode) => {
     setCommencementModeState(m);
   }, []);
 
-  /** Moves a call into history. Shared by SDK teardown and local end/reject. */
-  const archive = useCallback((prev: ActiveCall, duration?: number) => {
+  /**
+   * Moves a call into history. Shared by SDK teardown and local end/reject.
+   * `end` says how it ended; left out for a call replaced by another one.
+   */
+  const archive = useCallback((prev: ActiveCall, duration?: number, end?: CallEnd) => {
     const now = Date.now();
     const record: CallRecord = {
       id:               prev.id,
@@ -208,6 +305,7 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
       startedAt:        prev.startedAt,
       endedAt:          now,
       duration:         duration ?? Math.round((now - prev.startedAt) / 1000),
+      end,
     };
     setCallHistory(h => [record, ...h]);
   }, []);
@@ -272,20 +370,51 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
         setActiveCall(prev => {
           if (!prev || prev.sdkCallId !== e.callId) return prev;
           // A call that never went active has no talk time to report.
-          archive(prev, prev.state === 'ringing' ? 0 : undefined);
+          archive(prev, prev.state === 'ringing' ? 0 : undefined, {
+            mode:      e.mode,
+            reason:    e.reason,
+            sipCode:   e.sipCode,
+            sipReason: e.sipReason,
+          });
           return null;
         });
       }),
 
       sdk.onFloorUpdated((e: FloorUpdatedEvent) => {
+        // Our queued request's turn has come, but the server only hands the
+        // floor over if we ask again before T132 runs out (TS 24.380
+        // §6.2.4.9.4). Ask if the user is still holding PTT.
+        if (e.status === 'GRANT_PENDING' && floorWantedRef.current
+            && activeCallRef.current?.sdkCallId === e.callId) {
+          sdk.requestFloor(e.callId);
+        }
         setActiveCall(prev => {
           if (!prev || prev.sdkCallId !== e.callId) return prev;
-          // ownerId is an MC id; compare against the logged-in user to tell
-          // "we hold the floor" from "someone else does".
-          const mcId = AuthSettings.getLastUsername() ?? '';
-          const weOwnIt = !!e.ownerId && !!mcId && e.ownerId.includes(mcId);
-          return { ...prev, floorState: mapFloorState(e.status, weOwnIt) };
+          const floorState = mapFloorState(e.status);
+          // A notice outlives the update that raised it (an IDLE may follow a
+          // DENIED), and is cleared once a new request starts or succeeds.
+          const notice = floorNoticeFor(e);
+          const floorNotice = notice
+            ?? (floorState === 'requesting' || floorState === 'granted' ? undefined : prev.floorNotice);
+          return {
+            ...prev,
+            floorState,
+            floorOwner:    floorState === 'busy' ? e.ownerId || undefined : undefined,
+            queuePosition: floorState === 'queued' ? e.queuePosition : undefined,
+            floorNotice,
+          };
         });
+      }),
+
+      // The floor channel failing is otherwise invisible: PTT does nothing and
+      // no floor update follows. SdkError carries no call id; there is only
+      // ever one call, so it goes on the active SDK call. The protocol-level
+      // ones (malformed, unknown, unexpected source) are left to the log.
+      sdk.onSdkError((e: SdkErrorEvent) => {
+        if (!USER_FACING_FLOOR_ERRORS.has(e.error)) return;
+        setActiveCall(prev =>
+          prev?.sdkCallId ? { ...prev, floorNotice: `ERROR:${e.error}` } : prev,
+        );
       }),
     ];
     return () => subs.forEach(s => s.remove());
@@ -307,9 +436,10 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
 
     // Ask the SDK to place the call. It answers with onCallUpdated, which drives
     // the real state; until then the UI shows 'connecting'. Without an SDK the
-    // call stays local so the screens remain usable offline.
+    // call stays local so the screens remain usable offline. Only a half-duplex
+    // call has floor control; full-duplex is §11.1.2, with no floor to request.
     const sdk = sdkRef.current;
-    if (sdk) sdk.startPrivateCall(sipUri);
+    if (sdk) sdk.startPrivateCall(sipUri, mode === 'auto', callType === 'full_duplex');
 
     const call: ActiveCall = {
       id:               uuid(),
@@ -331,7 +461,12 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     setActiveCall(prev => {
       if (!prev) return null;
       if (prev.sdkCallId) sdkRef.current?.terminateCall(prev.sdkCallId);
-      archive(prev);
+      // Archived now, so the SDK's own termination event finds no call. Hanging
+      // up before the far end answered is a cancel, not a hang-up.
+      const unanswered = prev.direction === 'outgoing' && prev.state !== 'active';
+      archive(prev, undefined, unanswered
+        ? { mode: 'CANCELLED_LOCALLY', reason: 'UNKNOWN' }
+        : { mode: 'CLOSED_LOCALLY',    reason: 'NORMAL' });
       return null;
     });
   }, [archive, sdkRef]);
@@ -339,6 +474,34 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
   const setFloorState = useCallback((state: FloorState) => {
     setActiveCall(prev => prev ? { ...prev, floorState: state } : null);
   }, []);
+
+  // Floor commands. For an SDK call they only send the request: the floor state
+  // changes when the server answers, via onFloorUpdated, so the UI never shows
+  // the floor as ours before it is. A simulated call has no server and falls
+  // back to setting the state locally.
+  const requestFloor = useCallback(() => {
+    const call = activeCallRef.current;
+    if (!call || call.state !== 'active') return;
+    if (call.sdkCallId) {
+      floorWantedRef.current = true;
+      sdkRef.current?.requestFloor(call.sdkCallId);
+    } else if (call.floorState !== 'busy') {
+      setFloorState('granted');
+    }
+  }, [sdkRef, setFloorState]);
+
+  // Sent whatever the floor state, so letting go before the grant arrives
+  // withdraws the request instead of leaving the floor to be granted to no one.
+  const releaseFloor = useCallback(() => {
+    floorWantedRef.current = false;
+    const call = activeCallRef.current;
+    if (!call) return;
+    if (call.sdkCallId) {
+      sdkRef.current?.releaseFloor(call.sdkCallId);
+    } else if (call.floorState === 'granted') {
+      setFloorState('idle');
+    }
+  }, [sdkRef, setFloorState]);
 
   const joinCall = useCallback(() => {
     setActiveCall(prev =>
@@ -373,7 +536,7 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     setActiveCall(prev => {
       if (!prev || prev.state !== 'ringing') return prev;
       if (prev.sdkCallId) sdkRef.current?.rejectCall(prev.sdkCallId);
-      archive(prev, 0);
+      archive(prev, 0, { mode: 'REJECTED_LOCALLY', reason: 'DECLINED' });
       return null;
     });
   }, [archive, sdkRef]);
@@ -457,6 +620,12 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     startCall,
     endCall,
     setFloorState,
+    requestFloor,
+    releaseFloor,
+    speakerOn,
+    toggleSpeaker,
+    micMuted,
+    toggleMute,
     joinCall,
     acceptCall,
     rejectCall,
@@ -469,7 +638,9 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
   }), [
     activeCall, callHistory, commencementMode,
     setCommencementMode, startCall, endCall,
-    setFloorState, joinCall, acceptCall, rejectCall, clearHistory,
+    setFloorState, requestFloor, releaseFloor,
+    speakerOn, toggleSpeaker, micMuted, toggleMute,
+    joinCall, acceptCall, rejectCall, clearHistory,
     simulateIncomingCall, simulateAnswer,
     simulateFloorBusy, simulateFloorIdle,
   ]);

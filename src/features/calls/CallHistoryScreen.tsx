@@ -20,6 +20,7 @@ import { useNavigation } from '../../contexts/NavigationContext';
 import type { CallRecord } from './types';
 import { makeCallStyles } from './styles';
 import { MockCallsPanel } from './MockCallsPanel';
+import { callEndDetail } from './callEndText';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,9 @@ export function CallHistoryScreen() {
             <Text style={s.historyMetaText}>{formatDate(item.startedAt)}</Text>
             <Text style={s.historyMetaText}>· {tr.callDuration(item.duration)}</Text>
           </View>
+          {item.end && (
+            <Text style={s.historyEndText}>{callEndDetail(tr, item.end)}</Text>
+          )}
         </View>
 
         {/* Call-back button */}
