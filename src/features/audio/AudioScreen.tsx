@@ -17,8 +17,9 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useAppContext } from '../../contexts/AppContext';
+import { useSdkContext } from '../../contexts/SdkContext';
 import { makeCommonStyles } from '../../shared/commonStyles';
 import { ensureMicPermission, hasMicPermission } from '../../core/permissions';
 import {
@@ -42,6 +43,9 @@ const IMPAIRMENTS: Impairment[] = ['NORMAL', 'LOSS', 'REORDER', 'JITTER', 'FREEZ
 
 export function AudioScreen() {
   const { c, tr } = useAppContext();
+  // The peer has to be told this device's address by hand, so it is shown here
+  // rather than leaving it to be hunted for in the system settings.
+  const { ipInfo } = useSdkContext();
   const s = useMemo(() => makeCommonStyles(c), [c]);
   const a = useMemo(() => makeAudioStyles(c), [c]);
 
@@ -59,6 +63,12 @@ export function AudioScreen() {
   const [scoConnected, setScoConnected] = useState(false);
   const [hasBluetooth, setHasBluetooth] = useState(false);
   const [impairment, setImpairment] = useState<Impairment>('NORMAL');
+  // UDP peer, entered by hand — there is no signalling in this test, so nothing
+  // discovers the far end. 5004 is the conventional RTP audio port; both
+  // devices can listen on it since only the peer address differs.
+  const [remoteHost, setRemoteHost] = useState('');
+  const [remotePort, setRemotePort] = useState('5004');
+  const [localPort, setLocalPort] = useState('5004');
 
   const recording = stats?.running === true;
   const playing = play?.running === true;
@@ -204,6 +214,42 @@ export function AudioScreen() {
       setBusy(false);
     }
   }, [busy, refreshDevice, refreshRecordings]);
+
+  const startUdpSend = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Same reason as capture to a file: AudioRecord yields silence rather
+      // than reporting a missing RECORD_AUDIO, and only JS can prompt.
+      const outcome = await ensureMicPermission();
+      if (outcome !== 'granted') {
+        setError(outcome === 'blocked' ? tr.micPermissionBlocked : tr.micPermissionDenied);
+        return;
+      }
+      await MediaSession.startUdpCapture(codec, remoteHost.trim(), Number(remotePort));
+      setStats(await MediaSession.getCaptureStats());
+      await refreshDevice();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, codec, remoteHost, remotePort, tr, refreshDevice]);
+
+  const startUdpReceive = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await MediaSession.startUdpPlayback(codec, Number(localPort));
+      setPlay(await MediaSession.getPlaybackStats());
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, codec, localPort]);
 
   const row = (label: string, value: string, warn = false) => (
     <View style={a.row} key={label}>
@@ -427,6 +473,92 @@ export function AudioScreen() {
           </View>
         ) : null}
         <Text style={a.hint}>{tr.audioPlaybackHint}</Text>
+
+        <Text style={a.section}>{tr.audioUdpSection}</Text>
+        <View style={a.card}>
+          {row(tr.audioMyIp, ipInfo.ip ?? tr.audioNone)}
+          <View style={a.row}>
+            <Text style={a.rowLabel}>{tr.audioRemoteHost}</Text>
+            <TextInput
+              style={a.input}
+              value={remoteHost}
+              onChangeText={setRemoteHost}
+              placeholder="192.168.1.20"
+              placeholderTextColor={c.textMuted}
+              keyboardType="numeric"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!recording}
+            />
+          </View>
+          <View style={a.row}>
+            <Text style={a.rowLabel}>{tr.audioRemotePort}</Text>
+            <TextInput
+              style={a.input}
+              value={remotePort}
+              onChangeText={setRemotePort}
+              keyboardType="numeric"
+              editable={!recording}
+            />
+          </View>
+          <View style={a.row}>
+            <Text style={a.rowLabel}>{tr.audioLocalPort}</Text>
+            <TextInput
+              style={a.input}
+              value={localPort}
+              onChangeText={setLocalPort}
+              keyboardType="numeric"
+              editable={!playing}
+            />
+          </View>
+
+          {/* Disabled without a peer address: the sink would fail to resolve it
+              and the error would arrive as a rejected promise instead of being
+              obvious before the press. */}
+          <Pressable
+            onPress={recording ? stop : startUdpSend}
+            disabled={busy || (!recording && !remoteHost.trim())}
+            style={[
+              a.actionButton,
+              { backgroundColor: recording ? c.error : c.primary },
+              (busy || (!recording && !remoteHost.trim())) && a.actionButtonDisabled,
+            ]}>
+            <Text style={a.actionButtonText}>
+              {recording ? tr.audioUdpStopSend : tr.audioUdpSend}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={playing ? stopPlayback : startUdpReceive}
+            disabled={busy}
+            style={[
+              a.actionButton,
+              { backgroundColor: playing ? c.error : c.primary },
+              busy && a.actionButtonDisabled,
+            ]}>
+            <Text style={a.actionButtonText}>
+              {playing ? tr.audioUdpStopReceive : tr.audioUdpReceive}
+            </Text>
+          </Pressable>
+
+          {/* Shown only while a UDP stream is actually up: these counters read 0
+              for a file capture or a file replay, where they would mislead. */}
+          {stats?.target ? (
+            <>
+              {row(tr.audioUdpTarget, stats.target)}
+              {row(tr.audioPacketsSent, String(stats.packetsSent))}
+              {row(tr.audioSendErrors, String(stats.sendErrors), stats.sendErrors > 0)}
+            </>
+          ) : null}
+          {play?.source === 'UDP' ? (
+            <>
+              {row(tr.audioPacketsReceived, String(play.packetsReceived))}
+              {row(tr.audioPacketsLost, String(play.lostPackets), play.lostPackets > 0)}
+              {row(tr.audioMalformed, String(play.malformedPackets), play.malformedPackets > 0)}
+              {row(tr.audioRemoteSsrc, play.remoteSsrc ? play.remoteSsrc.toString(16) : tr.audioNone)}
+            </>
+          ) : null}
+        </View>
+        <Text style={a.hint}>{tr.audioUdpHint}</Text>
 
         <Text style={a.section}>{tr.audioRecordingsSection}</Text>
         <View style={a.card}>

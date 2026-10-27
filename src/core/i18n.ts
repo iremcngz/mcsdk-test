@@ -313,6 +313,25 @@ export interface Translations {
   audioLate: string;
   audioJitterDepth: string;
   audioPlaybackHint: string;
+
+  // ── Audio over UDP (two-device test)
+  audioUdpSection: string;
+  audioMyIp: string;
+  audioRemoteHost: string;
+  audioRemotePort: string;
+  audioLocalPort: string;
+  audioUdpSend: string;
+  audioUdpReceive: string;
+  audioUdpStopSend: string;
+  audioUdpStopReceive: string;
+  audioPacketsSent: string;
+  audioPacketsReceived: string;
+  audioPacketsLost: string;
+  audioMalformed: string;
+  audioSendErrors: string;
+  audioRemoteSsrc: string;
+  audioUdpTarget: string;
+  audioUdpHint: string;
 }
 
 const tr: Translations = {
@@ -596,6 +615,24 @@ const tr: Translations = {
   audioLate:              'Geç gelen',
   audioJitterDepth:       'Jitter derinliği',
   audioPlaybackHint:      'Underrun 0 olmalı. İlk testleri kulaklıkla yapın — hoparlörde yankı olabilir.',
+
+  audioUdpSection:        'UDP ile aktarım (iki cihaz)',
+  audioMyIp:              'Bu cihazın IP adresi',
+  audioRemoteHost:        'Karşı cihazın IP adresi',
+  audioRemotePort:        'Karşı port',
+  audioLocalPort:         'Dinlenen port',
+  audioUdpSend:           'UDP ile gönder',
+  audioUdpReceive:        'UDP ile al',
+  audioUdpStopSend:       'Göndermeyi durdur',
+  audioUdpStopReceive:    'Almayı durdur',
+  audioPacketsSent:       'Gönderilen paket',
+  audioPacketsReceived:   'Alınan paket',
+  audioPacketsLost:       'Kaybolan paket',
+  audioMalformed:         'Bozuk paket',
+  audioSendErrors:        'Gönderim hatası',
+  audioRemoteSsrc:        'Karşı SSRC',
+  audioUdpTarget:         'Hedef',
+  audioUdpHint:           'İki cihaz da aynı ağda ve aynı codec\'te olmalı. Karşı cihaza bu IP\'yi girin. Gönderilen ile alınan paket farkı gerçek kaybı verir.',
 };
 
 const en: Translations = {
@@ -879,6 +916,24 @@ const en: Translations = {
   audioLate:              'Late',
   audioJitterDepth:       'Jitter depth',
   audioPlaybackHint:      'Underrun must stay 0. Use a headset for first tests — the speaker may echo.',
+
+  audioUdpSection:        'Audio over UDP (two devices)',
+  audioMyIp:              'This device\'s IP address',
+  audioRemoteHost:        'Peer IP address',
+  audioRemotePort:        'Peer port',
+  audioLocalPort:         'Listening port',
+  audioUdpSend:           'Send over UDP',
+  audioUdpReceive:        'Receive over UDP',
+  audioUdpStopSend:       'Stop sending',
+  audioUdpStopReceive:    'Stop receiving',
+  audioPacketsSent:       'Packets sent',
+  audioPacketsReceived:   'Packets received',
+  audioPacketsLost:       'Packets lost',
+  audioMalformed:         'Malformed packets',
+  audioSendErrors:        'Send errors',
+  audioRemoteSsrc:        'Peer SSRC',
+  audioUdpTarget:         'Target',
+  audioUdpHint:           'Both devices must be on the same network and the same codec. Enter this IP on the other device. Sent minus received is the real packet loss.',
 };
 
 export function getTranslation(language: AppLanguage): Translations {

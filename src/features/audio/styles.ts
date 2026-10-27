@@ -53,6 +53,24 @@ export function makeAudioStyles(c: ThemePalette) {
       color: c.error,
     },
 
+    // Sits in the value half of a row, so it lines up with the read-only rows
+    // above it. Monospaced digits keep an address from shifting as it is typed.
+    input: {
+      flex: 1,
+      marginLeft: 12,
+      paddingVertical: 4,
+      paddingHorizontal: 8,
+      fontSize: 13,
+      fontWeight: '600',
+      color: c.textPrimary,
+      backgroundColor: c.inputBg,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 6,
+      textAlign: 'right',
+      fontVariant: ['tabular-nums'],
+    },
+
     fileName: {
       fontSize: 12,
       color: c.textPrimary,

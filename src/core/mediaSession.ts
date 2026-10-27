@@ -96,6 +96,12 @@ export interface CaptureStats {
   ns: boolean;
   filePath: string | null;
   error: string | null;
+  /** Packets handed to the kernel. 0 while capturing to a file. */
+  packetsSent: number;
+  /** send() threw — the frame was abandoned rather than retried. */
+  sendErrors: number;
+  /** Where packets are going ("host:port"), or null for a file. */
+  target: string | null;
 }
 
 /**
@@ -149,6 +155,20 @@ export interface PlaybackStats {
   jitterDepth: number;
   filePath: string | null;
   error: string | null;
+  /** Datagrams taken off the socket, valid or not. 0 while replaying a file. */
+  packetsReceived: number;
+  /** Rejected by the RTP parser — wrong version, too short, truncated. */
+  malformedPackets: number;
+  /**
+   * Packets the sender produced that never arrived, counted from gaps in the
+   * RTP sequence number. This is what the sequence number buys that a bare
+   * timestamp cannot: a timestamp gap is either loss or the sender pausing,
+   * and capture does pause while still advancing the timestamp.
+   */
+  lostPackets: number;
+  localPort: number;
+  /** SSRC of the stream being received, for telling peers apart. */
+  remoteSsrc: number;
 }
 
 const IDLE_PLAYBACK: PlaybackStats = {
@@ -157,6 +177,8 @@ const IDLE_PLAYBACK: PlaybackStats = {
   playedFrames: 0, writtenFrames: 0,
   concealedFrames: 0, underrunFrames: 0, lateFrames: 0, duplicateFrames: 0,
   jitterDepth: 0, filePath: null, error: null,
+  packetsReceived: 0, malformedPackets: 0, lostPackets: 0,
+  localPort: 0, remoteSsrc: 0,
 };
 
 export interface Recording {
@@ -172,6 +194,7 @@ const IDLE_STATS: CaptureStats = {
   capturedFrames: 0, encodedFrames: 0, droppedFrames: 0, bytesWritten: 0,
   timestamp: 0, mediaSeconds: 0, aec: false, ns: false,
   filePath: null, error: null,
+  packetsSent: 0, sendErrors: 0, target: null,
 };
 
 let emitter: NativeEventEmitter | null = null;
@@ -316,6 +339,27 @@ export const MediaSession = {
     return Native.startCapture(codec);
   },
 
+  /**
+   * Starts capture sending RTP over UDP to a peer instead of to a file.
+   *
+   * No signalling: the host and port are entered by hand. A real call learns
+   * them from the SDP offer/answer, which the SDK owns; this path exists to
+   * exercise the timestamps and the jitter buffer against a real network
+   * before that API exists.
+   *
+   * Both devices must be set to the same codec. The RTP payload type is in the
+   * dynamic range (96), so the number carries no meaning beyond what the two
+   * ends were configured to agree on — a mismatch decodes as noise.
+   */
+  async startUdpCapture(
+    codec: CaptureCodec,
+    remoteHost: string,
+    remotePort: number,
+  ): Promise<void> {
+    if (!isSupported) throw new Error('audio capture is Android-only');
+    return Native.startUdpCapture(codec, remoteHost, remotePort);
+  },
+
   /** Stops capture and resolves the finished file's path (null if none). */
   async stopCapture(): Promise<string | null> {
     if (!isSupported) return null;
@@ -358,6 +402,18 @@ export const MediaSession = {
   async startPlayback(path: string, impairment: Impairment = 'NORMAL'): Promise<string> {
     if (!isSupported) throw new Error('playback is Android-only');
     return Native.startPlayback(path, impairment);
+  },
+
+  /**
+   * Starts playback of RTP arriving on [localPort].
+   *
+   * No impairment setting, unlike the file path: a real network supplies loss,
+   * reordering and jitter of its own, which is the whole reason the impairment
+   * modes exist for files.
+   */
+  async startUdpPlayback(codec: CaptureCodec, localPort: number): Promise<void> {
+    if (!isSupported) throw new Error('playback is Android-only');
+    return Native.startUdpPlayback(codec, localPort);
   },
 
   async stopPlayback(): Promise<void> {

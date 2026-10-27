@@ -199,6 +199,50 @@ class MediaBridgeModule(
         }
     }
 
+    /**
+     * Starts capture sending RTP over UDP to a peer instead of to a file.
+     *
+     * There is no signalling: the address and port are typed in on the Audio
+     * screen. A real call learns them from the SDP offer/answer, which the SDK
+     * owns — this exists to exercise the timestamps and the jitter buffer
+     * against a real network before that API is available.
+     */
+    @ReactMethod
+    fun startUdpCapture(codecName: String, remoteHost: String, remotePort: Double, promise: Promise) {
+        try {
+            if (pipeline.startUdpCapture(codecName, remoteHost, remotePort.toInt())) {
+                promise.resolve(null)
+            } else {
+                promise.reject("udp_capture_start", pipeline.lastError ?: "could not start UDP capture")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startUdpCapture failed: ${e.message}", e)
+            promise.reject("udp_capture_start", e)
+        }
+    }
+
+    /**
+     * Starts playback of RTP arriving on a local port.
+     *
+     * The codec is named rather than inferred: a socket carries no extension,
+     * and the RTP payload type is in the dynamic range where the number means
+     * only what both ends agreed. Both devices must be set to the same codec or
+     * the decoder is handed bytes it will turn into noise.
+     */
+    @ReactMethod
+    fun startUdpPlayback(codecName: String, localPort: Double, promise: Promise) {
+        try {
+            if (pipeline.startUdpPlayback(codecName, localPort.toInt())) {
+                promise.resolve(null)
+            } else {
+                promise.reject("udp_playback_start", pipeline.lastError ?: "could not start UDP playback")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startUdpPlayback failed: ${e.message}", e)
+            promise.reject("udp_playback_start", e)
+        }
+    }
+
     /** Stops capture, releases the device, and resolves the finished file path. */
     @ReactMethod
     fun stopCapture(promise: Promise) {
@@ -242,6 +286,10 @@ class MediaBridgeModule(
             putBoolean("ns", s.ns)
             if (s.filePath != null) putString("filePath", s.filePath) else putNull("filePath")
             if (s.error != null) putString("error", s.error) else putNull("error")
+            // UDP sink only; 0 and null while capturing to a file.
+            putInt("packetsSent", s.packetsSent)
+            putInt("sendErrors", s.sendErrors)
+            if (s.target != null) putString("target", s.target) else putNull("target")
         })
     }
 
@@ -320,6 +368,15 @@ class MediaBridgeModule(
             putInt("jitterDepth", s.jitterDepth)
             if (s.filePath != null) putString("filePath", s.filePath) else putNull("filePath")
             if (s.error != null) putString("error", s.error) else putNull("error")
+            // UDP source only; 0 while replaying a file.
+            putInt("packetsReceived", s.packetsReceived)
+            putInt("malformedPackets", s.malformedPackets)
+            // Sent-minus-received across the two devices is the same number, but
+            // this one comes from the sequence numbers, so it is per-stream and
+            // does not need the peer's screen to be read at the same moment.
+            putInt("lostPackets", s.lostPackets)
+            putInt("localPort", s.localPort)
+            putInt("remoteSsrc", s.remoteSsrc)
         })
     }
 
