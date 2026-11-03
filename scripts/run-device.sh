@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-PACKAGE="com.testaar"
+PACKAGE="com.mcxtest"
 APK="android/app/build/outputs/apk/release/app-release.apk"
 
 cd "$(dirname "$0")/.."

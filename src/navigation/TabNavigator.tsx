@@ -293,7 +293,7 @@ export function TabNavigator() {
               <Text style={navStyles.avatarText}>{userInitials}</Text>
             </View>
             <View style={navStyles.identityBlock}>
-              <Text style={navStyles.metaTitle}>MCSDK Test</Text>
+              <Text style={navStyles.metaTitle}>MCX Test</Text>
               <Text style={navStyles.usernameText} numberOfLines={1}>
                 {username}
               </Text>

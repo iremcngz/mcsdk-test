@@ -627,7 +627,7 @@ pjsip worker thread: Logger::Log(level=2, "Sdk ready")
 ## 14. Proje Yapısı (Özet)
 
 ```
-testAAR/
+McxTest/
 ├── App.tsx                    ← Test UI (4 adımlı yaşam döngüsü)
 ├── src/mcsdk/
 │   ├── NativeMcSdk.ts         ← Codegen spec (platform-agnostic)

@@ -1,6 +1,6 @@
-# testAAR — MCX SDK demo app
+# MCX Test — MCX SDK demo app
 
-React Native 0.85 app (package `com.testaar`) that exercises the ASELSAN MCX SDK through a
+React Native 0.85 app (package `com.mcxtest`) that exercises the ASELSAN MCX SDK through a
 TurboModule bridge. 
 
 ```

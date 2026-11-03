@@ -1,4 +1,4 @@
-# testAAR — MCSDK React Native Integration
+# MCX Test — MCSDK React Native Integration
 
 > A React Native application demonstrating the full-stack integration of the **MCSDK** C++ core library into iOS and Android via the New Architecture (TurboModule) using shared native libraries (`.so` / `.xcframework`).
 
@@ -62,7 +62,7 @@ unzip -o mc-sdk-android.zip -d aar-contents
 #     proguard.txt
 
 # Step 3 — Create jniLibs target directories
-cd /path/to/testAAR
+cd /path/to/McxTest
 mkdir -p android/app/src/main/jniLibs/arm64-v8a
 mkdir -p android/app/src/main/jniLibs/armeabi-v7a
 mkdir -p android/app/src/main/jniLibs/x86_64
@@ -795,7 +795,7 @@ After a real `destroy()`, pressing **Create → Set Parameters → Initialize** 
 ## 8. Project Structure
 
 ```
-testAAR/
+McxTest/
 ├── App.tsx                              ← Test UI (4-step lifecycle)
 ├── src/
 │   ├── mcsdk/                          ← TypeScript bridge layer
@@ -824,7 +824,7 @@ testAAR/
 │           │   ├── arm64-v8a/libmcsdk.so    (9.3 MB)
 │           │   ├── armeabi-v7a/libmcsdk.so  (6.7 MB)
 │           │   └── x86_64/libmcsdk.so       (9.6 MB)
-│           ├── java/com/testaar/
+│           ├── java/com/mcxtest/
 │           │   ├── MainApplication.kt  ← McSdkPackage registration added
 │           │   └── MainActivity.kt
 │           └── java/com/aselsan/mcsdk/
@@ -979,7 +979,7 @@ Android: /data/data/<package>/files/logs/app_0.log
 iOS:     <sandbox>/Library/Caches/Logs/app_0.log
 ```
 
-> **iOS — Dosyaya ulaşmak:** Xcode → Window → Devices and Simulators → cihazı seçin → testAAR → Download Container. Açılan `.xcappdata` paketinde `AppData/Library/Caches/Logs/app_0.log` yoluna bakın.
+> **iOS — Dosyaya ulaşmak:** Xcode → Window → Devices and Simulators → cihazı seçin → MCX Test → Download Container. Açılan `.xcappdata` paketinde `AppData/Library/Caches/Logs/app_0.log` yoluna bakın.
 > **Kesin path:** Uygulama → Ayarlar sekmesi → Log Files bölümü tam yolu otomatik gösterir. Metro console'da da uygulama açılışında basılır.
 
 **Rotation behaviour:**

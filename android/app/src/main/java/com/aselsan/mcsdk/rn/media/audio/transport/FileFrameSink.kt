@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * is the point — our own decoder would happily read back our own encoder's
  * mistakes, so a third party has to confirm the bytes are really valid:
  *
- *   adb exec-out run-as com.testaar cat cache/media/<name>.pcmu > capture.pcmu
+ *   adb exec-out run-as com.mcxtest cat cache/media/<name>.pcmu > capture.pcmu
  *   ffmpeg -f mulaw -ar 16000 -ac 1 -i capture.pcmu out.wav
  *
  * The payload is the bare encoded stream with no container and no RTP headers —

@@ -1,5 +1,5 @@
 /**
- * Comprehensive integration tests for the MCSDK Test App.
+ * Comprehensive integration tests for the MCX Test app.
  *
  * ┌─ HOW TO RUN ─────────────────────────────────────────────────────────────┐
  * │  npx jest                              # Run ALL test files              │
@@ -239,7 +239,7 @@ describe('Initial render', () => {
 
   it('shows the app title', () => {
     render(<App />);
-    expect(screen.getByText('MCSDK Test')).toBeTruthy();
+    expect(screen.getByText('MCX Test')).toBeTruthy();
   });
 
   it('shows NOT CREATED status badge', () => {
