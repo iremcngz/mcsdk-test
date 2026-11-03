@@ -1,4 +1,4 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio.transport
 
 import org.junit.After
 import org.junit.Assert.assertEquals

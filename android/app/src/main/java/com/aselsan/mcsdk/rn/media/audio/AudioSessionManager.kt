@@ -1,4 +1,4 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio
 
 import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver

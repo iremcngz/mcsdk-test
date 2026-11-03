@@ -1,6 +1,7 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio
 
 import android.util.Log
+import com.aselsan.mcsdk.rn.media.audio.codec.AudioCodec
 import java.util.concurrent.atomic.AtomicInteger
 
 /**

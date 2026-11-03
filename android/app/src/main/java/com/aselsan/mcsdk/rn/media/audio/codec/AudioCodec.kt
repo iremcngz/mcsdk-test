@@ -1,4 +1,4 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio.codec
 
 /**
  * AudioCodec — turns captured PCM into the payload that goes on the wire.

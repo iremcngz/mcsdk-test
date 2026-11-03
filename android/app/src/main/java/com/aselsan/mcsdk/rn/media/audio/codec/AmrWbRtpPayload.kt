@@ -1,4 +1,4 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio.codec
 
 /**
  * AmrWbRtpPayload — AMR-WB frames to and from the RTP payload of RFC 4867,

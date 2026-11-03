@@ -10,7 +10,11 @@ src/contexts/     SdkContext (lifecycle/params/logs), TalkContext (groups/affili
 src/features/     talk, calls, contacts, home, metrics, sdklogs, settings, auth,
                   audio (capture diagnostics)
 android/app/src/main/java/com/aselsan/mcsdk/rn/McSdkModule.kt   the Kotlin bridge
-android/.../rn/media/   the audio layer: capture, codec, ring buffer, sinks, session
+android/.../rn/media/   the JS bridge and foreground service; subpackages below
+  rtp/                  the RTP header, shared by the planes
+  audio/                pipeline, capture, playback, routing, jitter buffer
+  audio/codec/          AMR-WB, PCMU, the RTP payload framing
+  audio/transport/      sinks and sources (file, UDP, SDK), CallAudioRouter
 MCSDK/            git submodule: the C++ SDK source
 ```
 

@@ -1,4 +1,4 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio.codec
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals

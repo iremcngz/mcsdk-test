@@ -1,4 +1,4 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.rtp
 
 /**
  * RtpPacket — RFC 3550 §5.1 fixed header, built and read in place.

@@ -25,7 +25,7 @@ import com.aselsan.mcsdk.SdkParams
 import com.aselsan.mcsdk.TerminationInfo
 import com.aselsan.mcsdk.ReceptionInfo
 import com.aselsan.mcsdk.TransmissionInfo
-import com.aselsan.mcsdk.rn.media.CallAudioRouter
+import com.aselsan.mcsdk.rn.media.audio.transport.CallAudioRouter
 import com.facebook.react.bridge.Arguments
 import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext

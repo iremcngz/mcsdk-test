@@ -1,4 +1,4 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio.codec
 
 /** AMR-WB's shape without MediaCodec: what sinks, sources and the jitter buffer read. */
 class FakeAmrWb(override val name: String = "AMR-WB") : AudioCodec {

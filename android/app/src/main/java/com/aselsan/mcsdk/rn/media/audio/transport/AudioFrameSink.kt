@@ -1,4 +1,6 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio.transport
+
+import com.aselsan.mcsdk.rn.media.audio.codec.AudioCodec
 
 /**
  * AudioFrameSink — where an encoded frame goes once capture is done with it.

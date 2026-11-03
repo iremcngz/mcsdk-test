@@ -1,4 +1,4 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio
 
 import android.annotation.SuppressLint
 import android.media.AudioFormat
@@ -6,6 +6,8 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Process
 import android.util.Log
+import com.aselsan.mcsdk.rn.media.audio.codec.AudioCodec
+import com.aselsan.mcsdk.rn.media.audio.transport.AudioFrameSink
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 

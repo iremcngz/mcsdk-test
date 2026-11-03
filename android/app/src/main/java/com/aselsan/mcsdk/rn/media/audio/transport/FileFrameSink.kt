@@ -1,6 +1,7 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio.transport
 
 import android.util.Log
+import com.aselsan.mcsdk.rn.media.audio.codec.AudioCodec
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream

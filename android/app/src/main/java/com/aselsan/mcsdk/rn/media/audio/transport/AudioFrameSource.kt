@@ -1,4 +1,6 @@
-package com.aselsan.mcsdk.rn.media
+package com.aselsan.mcsdk.rn.media.audio.transport
+
+import com.aselsan.mcsdk.rn.media.audio.codec.AudioCodec
 
 /**
  * AudioFrameSource — where encoded frames arrive from, on the downlink.
