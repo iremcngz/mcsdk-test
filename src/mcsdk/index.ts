@@ -22,6 +22,8 @@ import type {
     CallInfoEvent,
     CallTerminatedEvent,
     FloorUpdatedEvent,
+    AudioInfoUpdatedEvent,
+    McSdkAudioCodec,
 } from './types';
 
 export * from './types';
@@ -43,9 +45,14 @@ export const McSdkEvents = {
     CallUpdated:     'McSdkCallUpdated',
     CallTerminated:  'McSdkCallTerminated',
     FloorUpdated:    'McSdkFloorUpdated',
+    AudioInfoUpdated: 'McSdkAudioInfoUpdated',
     IdentityUpdated:      'McSdkIdentityUpdated',
     GroupsUpdated:        'McSdkGroupsUpdated',
     AffiliationsUpdated:  'McSdkAffiliationsUpdated',
+    Ready:                'McSdkReady',
+    Terminated:           'McSdkTerminated',
+    TransmissionUpdated:  'McSdkTransmissionUpdated',
+    ReceptionUpdated:     'McSdkReceptionUpdated',
 } as const;
 
 // ── Emitter (singleton, lazily created) ───────────────────────────────────────
@@ -258,12 +265,29 @@ export class McSdk {
      *
      * `autoCommence` sets the Answer-Mode header (RFC 5373): true auto-answers
      * at the far end, false rings for manual pickup.
+     *
+     * `audioCodec` is the AMR-WB framing the app's audio pipeline produces;
+     * left out, the SDK picks its default (octet-aligned, the same thing).
      */
-    startPrivateCall(mcId: string, autoCommence = true, fullDuplex = false): void {
-        NativeMcSdk.startPrivateCall(mcId, autoCommence, fullDuplex);
+    startPrivateCall(
+        mcId: string,
+        autoCommence = true,
+        fullDuplex = false,
+        audioCodec?: McSdkAudioCodec,
+    ): void {
+        NativeMcSdk.startPrivateCall(mcId, autoCommence, fullDuplex, audioCodec ?? '');
     }
-    startGroupCall(groupId: string): void  { NativeMcSdk.startGroupCall(groupId); }
-    answerCall(callId: string): void       { NativeMcSdk.answerCall(callId); }
+    /** `audioCodec` as for startPrivateCall. */
+    startGroupCall(groupId: string, audioCodec?: McSdkAudioCodec): void {
+        NativeMcSdk.startGroupCall(groupId, audioCodec ?? '');
+    }
+    /**
+     * `audioCodec` as for startPrivateCall. Leave it out for an MCVideo call,
+     * whose media plane carries no audio — the SDK refuses a codec there.
+     */
+    answerCall(callId: string, audioCodec?: McSdkAudioCodec): void {
+        NativeMcSdk.answerCall(callId, audioCodec ?? '');
+    }
     rejectCall(callId: string): void       { NativeMcSdk.rejectCall(callId); }
     terminateCall(callId: string): void    { NativeMcSdk.terminateCall(callId); }
 
@@ -327,6 +351,11 @@ export class McSdk {
         return emitter().addListener(McSdkEvents.FloorUpdated, handler);
     }
 
+    /** A call's audio stream changed: negotiated format, or RTP starting/stopping. */
+    onAudioInfoUpdated(handler: (e: AudioInfoUpdatedEvent) => void) {
+        return emitter().addListener(McSdkEvents.AudioInfoUpdated, handler);
+    }
+
     onSdsSent(handler: (e: SdsSentEvent) => void) {
         return emitter().addListener(McSdkEvents.SdsSent, handler);
     }
@@ -348,8 +377,19 @@ export class McSdk {
     }
 
     /**
+     * Every listener event with its raw payload, for logging. McSdkLog is left
+     * out: it has onLog above, and at ~450/s it would bury everything else.
+     */
+    onAnyEvent(handler: (event: string, payload: unknown) => void) {
+        const subs = Object.values(McSdkEvents)
+            .filter(event => event !== McSdkEvents.Log)
+            .map(event => emitter().addListener(event, payload => handler(event, payload)));
+        return { remove: () => subs.forEach(sub => sub.remove()) };
+    }
+
+    /**
      * SDK-level failures (SdkListener::onSdkError). Covers the whole SdkError
-     * set — IDENTITY_NOT_SET, NOT_REGISTERED, SIP_*, HTTP_*, FLOOR_*.
+     * set — IDENTITY_NOT_SET, NOT_REGISTERED, SIP_*, HTTP_*, FLOOR_*, AUDIO_*.
      */
     onSdkError(handler: (e: SdkErrorEvent) => void) {
         return emitter().addListener(McSdkEvents.SdkError, handler);

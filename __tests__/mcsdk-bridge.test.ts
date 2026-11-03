@@ -335,3 +335,58 @@ describe('McSdk.onStoreDocuments', () => {
         expect(h2).toHaveBeenCalledTimes(1);
     });
 });
+
+// =============================================================================
+// 5.  Call audio — the codec reaches the bridge, and the audio info event
+// =============================================================================
+
+describe('McSdk calls — audio codec', () => {
+    it('passes the AMR-WB framing to startPrivateCall', () => {
+        new McSdk().startPrivateCall('sip:bob@example.org', true, false, 'AMR_WB_OCTET_ALIGNED');
+        expect(MockNative.startPrivateCall)
+            .toHaveBeenCalledWith('sip:bob@example.org', true, false, 'AMR_WB_OCTET_ALIGNED');
+    });
+
+    // The bridge reads '' as "no codec" and uses the SDK's codec-less overload.
+    it('passes an empty codec when none is named', () => {
+        new McSdk().startPrivateCall('sip:bob@example.org');
+        expect(MockNative.startPrivateCall)
+            .toHaveBeenCalledWith('sip:bob@example.org', true, false, '');
+    });
+
+    it('passes the AMR-WB framing to startGroupCall', () => {
+        new McSdk().startGroupCall('sip:group.g2@example.org', 'AMR_WB_OCTET_ALIGNED');
+        expect(MockNative.startGroupCall)
+            .toHaveBeenCalledWith('sip:group.g2@example.org', 'AMR_WB_OCTET_ALIGNED');
+    });
+
+    it('starts a group call with an empty codec when none is named', () => {
+        new McSdk().startGroupCall('sip:group.g2@example.org');
+        expect(MockNative.startGroupCall).toHaveBeenCalledWith('sip:group.g2@example.org', '');
+    });
+
+    it('passes the framing to answerCall', () => {
+        new McSdk().answerCall('call-1', 'AMR_WB_OCTET_ALIGNED');
+        expect(MockNative.answerCall).toHaveBeenCalledWith('call-1', 'AMR_WB_OCTET_ALIGNED');
+    });
+
+    // An MCVideo call must be answered without a codec, or the SDK refuses it.
+    it('answers with an empty codec when none is named', () => {
+        new McSdk().answerCall('call-1');
+        expect(MockNative.answerCall).toHaveBeenCalledWith('call-1', '');
+    });
+});
+
+describe('McSdk.onAudioInfoUpdated', () => {
+    it('delivers the negotiated format and flow', () => {
+        const sdk = new McSdk();
+        const handler = jest.fn();
+        sdk.onAudioInfoUpdated(handler);
+        const e = {
+            callId: 'call-1', encoding: 'AMR-WB', clockRate: 16000,
+            fmtp: 'octet-align=1;crc=0', flow: 'FLOWING', path: 'UNICAST', encrypted: false,
+        };
+        emitNativeEvent('McSdkAudioInfoUpdated', e);
+        expect(handler).toHaveBeenCalledWith(e);
+    });
+});

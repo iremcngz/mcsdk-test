@@ -243,6 +243,48 @@ class MediaBridgeModule(
         }
     }
 
+    /**
+     * Runs a call's audio through the SDK: microphone → AMR-WB → the call's
+     * uplink, and the call's received audio → jitter buffer → speaker. Starts
+     * with the uplink gated; [setTransmitEnabled] opens it.
+     *
+     * RECORD_AUDIO must already be granted, as for capture. Rejects with the
+     * pipeline's reason when it cannot start — most likely an Audio-tab test
+     * still holding capture or playback.
+     */
+    @ReactMethod
+    fun startCallAudio(callId: String, promise: Promise) {
+        try {
+            if (pipeline.startCallAudio(callId)) {
+                promise.resolve(null)
+            } else {
+                promise.reject("call_audio_start", pipeline.lastError ?: "could not start call audio")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startCallAudio failed: ${e.message}", e)
+            promise.reject("call_audio_start", e)
+        }
+    }
+
+    /**
+     * Stops a call's audio — only [callId]'s, or whichever is running when it
+     * is empty. Resolves even when none was running.
+     */
+    @ReactMethod
+    fun stopCallAudio(callId: String, promise: Promise) {
+        try {
+            pipeline.stopCallAudio(callId.ifEmpty { null })
+            promise.resolve(null)
+        } catch (e: Exception) {
+            Log.e(TAG, "stopCallAudio failed: ${e.message}", e)
+            promise.reject("call_audio_stop", e)
+        }
+    }
+
+    /** The call whose audio is running, or null. */
+    @ReactMethod
+    fun getCallAudioId(promise: Promise) = promise.resolve(pipeline.callAudioId)
+
     /** Stops capture, releases the device, and resolves the finished file path. */
     @ReactMethod
     fun stopCapture(promise: Promise) {
@@ -260,6 +302,10 @@ class MediaBridgeModule(
      */
     @ReactMethod
     fun setTransmitEnabled(enabled: Boolean) = pipeline.setTransmitEnabled(enabled)
+
+    /** Silences the call's received audio without touching the call. */
+    @ReactMethod
+    fun setPlaybackMuted(muted: Boolean) = pipeline.setPlaybackMuted(muted)
 
     /**
      * One snapshot of the counters. Meant to be polled about once a second —

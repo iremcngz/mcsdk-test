@@ -19,6 +19,25 @@ jest.mock('react-native-sound-level', () => ({
   onNewFrame: undefined,
 }), { virtual: true });
 
+jest.mock('../src/core/permissions', () => ({
+  ensureMicPermission: jest.fn(async () => 'granted'),
+}));
+
+// A group call's audio is TalkContext's (talk-group-audio.test). The level
+// meter is refused the mic — the call's pipeline holds it — so it stays off and
+// updates nothing after a test's act() has ended.
+jest.mock('../src/core/mediaSession', () => ({
+  MediaSession: {
+    startCallAudio: jest.fn(async () => true),
+    stopCallAudio: jest.fn(async () => {}),
+    setTransmitEnabled: jest.fn(),
+    setPlaybackMuted: jest.fn(),
+    setRoute: jest.fn(),
+    claimMicForMeter: jest.fn(async () => false),
+    releaseMicForMeter: jest.fn(),
+  },
+}));
+
 const mockPalette = {
   bg:              '#0b1220',
   surface:         '#111b2f',
@@ -56,6 +75,8 @@ jest.mock('../src/contexts/AppContext', () => ({
       talkMenuStartEmergency: 'Start Emergency',
       talkMenuGroupDetails: 'Group Details',
       talkMenuMuteOff: 'Mute Off',
+      talkMenuMuteOn: 'Mute On',
+      talkGroupMutedHint: 'Group audio muted',
       talkButton: 'Push to talk',
       talkButtonHold: 'Hold to talk',
       talkSpeakerYou: 'You',
@@ -102,6 +123,8 @@ jest.mock('../src/contexts/AppContext', () => ({
       talkSvcVideo: 'Video',
       talkSvcData: 'Data',
       talkAffServicesHint: 'Services the group supports',
+      talkCallStartFailed: 'The group call could not be set up',
+      floorDeniedOtherTalker: 'Someone else has the floor',
     },
   }),
 }));
@@ -129,6 +152,19 @@ const allGroups = (): MockGroup[] =>
   ['group1', 'group2', 'group3', 'group4', 'group5', 'group6', 'group7']
     .map(groupId => ({ groupId, name: groupId, isPtt: true, isVideo: true, isData: true }));
 
+type Handler = (e: any) => void;
+const callListeners = {
+  incoming:   new Set<Handler>(),
+  updated:    new Set<Handler>(),
+  terminated: new Set<Handler>(),
+  floor:      new Set<Handler>(),
+  error:      new Set<Handler>(),
+};
+const sub = (set: Set<Handler>) => (h: Handler) => {
+  set.add(h);
+  return { remove: () => set.delete(h) };
+};
+
 const mockSdk = {
   affiliate: jest.fn(),
   deaffiliate: jest.fn(),
@@ -144,6 +180,16 @@ const mockSdk = {
     identityListeners.add(h);
     return { remove: () => identityListeners.delete(h) };
   },
+  // Group calls: the commands are recorded, the events driven by hand below.
+  startGroupCall: jest.fn(),
+  terminateCall:  jest.fn(),
+  requestFloor:   jest.fn(),
+  releaseFloor:   jest.fn(),
+  onIncomingCall:   sub(callListeners.incoming),
+  onCallUpdated:    sub(callListeners.updated),
+  onCallTerminated: sub(callListeners.terminated),
+  onFloorUpdated:   sub(callListeners.floor),
+  onSdkError:       sub(callListeners.error),
 };
 
 jest.mock('../src/contexts/SdkContext', () => ({
@@ -161,7 +207,44 @@ function emitGroups(supported: MockGroup[], affiliated: MockGroup[] = supported)
 beforeEach(() => {
   mockSdk.affiliate.mockClear();
   mockSdk.deaffiliate.mockClear();
+  mockSdk.startGroupCall.mockClear();
+  mockSdk.terminateCall.mockClear();
+  mockSdk.requestFloor.mockClear();
+  mockSdk.releaseFloor.mockClear();
 });
+
+const fire = (set: Set<Handler>, e: any) => act(() => { set.forEach(h => h(e)); });
+
+/** The SDK reporting group [group]'s call, as CallInfo. */
+function callUpdate(group: string, state: string, over: Partial<any> = {}) {
+  fire(callListeners.updated, {
+    callId: `call-${group}`, type: 'GROUP', state, outgoing: true,
+    isEmergency: false, isImminentPeril: false, callerId: '', calleeId: '',
+    groupId: group, ...over,
+  });
+}
+
+/** The SDK's floor update for group [group]'s call. */
+function floorUpdate(group: string, status: string, over: Partial<any> = {}) {
+  fire(callListeners.floor, {
+    callId: `call-${group}`, ownerId: '', status, queuePosition: 0,
+    denyReason: 'UNKNOWN', revokeReason: 'UNKNOWN', talkers: [], ...over,
+  });
+}
+
+/** Start, as the user presses it, and the SDK bringing the call up. */
+function startCall(group = 'group1') {
+  fireEvent.press(screen.getByTestId('talk-start-button'));
+  callUpdate(group, 'CALLING');
+  callUpdate(group, 'ACTIVE');
+}
+
+/** A simulated call from the mock panel, which has no SDK behind it. */
+function mockStart() {
+  fireEvent.press(screen.getByTestId('talk-mock-toggle'));
+  fireEvent.press(screen.getByTestId('talk-mock-start'));
+  fireEvent.press(screen.getByTestId('talk-mock-close'));
+}
 
 import { TalkScreen } from '../src/features/talk/TalkScreen';
 import { TalkContextProvider } from '../src/contexts/TalkContext';
@@ -215,10 +298,9 @@ describe('TalkScreen — visual state and actions', () => {
     expect(screen.getByTestId('talk-status-text')).toHaveTextContent('');
   });
 
-  it('accepts push once call is active and shows granted status after loading', () => {
+  it('shows the mock panel\'s grant on a simulated call', () => {
     renderWithTalkCtx(<TalkScreen />);
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
+    mockStart();
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
     fireEvent.press(screen.getByTestId('talk-mock-accept'));
 
@@ -227,18 +309,16 @@ describe('TalkScreen — visual state and actions', () => {
 
   it('turns the push-to-talk button dark when a call is active', () => {
     renderWithTalkCtx(<TalkScreen />);
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
+    startCall();
     expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Call active');
     const button = screen.getByTestId('talk-push-button');
     // Active call in dark theme → button uses the dark bg color.
     expect(hasBackground(button, mockPalette.bg)).toBe(true);
   });
 
-  it('shows the push-to-talk button as dark after SDK accepts push during a call', () => {
+  it('keeps the button dark after the mock panel grants push', () => {
     renderWithTalkCtx(<TalkScreen />);
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
+    mockStart();
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
     fireEvent.press(screen.getByTestId('talk-mock-accept'));
     expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Push granted');
@@ -249,8 +329,7 @@ describe('TalkScreen — visual state and actions', () => {
 
   it('starts talking while holding push-to-talk after acceptance', () => {
     renderWithTalkCtx(<TalkScreen />);
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
+    mockStart();
     fireEvent.press(screen.getByTestId('talk-mock-toggle'));
     fireEvent.press(screen.getByTestId('talk-mock-accept'));
     fireEvent(screen.getByTestId('talk-push-button'), 'pressIn');
@@ -264,8 +343,7 @@ describe('TalkScreen — visual state and actions', () => {
   it('opens the broadcast screen when transmit is pressed', () => {
     renderWithTalkCtx(<TalkScreen />);
     // Start call first
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
+    startCall();
 
     // Transmit now switches to the full-screen BroadcastScreen, so the
     // TalkScreen (and its push button) unmounts.
@@ -275,30 +353,24 @@ describe('TalkScreen — visual state and actions', () => {
 
   it('shows group avatar blue when call active and idle', () => {
     renderWithTalkCtx(<TalkScreen />);
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
+    startCall();
     const avatar = screen.getByTestId('talk-group-group1');
     expect(hasBackground(avatar, mockPalette.primary)).toBe(true);
   });
 
   it('shows group avatar red when occupied', () => {
     renderWithTalkCtx(<TalkScreen />);
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
-    fireEvent.press(screen.getByTestId('talk-mock-toggle'));
-    fireEvent.press(screen.getByTestId('talk-mock-occupy'));
+    startCall();
+    floorUpdate('group1', 'TAKEN', { ownerId: 'sip:mcptt.mcuser-222@x' });
     const avatar = screen.getByTestId('talk-group-group1');
     expect(hasBackground(avatar, mockPalette.error)).toBe(true);
   });
 
   it('shows group avatar green while talking', () => {
     renderWithTalkCtx(<TalkScreen />);
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
-    fireEvent.press(screen.getByTestId('talk-mock-toggle'));
-    fireEvent.press(screen.getByTestId('talk-mock-accept'));
+    startCall();
     fireEvent(screen.getByTestId('talk-push-button'), 'pressIn');
-    act(() => { jest.advanceTimersByTime(500); });
+    floorUpdate('group1', 'GRANTED');
     const avatar = screen.getByTestId('talk-group-group1');
     expect(hasBackground(avatar, mockPalette.success)).toBe(true);
   });
@@ -307,15 +379,13 @@ describe('TalkScreen — visual state and actions', () => {
     renderWithTalkCtx(<TalkScreen />);
 
     // Start call on group1
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
+    startCall();
     const g1 = screen.getByTestId('talk-group-group1');
     expect(hasBackground(g1, mockPalette.primary)).toBe(true);
 
     // Switch to group2 and start call there too
     fireEvent.press(screen.getByTestId('talk-group-group2'));
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
+    startCall('group2');
     const g2 = screen.getByTestId('talk-group-group2');
     expect(hasBackground(g2, mockPalette.primary)).toBe(true);
 
@@ -323,8 +393,7 @@ describe('TalkScreen — visual state and actions', () => {
     expect(hasBackground(g1, mockPalette.primary)).toBe(true);
 
     // Occupy group2 → group2 red, group1 stays blue
-    fireEvent.press(screen.getByTestId('talk-mock-toggle'));
-    fireEvent.press(screen.getByTestId('talk-mock-occupy'));
+    floorUpdate('group2', 'TAKEN', { ownerId: 'sip:mcptt.mcuser-222@x' });
     expect(hasBackground(g2, mockPalette.error)).toBe(true);
     expect(hasBackground(g1, mockPalette.primary)).toBe(true);
   });
@@ -333,10 +402,8 @@ describe('TalkScreen — visual state and actions', () => {
     renderWithTalkCtx(<TalkScreen />);
 
     // Start call on group1, occupy it
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
-    fireEvent.press(screen.getByTestId('talk-mock-toggle'));
-    fireEvent.press(screen.getByTestId('talk-mock-occupy'));
+    startCall();
+    floorUpdate('group1', 'TAKEN', { ownerId: 'sip:mcptt.mcuser-222@x' });
     const g1 = screen.getByTestId('talk-group-group1');
     expect(hasBackground(g1, mockPalette.error)).toBe(true);
 
@@ -453,8 +520,7 @@ describe('TalkScreen — visual state and actions', () => {
     fireEvent.press(screen.getByTestId('talk-group-group3'));
 
     // Start call first
-    fireEvent.press(screen.getByTestId('talk-start-button'));
-    act(() => { jest.advanceTimersByTime(600); });
+    startCall('group3');
 
     fireEvent.press(screen.getByTestId('talk-mode-messages'));
 
@@ -527,6 +593,155 @@ describe('TalkScreen — visual state and actions', () => {
   });
 });
 
+
+describe('TalkScreen — SDK group calls', () => {
+  const status = () => screen.getByTestId('talk-status-text');
+  const ptt = () => screen.getByTestId('talk-push-button');
+
+  it('places the call on Start and shows it active once the SDK says so', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    fireEvent.press(screen.getByTestId('talk-start-button'));
+    expect(mockSdk.startGroupCall).toHaveBeenCalledWith('group1', 'AMR_WB_OCTET_ALIGNED');
+    callUpdate('group1', 'CALLING');
+    expect(status()).toHaveTextContent('');
+    callUpdate('group1', 'ACTIVE');
+    expect(status()).toHaveTextContent('Call active');
+  });
+
+  // MCPTT group calls ask for no floor on setup.
+  it('starts the call from PTT without asking for the floor', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    fireEvent(ptt(), 'pressIn');
+    expect(mockSdk.startGroupCall).toHaveBeenCalledWith('group1', 'AMR_WB_OCTET_ALIGNED');
+    expect(mockSdk.requestFloor).not.toHaveBeenCalled();
+  });
+
+  it('shows talking only once the server grants the floor', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    fireEvent(ptt(), 'pressIn');
+    expect(mockSdk.requestFloor).toHaveBeenCalledWith('call-group1');
+    floorUpdate('group1', 'REQUESTED');
+    expect(status()).not.toHaveTextContent('Talking');
+    floorUpdate('group1', 'GRANTED');
+    expect(status()).toHaveTextContent('Talking');
+  });
+
+  it('releases the floor on letting go and goes back to active at once', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    fireEvent(ptt(), 'pressIn');
+    floorUpdate('group1', 'GRANTED');
+    fireEvent(ptt(), 'pressOut');
+    expect(mockSdk.releaseFloor).toHaveBeenCalledWith('call-group1');
+    expect(status()).toHaveTextContent('Call active');
+  });
+
+  it('withdraws a request still waiting when PTT is let go', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    fireEvent(ptt(), 'pressIn');
+    floorUpdate('group1', 'QUEUED', { queuePosition: 1 });
+    fireEvent(ptt(), 'pressOut');
+    expect(mockSdk.releaseFloor).toHaveBeenCalledWith('call-group1');
+  });
+
+  it('names the talker and keeps PTT passive while someone else talks', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    floorUpdate('group1', 'TAKEN', {
+      ownerId: 'sip:mcptt.mcuser-222@ims.example.org',
+      talkers: [{ id: 'sip:mcptt.mcuser-222@ims.example.org', ssrc: 1 }],
+    });
+    expect(status()).toHaveTextContent('Other speaking');
+    expect(screen.getByTestId('talk-speaker-name')).toHaveTextContent('mcuser-222');
+    expect(ptt()).toBeDisabled();
+  });
+
+  it('ends the hold when the floor turns busy under the finger', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    fireEvent(ptt(), 'pressIn');
+    floorUpdate('group1', 'DENIED', { denyReason: 'ANOTHER_CLIENT_HAS_PERMISSION' });
+    floorUpdate('group1', 'TAKEN', { ownerId: 'sip:mcptt.mcuser-222@x' });
+    expect(mockSdk.releaseFloor).toHaveBeenCalledWith('call-group1');
+  });
+
+  it('shows why the floor was denied, under the button', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    fireEvent(ptt(), 'pressIn');
+    floorUpdate('group1', 'DENIED', { denyReason: 'ANOTHER_CLIENT_HAS_PERMISSION' });
+    expect(screen.getByTestId('talk-floor-notice')).toHaveTextContent('Someone else has the floor');
+  });
+
+  it('leaves the call on End', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    fireEvent.press(screen.getByTestId('talk-end-button'));
+    expect(mockSdk.terminateCall).toHaveBeenCalledWith('call-group1');
+    expect(screen.getByTestId('talk-start-button')).toBeTruthy();
+  });
+
+  it('goes back to inactive when the server ends the call', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    fire(callListeners.terminated, {
+      callId: 'call-group1', mode: 'CLOSED_REMOTELY', reason: 'NORMAL', sipCode: 0, sipReason: '',
+    });
+    expect(status()).toHaveTextContent('');
+    expect(screen.getByTestId('talk-start-button')).toBeTruthy();
+  });
+
+  it('says so when a call we started is refused before it comes up', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    fireEvent.press(screen.getByTestId('talk-start-button'));
+    callUpdate('group1', 'CALLING');
+    fire(callListeners.terminated, {
+      callId: 'call-group1', mode: 'REJECTED_REMOTELY', reason: 'FORBIDDEN', sipCode: 403, sipReason: '',
+    });
+    expect(screen.getByTestId('talk-floor-notice')).toHaveTextContent('The group call could not be set up');
+  });
+
+  // The SDK answers group calls itself: one comes up with nobody pressing anything.
+  it('shows a call another member started on a group not selected, first in line', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    callUpdate('group5', 'ACTIVE', { outgoing: false });
+    expect(hasBackground(screen.getByTestId('talk-group-group5'), mockPalette.primary)).toBe(true);
+    expect(screen.getAllByText(/^group\d+$/)[0]).toHaveTextContent('group5');
+  });
+
+  it('offers to mute the group, then to unmute it, and marks it muted', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    fireEvent.press(screen.getByTestId('talk-group-menu-toggle'));
+    expect(screen.getByTestId('talk-group-menu-mute')).toHaveTextContent('Mute On');
+    expect(screen.queryByTestId('talk-group-muted')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('talk-group-menu-mute'));
+    expect(screen.getByTestId('talk-group-muted')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('talk-group-menu-toggle'));
+    expect(screen.getByTestId('talk-group-menu-mute')).toHaveTextContent('Mute Off');
+  });
+
+  it('keeps the mute with the group it was set on', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    fireEvent.press(screen.getByTestId('talk-group-menu-toggle'));
+    fireEvent.press(screen.getByTestId('talk-group-menu-mute'));
+    fireEvent.press(screen.getByTestId('talk-group-group2'));
+    expect(screen.queryByTestId('talk-group-muted')).toBeNull();
+    fireEvent.press(screen.getByTestId('talk-group-group1'));
+    expect(screen.getByTestId('talk-group-muted')).toBeTruthy();
+  });
+
+  // The mock panel acts on the simulated call; the SDK's takes precedence.
+  it('lets the SDK call win over the mock panel', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    fireEvent.press(screen.getByTestId('talk-mock-toggle'));
+    fireEvent.press(screen.getByTestId('talk-mock-occupy'));
+    expect(status()).toHaveTextContent('Call active');
+  });
+});
 
 describe('TalkScreen — group affiliation', () => {
   const g = (

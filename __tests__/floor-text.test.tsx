@@ -31,6 +31,10 @@ describe('floorNoticeText', () => {
     ['QUEUE_TIMEOUT',                        en.floorQueueTimeout],
     ['GRANT_EXPIRED',                        en.floorGrantExpired],
     ['ERROR:FLOOR_SEND_FAILED',              en.floorErrorUnreachable],
+    ['AUDIO:MIC_DENIED',                     en.callAudioMicDenied],
+    ['AUDIO:AUDIO_CODEC_UNSUPPORTED',        en.callAudioCodecUnsupported],
+    ['AUDIO:START_FAILED',                   en.callAudioFailed],
+    ['AUDIO:AUDIO_SDP_INVALID',              en.callAudioFailed],
   ])('reads %s as its own text', (notice, text) => {
     expect(floorNoticeText(en, notice)).toBe(text);
   });

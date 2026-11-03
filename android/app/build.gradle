@@ -74,6 +74,13 @@ def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
     ndkVersion rootProject.ext.ndkVersion
+
+    // JVM unit tests run against a stub android.jar whose methods throw. The
+    // media classes log (android.util.Log); let those calls return defaults
+    // instead of failing the test.
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
@@ -134,6 +141,10 @@ dependencies {
 
     // react-native-image-picker (camera / gallery)
     implementation project(':react-native-image-picker')
+
+    // JVM unit tests for the pure-Kotlin media code (no device needed):
+    //   cd android && ./gradlew :app:testReleaseUnitTest
+    testImplementation("junit:junit:4.13.2")
 
 
 }

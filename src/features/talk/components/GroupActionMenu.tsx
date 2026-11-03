@@ -17,16 +17,18 @@ interface GroupActionMenuProps {
   styles: TalkStyles;
   tr: Translations;
   onClose: () => void;
+  /** Whether the group's received audio is silenced — the mute item offers the other state. */
+  muted: boolean;
   onToggleMute: () => void;
 }
 
-export function GroupActionMenu({ styles, tr, onClose, onToggleMute }: GroupActionMenuProps) {
+export function GroupActionMenu({ styles, tr, onClose, muted, onToggleMute }: GroupActionMenuProps) {
   const items = [
     { key: 'alert',          label: tr.talkMenuStartAlert },
     { key: 'imminent_peril', label: tr.talkMenuStartImminentPeril },
     { key: 'emergency',      label: tr.talkMenuStartEmergency },
     { key: 'details',        label: tr.talkMenuGroupDetails },
-    { key: 'mute',           label: tr.talkMenuMuteOff },
+    { key: 'mute',           label: muted ? tr.talkMenuMuteOff : tr.talkMenuMuteOn },
   ];
 
   return (

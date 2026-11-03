@@ -97,10 +97,18 @@ the SDK, so events are dropped and counted in `droppedEvents` (warned once per 1
 swallowing them would read as "the SDK stopped emitting".
 
 The pump also logs every event it hands to JS as one `McSdkBridge` line,
-`event=<name> key=value …` (capped at 300 chars), so logcat shows what the SDK actually told
+`event=<name> key=value …` (capped at 1000 chars), so logcat shows what the SDK actually told
 the app — e.g. a termination's `mode`/`reason`, which the SDK's own lines do not print. It is
 logged on the pump, never in `emit()`, to keep the cost off the SDK thread, and `McSdkLog` is
 skipped (it is the ~450/s stream, and its text is already in logcat under the `SDK` tag).
+
+The app logs the same events: `SdkContext` subscribes once through `McSdk.onAnyEvent`, and each
+one goes to the Log Console and the file log with its whole payload (`src/mcsdk/listenerLog.ts`).
+A new event only has to be added to `McSdkEvents` to be logged. They also have their own buffer,
+behind **Listener only** on the console: at ~450 SDK lines/s the shared 5000-entry buffer
+evicts an event in about 11 s. Three things stay out on purpose: `IdentityInfo.token` is a
+credential (`hasToken` says whether there is one), document content goes to the file log only,
+and `onAudioFrame` is never logged (~50/s on the media thread).
 
 This mattered because RTP frames will share that thread once media lands — starving the
 socket read loses packets, and in the jitter buffer that loss is indistinguishable from
@@ -165,15 +173,31 @@ stay clean under `tsc`.
 
 Do not assume a screen is wired just because it renders convincingly.
 
-- **Audio is not connected at all.** `selectCall`, `requestFloor`, `releaseFloor` and
-  `muteMicrophone` exist in the SDK and the bridge but are called from nowhere in `src/`.
-  Calls set up and tear down over SIP, but no media flows.
-- `TalkScreen` push-to-talk is driven by fixed timeouts (`MOCK_CALL_SETUP_MS`,
-  `MOCK_FLOOR_GRANT_MS`, `MOCK_AUTO_ACCEPT_MS`), not by real floor callbacks.
+- **Private-call audio is wired, but not yet verified on a call.** An active SDK call runs
+  `MediaSession.startCallAudio` (CallContext): capture → AMR-WB → `SdkFrameSink` →
+  `sendAudioFrame`, and `onAudioFrame` → `SdkFrameSource` → jitter buffer → playback, with
+  `CallAudioRouter` joining McSdkModule and the pipeline natively — frames never touch JS.
+  The uplink gate follows the floor and mute. Calls go out and are answered as
+  `AMR_WB_OCTET_ALIGNED`, which `AmrWbRtpPayload` produces from MediaCodec's frames; if the
+  server offers another framing the call is silent and `AUDIO_CODEC_UNSUPPORTED` is shown.
+- **Group-call audio is wired the same way, also unverified.** Both contexts run it through
+  `useCallAudio`; there is one pipeline, so one call is heard at a time: a private call
+  with audio always wins, otherwise the group on the Talk screen if its call is up, else the
+  latest group call to come up (`TalkContext.audioGroupId`). Group audio plays on the
+  loudspeaker, the uplink opens only while PTT is held *and* the floor is granted, and the
+  menu's mute silences that group's received audio (`setPlaybackMuted`) without leaving the
+  call. A stop always names its call (`stopCallAudio(callId)`), so a late stop from a call
+  that lost the pipeline cannot end the audio of the one that took it.
+- `TalkScreen` group calls are the SDK's (`TalkContext.sdkGroupCalls`): Start/PTT place
+  the call, PTT requests and releases the floor, End leaves, and the screen follows the
+  callbacks. The mock panel (⚙️) only drives a simulated call on a
+  group with no SDK call — an SDK call always takes precedence over it.
 - The `VoiceMeter` shows the *local* microphone level, not anything on the wire.
-- The active-call **mute** button only flips `CallContext.micMuted`; there is no call uplink
-  to gate yet. The **speaker** button next to it is real: it calls `MediaSession.setRoute`
-  and is put back on the earpiece when the call ends.
+- The active-call **mute** and **speaker** buttons are real: mute closes the uplink gate,
+  the speaker calls `MediaSession.setRoute` and is put back on the earpiece when the call
+  ends.
+- The `VoiceMeter` cannot get the microphone during a call (the pipeline outranks it), so it
+  shows nothing there; it should read the capture's own level instead.
 - `CallContext.simulate*` helpers create purely local calls (no `sdkCallId`) for testing the
   UI offline. Real SDK calls carry `sdkCallId`; that field is what tells them apart.
 

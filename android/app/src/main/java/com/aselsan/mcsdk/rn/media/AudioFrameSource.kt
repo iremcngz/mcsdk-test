@@ -9,7 +9,7 @@ package com.aselsan.mcsdk.rn.media
  *
  *   FileFrameSource → replays a recording      (today: prove decode + playback)
  *   LoopbackSource  → the uplink's own frames  (later: live round trip)
- *   SdkFrameSource  → onEncodedFrame callback  (once the SDK exposes it)
+ *   SdkFrameSource  → SdkListener.onAudioFrame (a call's received audio)
  *
  * Starting from a file matters: a recording is a *known* input. There are
  * already verified ones on the device — 1138 AMR-WB frames of 61 bytes, which
@@ -35,9 +35,12 @@ interface AudioFrameSource {
      *                  wire; a file source synthesises it by counting frames,
      *                  which is what lets the jitter buffer order and place them
      *                  identically in both cases.
+     * @param firstOfBurst a talk burst starts here (the RTP marker bit, or a new
+     *                  talker): the jitter buffer restarts its timeline, since
+     *                  nothing about the previous burst says where this one sits.
      */
     fun interface Listener {
-        fun onFrame(payload: ByteArray, len: Int, timestamp: Int)
+        fun onFrame(payload: ByteArray, len: Int, timestamp: Int, firstOfBurst: Boolean)
     }
 
     /** Must be called before [start]. */

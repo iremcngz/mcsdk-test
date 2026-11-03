@@ -36,6 +36,8 @@ export interface Translations {
   btnSetParams: string;
   btnInitSdk: string;
   btnClear: string;
+  btnLogsListener: string;
+  btnLogsAll: string;
   btnFetch: string;
   btnShowPaths: string;
   btnDeleteAll: string;
@@ -129,6 +131,10 @@ export interface Translations {
   talkMenuStartEmergency: string;
   talkMenuGroupDetails: string;
   talkMenuMuteOff: string;
+  /** Stops hearing the group's call for now; the call carries on. */
+  talkMenuMuteOn: string;
+  /** Next to the group's name while its received audio is silenced. */
+  talkGroupMutedHint: string;
   talkButton: string;
   talkButtonHold: string;
   talkHoldHint: string;
@@ -140,6 +146,8 @@ export interface Translations {
   talkStatusOccupied: string;
   talkStatusActive: string;
   talkStatusTalking: string;
+  /** A group call we started was refused before it came up. */
+  talkCallStartFailed: string;
   talkModeReceive: string;
   talkModeTransmit: string;
   talkModeMessages: string;
@@ -180,6 +188,12 @@ export interface Translations {
   contactsAlertClearTitle: string;
   contactsAlertClearMessage: string;
   contactAdded: string;
+  contactAddTitle: string;
+  contactUriPlaceholder: string;
+  contactWillCall: (uri: string) => string;
+  contactCancel: string;
+  contactErrRequired: string;
+  contactErrDuplicate: (name: string) => string;
 
   // ── Network / IP monitor
   ipLabel: (ip: string | null) => string;
@@ -236,6 +250,10 @@ export interface Translations {
   floorGrantExpired: string;
   /** The floor control channel could not be set up or used. */
   floorErrorUnreachable: string;
+  // Call audio could not run (CallContext floorNotice AUDIO:*).
+  callAudioMicDenied: string;
+  callAudioCodecUnsupported: string;
+  callAudioFailed: string;
   commencementAuto: string;
   commencementManual: string;
   btnJoinCall: string;
@@ -403,6 +421,8 @@ const tr: Translations = {
   btnSetParams: '② Parametreleri Ayarla',
   btnInitSdk:   '③ SDK\'yı Başlat',
   btnClear:     'Temizle',
+  btnLogsListener: 'Sadece Listener',
+  btnLogsAll:   'Tüm Loglar',
   btnFetch:     'Getir',
   btnShowPaths: 'Yolları Göster',
   btnDeleteAll: 'Tümünü Sil',
@@ -485,6 +505,8 @@ const tr: Translations = {
   talkMenuStartEmergency:    'Acil Durumu Başlat',
   talkMenuGroupDetails:      'Grup Detayları',
   talkMenuMuteOff:           'Sesi Aç',
+  talkMenuMuteOn:            'Sesi Kapat',
+  talkGroupMutedHint:        'Grubun sesi kapalı',
   talkButton:            'Push to talk',
   talkButtonHold:        'Hold to talk',
   talkSpeakerYou:        'You',
@@ -496,6 +518,7 @@ const tr: Translations = {
   talkStatusOccupied:    'Başka konuşuyor',
   talkStatusActive:      'Çağrı aktif',
   talkStatusTalking:     'Konuşuyorsunuz',
+  talkCallStartFailed:   'Grup çağrısı kurulamadı',
   talkModeReceive:       'Receive',
   talkModeTransmit:      'Transmit',
   talkModeMessages:      'Messages',
@@ -540,6 +563,12 @@ const tr: Translations = {
   contactsAlertClearTitle:   'Tüm kişileri sil',
   contactsAlertClearMessage: 'Adres defterindeki tüm kayıtlar silinecek. Devam edilsin mi?',
   contactAdded:            'Kişi eklendi',
+  contactAddTitle:         'Yeni Kişi',
+  contactUriPlaceholder:   'mcuser-222 veya sip:…',
+  contactWillCall:         uri => `Aranacak adres: ${uri}`,
+  contactCancel:           'Vazgeç',
+  contactErrRequired:      'Ad ve MC ID / SIP URI gerekli',
+  contactErrDuplicate:     name => `Bu adres zaten rehberde: ${name}`,
 
   ipLabel:   ip => ip ? `IP: ${ip}` : 'Ağ yok',
   ipChanged: (p, c) => `[NET] IP değişti: ${p ?? '?'} → ${c ?? '?'}`,
@@ -584,6 +613,9 @@ const tr: Translations = {
   floorQueueTimeout:      'Sırada bekleme süresi doldu',
   floorGrantExpired:      'Sıranız geldi ama alınmadı',
   floorErrorUnreachable:  'Floor sunucusuna ulaşılamıyor',
+  callAudioMicDenied:        'Mikrofon izni yok: ses gönderilemez',
+  callAudioCodecUnsupported: 'Karşı tarafın ses biçimi desteklenmiyor',
+  callAudioFailed:           'Çağrı sesi başlatılamadı',
   commencementAuto:   'OTOMATİK',
   commencementManual: 'MANUEL',
   btnJoinCall:        'Aramaya Katıl',
@@ -737,6 +769,8 @@ const en: Translations = {
   btnSetParams: '② Set Parameters',
   btnInitSdk:   '③ Initialize SDK',
   btnClear:     'Clear',
+  btnLogsListener: 'Listener only',
+  btnLogsAll:   'All logs',
   btnFetch:     'Fetch',
   btnShowPaths: 'Show paths',
   btnDeleteAll: 'Delete all',
@@ -819,6 +853,8 @@ const en: Translations = {
   talkMenuStartEmergency:    'Start Emergency',
   talkMenuGroupDetails:      'Group Details',
   talkMenuMuteOff:           'Mute Off',
+  talkMenuMuteOn:            'Mute On',
+  talkGroupMutedHint:        'Group audio muted',
   talkButton:            'Push to talk',
   talkButtonHold:        'Hold to talk',
   talkSpeakerYou:        'You',
@@ -830,6 +866,7 @@ const en: Translations = {
   talkStatusOccupied:    'Other speaking',
   talkStatusActive:      'Call active',
   talkStatusTalking:     'Talking',
+  talkCallStartFailed:   'The group call could not be set up',
   talkModeReceive:       'Receive',
   talkModeTransmit:      'Transmit',
   talkModeMessages:      'Messages',
@@ -874,6 +911,12 @@ const en: Translations = {
   contactsAlertClearTitle:   'Delete all contacts',
   contactsAlertClearMessage: 'All contacts will be deleted. Continue?',
   contactAdded:            'Contact added',
+  contactAddTitle:         'New Contact',
+  contactUriPlaceholder:   'mcuser-222 or sip:…',
+  contactWillCall:         uri => `Will call: ${uri}`,
+  contactCancel:           'Cancel',
+  contactErrRequired:      'Name and MC ID / SIP URI are required',
+  contactErrDuplicate:     name => `Already in contacts: ${name}`,
 
   ipLabel:   ip => ip ? `IP: ${ip}` : 'No network',
   ipChanged: (p, c) => `[NET] IP changed: ${p ?? '?'} → ${c ?? '?'}`,
@@ -918,6 +961,9 @@ const en: Translations = {
   floorQueueTimeout:      'Waited too long in the queue',
   floorGrantExpired:      'Your turn passed before it was taken',
   floorErrorUnreachable:  'Cannot reach the floor server',
+  callAudioMicDenied:        'No microphone permission: audio cannot be sent',
+  callAudioCodecUnsupported: "The other side's audio format is not supported",
+  callAudioFailed:           'Call audio could not start',
   commencementAuto:   'AUTO',
   commencementManual: 'MANUAL',
   btnJoinCall:        'Join Call',

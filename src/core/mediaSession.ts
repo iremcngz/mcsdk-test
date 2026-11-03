@@ -360,6 +360,45 @@ export const MediaSession = {
     return Native.startUdpCapture(codec, remoteHost, remotePort);
   },
 
+  // ── A call's audio ──────────────────────────────────────────────────────────
+
+  /**
+   * Runs a call's audio through the SDK — the Audio tab's capture → AMR-WB →
+   * playback chain with the SDK at both ends. Starts with the uplink gated:
+   * [setTransmitEnabled] opens it (the floor granted, and not muted).
+   *
+   * Call ensureMicPermission() first, as for capture. Resolves false where
+   * there is no audio pipeline (iOS, tests), so a call still works without
+   * audio there; rejects with the native reason when it cannot start.
+   */
+  async startCallAudio(callId: string): Promise<boolean> {
+    if (!isSupported) return false;
+    await Native.startCallAudio(callId);
+    return true;
+  },
+
+  /**
+   * Stops a call's audio: only [callId]'s if given — so a stop that arrives
+   * after another call took the pipeline leaves that call alone — or whatever
+   * is running. A no-op when none is running.
+   */
+  async stopCallAudio(callId?: string): Promise<void> {
+    if (!isSupported) return;
+    return Native.stopCallAudio(callId ?? '');
+  },
+
+  /** Silences the call's received audio (true) or brings it back, leaving the call up. */
+  setPlaybackMuted(muted: boolean): void {
+    if (!isSupported) return;
+    Native.setPlaybackMuted(muted);
+  },
+
+  /** The call whose audio is running, or null. */
+  async getCallAudioId(): Promise<string | null> {
+    if (!isSupported) return null;
+    return Native.getCallAudioId();
+  },
+
   /** Stops capture and resolves the finished file's path (null if none). */
   async stopCapture(): Promise<string | null> {
     if (!isSupported) return null;

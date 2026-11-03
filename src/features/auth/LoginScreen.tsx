@@ -4,6 +4,9 @@
  *
  * First login with a username registers it; subsequent logins verify the
  * stored password hash.  Wrong password shows an error inline.
+ *
+ * The username starts as the last one that logged in on this device, so
+ * coming back takes only the password.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -19,11 +22,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
+import { AuthSettings } from '../../core/settings';
 
 export default function LoginScreen() {
   const { c, tr, login } = useAppContext();
 
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(() => AuthSettings.getLastUsername() ?? '');
   const [password, setPassword] = useState('');
   const [error, setError]       = useState<string | null>(null);
   const [loading, setLoading]   = useState(false);

@@ -181,6 +181,7 @@ jest.mock('../src/contexts/AppContext', () => ({
 }));
 
 import LoginScreen from '../src/features/auth/LoginScreen';
+import { AuthSettings } from '../src/core/settings';
 
 describe('LoginScreen component', () => {
   beforeEach(() => {
@@ -244,6 +245,27 @@ describe('LoginScreen component', () => {
     render(<LoginScreen />);
     await act(async () => { fireEvent.press(screen.getByText('Login')); });
     expect(mockLogin).toHaveBeenCalledWith('', '');
+  });
+
+  // Coming back takes only the password.
+  it('starts with the last username that logged in on this device', async () => {
+    const last = jest.spyOn(AuthSettings, 'getLastUsername').mockReturnValue('mcuser-111');
+    mockLogin.mockResolvedValue(true);
+    render(<LoginScreen />);
+    expect(screen.getByPlaceholderText('Username').props.value).toBe('mcuser-111');
+    expect(screen.getByPlaceholderText('Password').props.value).toBe('');
+
+    fireEvent.changeText(screen.getByPlaceholderText('Password'), '12345678');
+    await act(async () => { fireEvent.press(screen.getByText('Login')); });
+    expect(mockLogin).toHaveBeenCalledWith('mcuser-111', '12345678');
+    last.mockRestore();
+  });
+
+  it('starts empty on a device nobody has logged in on', () => {
+    const last = jest.spyOn(AuthSettings, 'getLastUsername').mockReturnValue(undefined);
+    render(<LoginScreen />);
+    expect(screen.getByPlaceholderText('Username').props.value).toBe('');
+    last.mockRestore();
   });
 
   it('submitting via keyboard (onSubmitEditing on password field) triggers login', async () => {

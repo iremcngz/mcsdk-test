@@ -15,7 +15,8 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { McSdk, type McSdkParams, type LogEvent, type RegistrationEvent, type SdkErrorEvent, type StoreDocumentsEvent } from '../mcsdk';
+import { McSdk, type McSdkParams, type LogEvent, type RegistrationEvent, type StoreDocumentsEvent } from '../mcsdk';
+import { formatListenerEvent } from '../mcsdk/listenerLog';
 import { DeviceIdentity, SdkSettings, type SdkSettingsSchema } from '../core/settings';
 import { AppLogger, SdkLogger } from '../core/logger';
 import { MediaSession } from '../core/mediaSession';
@@ -79,6 +80,8 @@ export interface SdkContextValue {
 
   // Log buffers
   logs:    LogEntry[];
+  /** Listener events only; also in `logs`, where SDK lines soon push them out. */
+  listenerLogs: LogEntry[];
   sdkLogs: SdkLogEntry[];
   addLog:  (msg: string, level?: LogEntry['level']) => void;
   clearLogs:    () => void;
@@ -201,6 +204,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
 
   // ── Log buffers ────────────────────────────────────────────────────────────
   const [logs,    setLogs]    = useState<LogEntry[]>([]);
+  const [listenerLogs, setListenerLogs] = useState<LogEntry[]>([]);
   const [sdkLogs, setSdkLogs] = useState<SdkLogEntry[]>([]);
 
   // Both buffers are batched rather than written per event. With the default
@@ -221,8 +225,10 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   const MAX_ENTRIES = 5000;
 
   const pendingLogs    = useRef<LogEntry[]>([]);
+  const pendingListenerLogs = useRef<LogEntry[]>([]);
   const pendingSdkLogs = useRef<SdkLogEntry[]>([]);
   const flushTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listenerLogSub = useRef<{ remove: () => void } | null>(null);
 
   const flushLogs = useCallback(() => {
     flushTimer.current = null;
@@ -232,6 +238,11 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
       const batch = pendingLogs.current;
       pendingLogs.current = [];
       setLogs(prev => [...prev, ...batch].slice(-MAX_ENTRIES));
+    }
+    if (pendingListenerLogs.current.length) {
+      const batch = pendingListenerLogs.current;
+      pendingListenerLogs.current = [];
+      setListenerLogs(prev => [...prev, ...batch].slice(-MAX_ENTRIES));
     }
     if (pendingSdkLogs.current.length) {
       const batch = pendingSdkLogs.current;
@@ -252,6 +263,8 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   // show it — but when this teardown is a re-mount rather than a shutdown it is
   // the difference between keeping those lines and silently losing them.
   useEffect(() => () => {
+    listenerLogSub.current?.remove();
+    listenerLogSub.current = null;
     if (flushTimer.current !== null) {
       clearTimeout(flushTimer.current);
       flushLogs();
@@ -270,7 +283,9 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   // console with entries from before the clear.
   const clearLogs = useCallback(() => {
     pendingLogs.current = [];
+    pendingListenerLogs.current = [];
     setLogs([]);
+    setListenerLogs([]);
   }, []);
   const clearSdkLogs = useCallback(() => {
     pendingSdkLogs.current = [];
@@ -306,11 +321,22 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         scheduleFlush();
       });
 
-      // Every SdkError the engine raises. These were discarded by the bridge
-      // until now, so a failure like IDENTITY_NOT_SET left no trace outside
-      // logcat.
-      sdkRef.current.onSdkError((e: SdkErrorEvent) => {
-        addLog(`onSdkError: ${e.error}`, 'error');
+      // Everything the listener reports, contents included: call and floor
+      // state, SdkErrors, registration, groups. The handlers elsewhere each read
+      // the fields they need and log nothing, so this is the one place that shows
+      // what the SDK actually said.
+      //
+      // Replaced rather than added to, because the emitter outlives the McSdk
+      // instance and a Create after a Destroy would log everything twice. Not
+      // removed on Destroy: onTerminated arrives after it.
+      listenerLogSub.current?.remove();
+      listenerLogSub.current = sdkRef.current.onAnyEvent((event, payload) => {
+        const line = formatListenerEvent(event, payload);
+        addLog(line.msg, line.level);
+        pendingListenerLogs.current.push({
+          id: nextId++, time: stamp(), msg: line.msg, level: line.level,
+        });
+        if (line.fileDetail) { AppLogger.info(line.fileDetail); }
       });
 
       sdkRef.current.onRegistration((e: RegistrationEvent) => {
@@ -536,7 +562,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   const value: SdkContextValue = useMemo(() => ({
     sdkRef,
     created, initialized, paramsSet,
-    logs, sdkLogs, addLog, clearLogs, clearSdkLogs,
+    logs, listenerLogs, sdkLogs, addLog, clearLogs, clearSdkLogs,
     ipInfo,
     registrationProgress, registrationPhase, registrationState,
     handleCreate, handleSetParams, handleInit, handleDestroy,
@@ -544,7 +570,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     ...setters,
   }), [
     created, initialized, paramsSet,
-    logs, sdkLogs, addLog, clearLogs, clearSdkLogs,
+    logs, listenerLogs, sdkLogs, addLog, clearLogs, clearSdkLogs,
     ipInfo,
     registrationProgress, registrationPhase, registrationState,
     handleCreate, handleSetParams, handleInit, handleDestroy,

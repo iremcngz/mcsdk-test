@@ -28,6 +28,12 @@ const mockSdk = {
       },
     };
   },
+  // TalkContext also tracks the SDK's group calls.
+  onIncomingCall:   () => ({ remove: () => {} }),
+  onCallUpdated:    () => ({ remove: () => {} }),
+  onCallTerminated: () => ({ remove: () => {} }),
+  onFloorUpdated:   () => ({ remove: () => {} }),
+  onSdkError:       () => ({ remove: () => {} }),
 };
 
 jest.mock('../src/contexts/SdkContext', () => ({

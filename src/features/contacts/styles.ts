@@ -26,6 +26,52 @@ export function makeContactsStyles(c: ThemePalette) {
 
     countText: { color: c.textMuted, fontSize: 11, paddingHorizontal: 14, marginBottom: 4 },
 
+    // ── Add contact ─────────────────────────────────────────────────────────────
+    addBtn: {
+      marginLeft: 6,
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.accent,
+    },
+    addBtnText: { color: c.textOnAccent, fontSize: 18, fontWeight: '700', lineHeight: 20 },
+    addForm: {
+      backgroundColor: c.surface,
+      marginHorizontal: 12,
+      marginBottom: 10,
+      borderRadius: 10,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: c.accent,
+    },
+    addTitle: { color: c.textPrimary, fontWeight: '700', fontSize: 15, marginBottom: 8 },
+    addLabel: { color: c.textSecondary, fontSize: 12, marginBottom: 4, marginTop: 4 },
+    addInput: {
+      backgroundColor: c.inputBg,
+      color: c.textPrimary,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: Platform.OS === 'ios' ? 10 : 6,
+      fontSize: 14,
+    },
+    addPreview: {
+      color: c.accent,
+      fontSize: 11,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+      marginTop: 8,
+    },
+    addError:   { color: c.error, fontSize: 12, marginTop: 8 },
+    addActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+    addAction:  { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
+    addCancel:  { borderWidth: 1.5, borderColor: c.border, backgroundColor: 'transparent' },
+    addCancelText: { color: c.textPrimary, fontWeight: '700', fontSize: 13 },
+    addSave:    { backgroundColor: c.primary },
+    addSaveText: { color: c.textOnAccent, fontWeight: '700', fontSize: 13 },
+
     // ── Filter tabs ─────────────────────────────────────────────────────────────
     filterRow: {
       flexDirection: 'row',

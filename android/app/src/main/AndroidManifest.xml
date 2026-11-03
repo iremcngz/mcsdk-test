@@ -19,6 +19,11 @@
          refused — measured on API 28: AudioManager.mode stayed 0 and the
          speakerphone flag would not take. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- MediaPipeline holds a WifiLock for a call's audio. Wi-Fi power save
+         otherwise lets the AP hold a dozing phone's packets until the next
+         beacon it wakes for — measured as ~300 ms arrival gaps on a call,
+         well past the jitter buffer's 80 ms. Normal permission. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Bluetooth call audio runs over SCO/HFP, not A2DP, and SCO has to be
          started explicitly. BLUETOOTH is the legacy (<= API 30) grant;
          BLUETOOTH_CONNECT replaced it and is runtime-requested on 31+. -->

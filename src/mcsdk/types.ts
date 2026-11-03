@@ -48,7 +48,53 @@ export type McSdkError =
     | 'FLOOR_UNKNOWN_CALL'
     | 'FLOOR_CHANNEL_FAILED'
     | 'FLOOR_SDP_INVALID'
-    | 'FLOOR_SEND_FAILED';
+    | 'FLOOR_SEND_FAILED'
+    // ── A call's audio plane (SDK c463c5b4). Like the FLOOR_* family, but the
+    // per-packet ones are reported once per stream rather than per packet.
+    /** The call's RTP/RTCP sockets could not be opened. */
+    | 'AUDIO_CHANNEL_FAILED'
+    /** The offer carried no AMR-WB framing we asked for: the call goes ahead silent. */
+    | 'AUDIO_CODEC_UNSUPPORTED'
+    | 'AUDIO_MESSAGE_MALFORMED'
+    /** RTP from an address other than the peer the SDP named. */
+    | 'AUDIO_MESSAGE_UNEXPECTED_SOURCE'
+    /** The negotiated SDP names no usable audio stream: no audio. */
+    | 'AUDIO_SDP_INVALID'
+    /** A frame could go out but had no socket to go through. */
+    | 'AUDIO_SEND_FAILED'
+    | 'AUDIO_UNKNOWN_CALL'
+    /** A call was started or answered with no codec for the plane it carries. */
+    | 'CALL_CODEC_INVALID'
+    | 'CALL_MEDIA_PORTS_UNAVAILABLE';
+
+/**
+ * The AMR-WB RTP framing a call's audio uses (RFC 4867 §8.3), named at call
+ * setup and fixed for the call. The SDK sends the app's bytes verbatim as this
+ * framing, so it must be what the encoder side produces. Mirrors the SDK's
+ * AudioCodec minus NONE, which no audio call may use.
+ */
+export type McSdkAudioCodec =
+    | 'AMR_WB_OCTET_ALIGNED'
+    | 'AMR_WB_BANDWIDTH_EFFICIENT'
+    | 'AMR_WB_OCTET_ALIGNED_CRC';
+
+/**
+ * Payload of McSdkAudioInfoUpdated: a call's audio stream — what SDP settled
+ * on, and whether RTP is arriving.
+ */
+export interface AudioInfoUpdatedEvent {
+    callId:    string;
+    /** a=rtpmap encoding name, "AMR-WB". */
+    encoding:  string;
+    /** RTP clock rate, 16000 for AMR-WB. */
+    clockRate: number;
+    /** What follows a=fmtp:<pt>, e.g. "octet-align=1;crc=0". */
+    fmtp:      string;
+    /** IDLE (nothing arriving — normal between talk bursts), FLOWING, SUSPENDED. */
+    flow:      'IDLE' | 'FLOWING' | 'STALLED' | 'SUSPENDED' | '';
+    path:      'UNICAST' | 'RELAYED' | 'MULTICAST' | '';
+    encrypted: boolean;
+}
 
 /** Payload of McSdkSdkError. */
 export interface SdkErrorEvent {
@@ -279,6 +325,15 @@ export interface CallInfoEvent {
     callerId:        string;
     calleeId:        string;
     groupId:         string;
+    /** The dialog's latest SIP status and reason phrase. */
+    sipCode?:        number;
+    sipReason?:      string;
+    /** False for a full-duplex private call (TS 24.379 §11.1.2): no floor. */
+    isFloorControlEnabled?: boolean;
+    /** An MCVideo call: no audio plane, answered without an audio codec. */
+    isVideo?:               boolean;
+    /** The caller asked for auto-answer (Answer-Mode, RFC 5373). */
+    isAutoCommencement?:    boolean;
 }
 
 /** Mirrors TerminationInfo. Payload of McSdkCallTerminated. */
@@ -352,10 +407,13 @@ export interface FloorUpdatedEvent {
     /** Dual floor: someone talks over us. */
     overriddenWithoutRevoke: boolean;
     // Floor Indicator bits (TS 24.380 §8.2.3.15), decoded by the SDK.
+    floorIndicator?:     number;
+    isNormalCall?:       boolean;
     isBroadcastCall:     boolean;
     isSystemCall:        boolean;
     isQueueingSupported: boolean;
     isDualFloor:         boolean;
+    isTemporaryGroup?:   boolean;
     talkers: McSdkFloorParticipant[];
 }
 
@@ -402,6 +460,8 @@ export interface IdentityUpdatedEvent {
     isPtt:   boolean;
     isVideo: boolean;
     isData:  boolean;
+    /** Whether the SDK holds a token, for the logs. Never the token itself. */
+    hasToken?: boolean;
 }
 
 /** Payload of McSdkGroupsUpdated — groups the user MAY affiliate to. */

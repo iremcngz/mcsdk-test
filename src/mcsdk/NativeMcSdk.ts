@@ -40,9 +40,10 @@ export interface Spec extends TurboModule {
     // Calling (Android only until the iOS xcframework is rebuilt)
     // autoCommence: Answer-Mode header on the INVITE (RFC 5373).
     // fullDuplex: TS 24.379 §11.1.2, a private call with no floor control.
-    startPrivateCall(mcId: string, autoCommence: boolean, fullDuplex: boolean): void;
-    startGroupCall(groupId: string): void;
-    answerCall(callId: string): void;
+    // audioCodec: an McSdkAudioCodec name, or '' for the SDK's default.
+    startPrivateCall(mcId: string, autoCommence: boolean, fullDuplex: boolean, audioCodec: string): void;
+    startGroupCall(groupId: string, audioCodec: string): void;
+    answerCall(callId: string, audioCodec: string): void;
     rejectCall(callId: string): void;
     terminateCall(callId: string): void;
 

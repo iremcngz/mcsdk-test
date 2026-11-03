@@ -4,7 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import { useNavigation } from '../../contexts/NavigationContext';
-import { initDb, getAllContacts, seedContacts, type Contact } from '../../core/db';
+import { initDb, getAllContacts, insertContact, seedContacts, type Contact } from '../../core/db';
+import { toMcpttUri } from '../calls/mcId';
 import { makeContactsStyles } from './styles';
 import type {
   ContactFilter,
@@ -30,7 +31,7 @@ const GROUPS = ['group1', 'group2', 'group3', 'group4', 'group5', 'group6', 'gro
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export function ContactsScreen() {
-  const { c } = useAppContext();
+  const { c, tr } = useAppContext();
   const { startCall } = useCallContext();
   const { setScreen } = useNavigation();
   const cs            = useMemo(() => makeContactsStyles(c), [c]);
@@ -45,31 +46,71 @@ export function ContactsScreen() {
   const [callInfo,   setCallInfo]   = useState<Record<number, CallInfo>>({});
   const [userInfo,   setUserInfo]   = useState<Record<number, UserInfo>>({});
 
+  const [adding,   setAdding]   = useState(false);
+  const [newName,  setNewName]  = useState('');
+  const [newUri,   setNewUri]   = useState('');
+  const [addError, setAddError] = useState<string | null>(null);
+
+  const loadContacts = useCallback(async () => {
+    const rows = await getAllContacts();
+    setContacts(rows);
+    const p: Record<number, PresenceStatus> = {};
+    const ci: Record<number, CallInfo> = {};
+    const ui: Record<number, UserInfo> = {};
+    rows.forEach(r => {
+      p[r.id] = mockPresence(r.id);
+      ci[r.id] = {
+        callStatus: mockCallStatus(r.id),
+        callType: mockCallType(r.id),
+        lastCall: mockLastCallDate(r.id),
+      };
+      ui[r.id] = {
+        userStatus: mockUserStatus(r.id),
+        lastOnline: mockLastOnline(r.id),
+      };
+    });
+    setPresence(p);
+    setCallInfo(ci);
+    setUserInfo(ui);
+  }, []);
+
   useEffect(() => {
     initDb().then(async () => {
       await seedContacts();
-      const rows = await getAllContacts();
-      setContacts(rows);
-      const p: Record<number, PresenceStatus> = {};
-      const ci: Record<number, CallInfo> = {};
-      const ui: Record<number, UserInfo> = {};
-      rows.forEach(r => {
-        p[r.id] = mockPresence(r.id);
-        ci[r.id] = {
-          callStatus: mockCallStatus(r.id),
-          callType: mockCallType(r.id),
-          lastCall: mockLastCallDate(r.id),
-        };
-        ui[r.id] = {
-          userStatus: mockUserStatus(r.id),
-          lastOnline: mockLastOnline(r.id),
-        };
-      });
-      setPresence(p);
-      setCallInfo(ci);
-      setUserInfo(ui);
+      await loadContacts();
     });
+  }, [loadContacts]);
+
+  const closeAddForm = useCallback(() => {
+    setAdding(false);
+    setNewName('');
+    setNewUri('');
+    setAddError(null);
   }, []);
+
+  // A bare MC ID is completed to the server's URI form; shown before saving so
+  // the address that will actually be dialled is never a surprise.
+  const newSipUri = useMemo(() => toMcpttUri(newUri), [newUri]);
+
+  const saveContact = useCallback(async () => {
+    const name = newName.trim();
+    if (!name || !newSipUri) {
+      setAddError(tr.contactErrRequired);
+      return;
+    }
+    const existing = contacts.find(ct => ct.sip_uri.toLowerCase() === newSipUri.toLowerCase());
+    if (existing) {
+      setAddError(tr.contactErrDuplicate(existing.name));
+      return;
+    }
+    const id = await insertContact(name, newSipUri, '');
+    await loadContacts();
+    closeAddForm();
+    // Opened on arrival, so the call buttons are one tap away.
+    setQuery('');
+    setFilter(f => (f === 'groups' ? 'all' : f));
+    setSelectedId(id);
+  }, [newName, newSipUri, contacts, tr, loadContacts, closeAddForm]);
 
   const groupContacts: GroupItem[] = useMemo(() =>
     GROUPS.map((g, i) => ({
@@ -148,7 +189,7 @@ export function ContactsScreen() {
                   style={[cs.duplexBtn, cs.duplexHalf]}
                   onPress={() => {
                     startCall(item.name, item.sip_uri, 'half_duplex', 'auto');
-                    setScreen('callactive');
+                    setScreen('incall');
                   }}>
                   <Text style={cs.duplexBtnText}>Half Duplex AC</Text>
                 </TouchableOpacity>
@@ -156,7 +197,7 @@ export function ContactsScreen() {
                   style={[cs.duplexBtn, cs.duplexFull]}
                   onPress={() => {
                     startCall(item.name, item.sip_uri, 'full_duplex', 'auto');
-                    setScreen('callactive');
+                    setScreen('incall');
                   }}>
                   <Text style={cs.duplexBtnText}>Full Duplex AC</Text>
                 </TouchableOpacity>
@@ -212,7 +253,7 @@ export function ContactsScreen() {
                 style={[cs.duplexBtn, cs.duplexHalf]}
                 onPress={() => {
                   startCall(item.name, item.sip_uri, 'half_duplex', 'auto');
-                  setScreen('callactive');
+                  setScreen('incall');
                 }}>
                 <Text style={cs.duplexBtnText}>Half Duplex AC</Text>
               </TouchableOpacity>
@@ -220,7 +261,7 @@ export function ContactsScreen() {
                 style={[cs.duplexBtn, cs.duplexFull]}
                 onPress={() => {
                   startCall(item.name, item.sip_uri, 'full_duplex', 'auto');
-                  setScreen('callactive');
+                  setScreen('incall');
                 }}>
                 <Text style={cs.duplexBtnText}>Full Duplex AC</Text>
               </TouchableOpacity>
@@ -253,7 +294,7 @@ export function ContactsScreen() {
         )}
       </View>
     );
-  }, [cs, presence, selectedId, callInfo, userInfo, handleSelect, startCall, setScreen]);
+  }, [cs, PRESENCE_COLOR, presence, selectedId, callInfo, userInfo, handleSelect, startCall, setScreen]);
 
   const filterTabs: { key: ContactFilter; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -275,7 +316,50 @@ export function ContactsScreen() {
           autoCapitalize="none"
           clearButtonMode="while-editing"
         />
+        <TouchableOpacity
+          style={cs.addBtn}
+          onPress={() => (adding ? closeAddForm() : setAdding(true))}
+          accessibilityLabel={tr.btnSaveContact}
+          activeOpacity={0.7}>
+          <Text style={cs.addBtnText}>{adding ? '×' : '＋'}</Text>
+        </TouchableOpacity>
       </View>
+
+      {adding && (
+        <View style={cs.addForm}>
+          <Text style={cs.addTitle}>{tr.contactAddTitle}</Text>
+          <Text style={cs.addLabel}>{tr.inputName}</Text>
+          <TextInput
+            style={cs.addInput}
+            value={newName}
+            onChangeText={t => { setNewName(t); setAddError(null); }}
+            placeholder="mcuser-222"
+            placeholderTextColor={c.textMuted}
+            autoCapitalize="words"
+          />
+          <Text style={cs.addLabel}>MC ID / {tr.inputSipUri}</Text>
+          <TextInput
+            style={cs.addInput}
+            value={newUri}
+            onChangeText={t => { setNewUri(t); setAddError(null); }}
+            placeholder={tr.contactUriPlaceholder}
+            placeholderTextColor={c.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+          />
+          {!!newSipUri && <Text style={cs.addPreview}>{tr.contactWillCall(newSipUri)}</Text>}
+          {!!addError && <Text style={cs.addError}>{addError}</Text>}
+          <View style={cs.addActions}>
+            <TouchableOpacity style={[cs.addAction, cs.addCancel]} onPress={closeAddForm}>
+              <Text style={cs.addCancelText}>{tr.contactCancel}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[cs.addAction, cs.addSave]} onPress={saveContact}>
+              <Text style={cs.addSaveText}>{tr.btnSaveContact}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* Filter tabs */}
       <View style={cs.filterRow}>

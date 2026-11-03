@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
@@ -21,6 +21,8 @@ export function HomeScreen() {
   const insets     = useSafeAreaInsets();
   const s          = useMemo(() => makeCommonStyles(c), [c]);
   const scrollRef  = useRef<ScrollView>(null);
+  const [listenerOnly, setListenerOnly] = useState(false);
+  const shownLogs  = listenerOnly ? sdk.listenerLogs : sdk.logs;
 
   // Auto-scroll log console when new entries arrive.
   useEffect(() => {
@@ -29,7 +31,7 @@ export function HomeScreen() {
       100,
     );
     return () => clearTimeout(timer);
-  }, [sdk.logs]);
+  }, [shownLogs]);
 
   // ── Render helpers ─────────────────────────────────────────────────────────
 
@@ -246,16 +248,21 @@ export function HomeScreen() {
       {/* ── Log Console ────────────────────────────────────────────────────── */}
       <View style={s.logHeader}>
         <Text style={s.sectionTitle}>{tr.sectionLogConsole}</Text>
-        <TouchableOpacity onPress={sdk.clearLogs}>
-          <Text style={s.clearBtn}>{tr.btnClear}</Text>
-        </TouchableOpacity>
+        <View style={s.logHeaderActions}>
+          <TouchableOpacity onPress={() => setListenerOnly(v => !v)}>
+            <Text style={s.clearBtn}>{listenerOnly ? tr.btnLogsAll : tr.btnLogsListener}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={sdk.clearLogs}>
+            <Text style={s.clearBtn}>{tr.btnClear}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
       <View style={[s.logBox, { height: Platform.OS === 'ios' ? 220 : 200 }]}>
         <ScrollView ref={scrollRef} nestedScrollEnabled>
-          {sdk.logs.length === 0 ? (
+          {shownLogs.length === 0 ? (
             <Text style={s.logPlaceholder}>{tr.logPlaceholder}</Text>
           ) : (
-            sdk.logs.map(entry => (
+            shownLogs.map(entry => (
               <Text
                 key={entry.id}
                 style={[

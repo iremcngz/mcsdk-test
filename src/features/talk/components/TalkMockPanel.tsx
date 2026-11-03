@@ -3,7 +3,8 @@
  *
  * Dev/test overlay for TalkScreen — lets you drive floor state, toggle
  * incoming calls per group, and start/end a call without the real SDK.
- * Pure scaffolding: remove once the SDK provides real call/floor callbacks.
+ * Pure scaffolding: it acts on the simulated call only, so on a group with an
+ * SDK call (which takes precedence) its buttons change nothing visible.
  */
 
 import React from 'react';
@@ -103,12 +104,14 @@ export function TalkMockPanel({
         <Text style={styles.mockSectionLabel}>Call</Text>
         <View style={styles.mockRow}>
           <TouchableOpacity
+            testID="talk-mock-start"
             onPress={() => { setCallActive(true); setPushState('idle'); }}
             activeOpacity={0.8}
             style={[styles.mockButton, styles.mockButtonPrimary]}>
             <Text style={styles.mockButtonText}>Start</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            testID="talk-mock-end"
             onPress={() => { setCallActive(false); setPushState('idle'); setIsHolding(false); }}
             activeOpacity={0.8}
             style={[styles.mockButton, styles.mockButtonDanger]}>

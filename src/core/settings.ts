@@ -26,17 +26,20 @@ const globalStorage = new MMKV({ id: 'app-global' });
 let userStorage = new MMKV({ id: 'app-anonymous' });
 
 /**
- * Clears TLS paths left over from when they had non-empty defaults.
+ * Clears SDK settings still holding a default that has since changed, so the
+ * new default takes effect. save() writes every field, so a stored copy of the
+ * old default survives the change and would otherwise win over it.
  *
- * These are handed to OpenSSL as filesystem paths, and the old defaults
- * ('cert/client.crt', 'cert/ca.pem') named files that were never on the device,
- * so TLS setup failed before the request was sent and IDMS login could not
- * complete. The stored copy would survive the default change, hence the drop.
+ *  - TLS paths. Handed to OpenSSL as filesystem paths, and the old defaults
+ *    ('cert/client.crt', 'cert/ca.pem') named files that were never on the
+ *    device, so TLS setup failed before the request was sent and IDMS login
+ *    could not complete.
+ *  - The BMS URL, which moved from http:// to https://.
  *
- * Only removes values equal to those old defaults — a path the user typed is
+ * Only removes values equal to those old defaults — anything the user typed is
  * left alone. Runs per partition, after each storage switch.
  */
-function dropStaleTlsPaths(): void {
+function dropStaleDefaults(): void {
   // Keys spelled out rather than built from SDK_PREFIX/sdkKey(): both are
   // declared further down the module and `const` does not hoist, so calling
   // this during module load — which the stay-logged-in restore does — would
@@ -45,6 +48,7 @@ function dropStaleTlsPaths(): void {
     'sdk.certPath':    'cert/client.crt',
     'sdk.privKeyPath': 'cert/client.key',
     'sdk.caListPath':  'cert/ca.pem',
+    'sdk.bmsUrl':      'http://10.11.100.109',
   };
   for (const [key, old] of Object.entries(stale)) {
     if (userStorage.getString(key) === old) userStorage.delete(key);
@@ -63,18 +67,18 @@ if (
 // Covers the restore above as well as the plain anonymous start: a logged-in
 // launch never calls initUserStorage(), so clearing only there would miss the
 // partition the app actually reads.
-dropStaleTlsPaths();
+dropStaleDefaults();
 
 /** Switch to app-anonymous partition. Call on logout. */
 export function clearUserStorage(): void {
   userStorage = new MMKV({ id: 'app-anonymous' });
-  dropStaleTlsPaths();
+  dropStaleDefaults();
 }
 
 /** Switch to the given user's partition. Call on successful login. */
 export function initUserStorage(username: string): void {
   userStorage = new MMKV({ id: `user-${username}` });
-  dropStaleTlsPaths();
+  dropStaleDefaults();
 }
 
 // ── MC client id ───────────────────────────────────────────────────────────────
@@ -203,7 +207,7 @@ export const SDK_DEFAULTS: SdkSettingsSchema = {
   idmsUrl: '',
   // Required: the SDK has no default for it, and registration cannot start
   // without it (the IDMS/CMS/GMS endpoints are all read from the BMS documents).
-  bmsUrl:  'http://10.11.100.109',
+  bmsUrl:  'https://10.11.100.109',
   cmsUrl:  '',
   gmsUrl:  '',
 };

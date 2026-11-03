@@ -49,6 +49,21 @@ class JitterBuffer(
      * burst of early frames has somewhere to go.
      */
     private val capacityFrames: Int = 32,
+    /**
+     * Consecutive missing frames concealed by repeating the last one before
+     * playback falls silent. Unbounded by default, which suits a file or a
+     * continuous stream; a PTT call needs a bound, because between talk bursts
+     * nothing arrives at all and "repeat the last frame" would buzz it until
+     * the next burst. 5 frames = 100 ms, the usual reach of loss concealment.
+     */
+    private val maxConcealFrames: Int = Int.MAX_VALUE,
+    /**
+     * What an empty buffer means. False: the stream ran ahead of us and the
+     * play position moves on, as a file or a steady socket wants. True, for a
+     * call: the network is holding packets back, so playback waits for
+     * [targetFrames] again without advancing — see [read].
+     */
+    private val rebufferOnStall: Boolean = false,
 ) {
 
     companion object {
@@ -69,11 +84,25 @@ class JitterBuffer(
     /** Timestamp increment per frame — the stride between adjacent slots. */
     private val stride = codec.frameSamples
 
-    /** Timestamp of the next frame playback will ask for. -1 until primed. */
-    private var playTimestamp = -1
+    /**
+     * Timestamp of the next frame playback will ask for; meaningful only once
+     * [anchored]. Any Int is a valid RTP timestamp — an SDK stream starts at a
+     * random base, so half of them start negative — so "not yet" cannot be a
+     * sentinel value of this field.
+     */
+    private var playTimestamp = 0
+
+    /** True once the first frame has placed the timeline. */
+    private var anchored = false
+
+    /** Misses concealed since the last real frame, for [maxConcealFrames]. */
+    private var concealRun = 0
 
     /** True once [targetFrames] have accumulated and reads may begin. */
     private var primed = false
+
+    /** Reads spent waiting, unprimed, with frames already held ([rebufferOnStall]). */
+    private var heldWait = 0
 
     /** Last frame handed out, reused to conceal a gap. */
     private val lastGood = ByteArray(codec.maxEncodedBytes)
@@ -93,6 +122,8 @@ class JitterBuffer(
     private val underrun = AtomicInteger(0)
     /** Dropped because the buffer was full — the frame was too far ahead. */
     private val overflow = AtomicInteger(0)
+    /** Times the buffer ran dry mid-stream and playback waited to refill it. */
+    private val rebuffer = AtomicInteger(0)
 
     val receivedFrames: Int get() = received.get()
     val playedFrames: Int get() = played.get()
@@ -101,6 +132,7 @@ class JitterBuffer(
     val concealedFrames: Int get() = concealed.get()
     val underrunFrames: Int get() = underrun.get()
     val overflowFrames: Int get() = overflow.get()
+    val rebufferCount: Int get() = rebuffer.get()
 
     /** Frames currently held and not yet played. */
     @Synchronized
@@ -118,10 +150,11 @@ class JitterBuffer(
     fun put(payload: ByteArray, len: Int, timestamp: Int) {
         received.incrementAndGet()
 
-        if (playTimestamp < 0) {
+        if (!anchored) {
             // First frame seen: anchor the timeline here. Its own timestamp need
             // not be 0 — an SDK stream can start anywhere.
             playTimestamp = timestamp
+            anchored = true
         }
 
         // Where this frame sits relative to what plays next.
@@ -132,7 +165,13 @@ class JitterBuffer(
             late.incrementAndGet()
             return
         }
-        if (offsetFrames >= capacityFrames) {
+        if (offsetFrames >= capacityFrames && rebufferOnStall && !primed && depth() == 0) {
+            // A stall that outlasted the whole buffer: the play position has
+            // been waiting so long that the stream is now past anything we
+            // could hold. Start the timeline over here, or every frame of the
+            // rest of the burst would overflow too.
+            playTimestamp = timestamp
+        } else if (offsetFrames >= capacityFrames) {
             // Too far ahead to store. Keeping it would mean dropping something
             // nearer, which is worse.
             overflow.incrementAndGet()
@@ -171,7 +210,16 @@ class JitterBuffer(
      */
     @Synchronized
     fun read(out: ByteArray): Int {
-        if (!primed) return 0
+        if (!primed) {
+            if (!rebufferOnStall || depth() == 0) return 0
+            // Frames are held but fewer than the target, and they may be all
+            // there is: the end of a talk burst, or a burst shorter than the
+            // target. Wait no longer than the target would have taken to fill,
+            // then play what there is rather than sit on it until the next
+            // burst wipes it.
+            if (++heldWait < targetFrames) return 0
+            primed = true
+        }
 
         val slot = slots[slotIndex(playTimestamp)]
         var result: Int
@@ -183,11 +231,25 @@ class JitterBuffer(
             System.arraycopy(slot.data, 0, lastGood, 0, result)
             lastGoodLen = result
             slot.filled = false
+            concealRun = 0
             played.incrementAndGet()
-        } else if (lastGoodLen > 0) {
+        } else if (rebufferOnStall && depth() == 0) {
+            // Nothing here and nothing after it: not a lost frame but a stall,
+            // the network holding the stream back (Wi-Fi power save delivers
+            // it in clumps). Moving on would make every frame of the coming
+            // clump late; waiting turns the stall into a pause and keeps the
+            // audio. The buffer refills to the target first, so once one stall
+            // has been sat out the next one of the same length is absorbed.
+            primed = false
+            heldWait = 0
+            concealRun = 0
+            rebuffer.incrementAndGet()
+            return 0
+        } else if (lastGoodLen > 0 && concealRun < maxConcealFrames) {
             // Gap: repeat the previous frame.
             result = minOf(lastGoodLen, out.size)
             System.arraycopy(lastGood, 0, out, 0, result)
+            concealRun++
             concealed.incrementAndGet()
         } else {
             // Nothing yet, not even history.
@@ -208,14 +270,37 @@ class JitterBuffer(
         return Math.floorMod(frameNo, capacityFrames)
     }
 
+    /**
+     * Starts the timeline over for a new talk burst, keeping the counters. Safe
+     * while playing: put() and read() take the same lock, and an unprimed
+     * buffer reads as silence until the new burst has filled it.
+     *
+     * Needed because a burst's first frame need not follow the last one: the
+     * talker may have changed (another SSRC, another clock), and even the same
+     * talker's clock ran on through the pause, so the old play position says
+     * nothing about where the new frames belong. The frame repeated to conceal
+     * gaps goes too — it belongs to the burst that just ended.
+     */
+    @Synchronized
+    fun restartBurst() {
+        slots.forEach { it.filled = false; it.len = 0 }
+        anchored = false
+        primed = false
+        heldWait = 0
+        lastGoodLen = 0
+        concealRun = 0
+    }
+
     /** Clears everything. Only safe while neither side is running. */
     @Synchronized
     fun reset() {
         slots.forEach { it.filled = false; it.len = 0 }
-        playTimestamp = -1
+        anchored = false
         primed = false
+        heldWait = 0
         lastGoodLen = 0
+        concealRun = 0
         received.set(0); played.set(0); late.set(0); duplicate.set(0)
-        concealed.set(0); underrun.set(0); overflow.set(0)
+        concealed.set(0); underrun.set(0); overflow.set(0); rebuffer.set(0)
     }
 }

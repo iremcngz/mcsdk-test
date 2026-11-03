@@ -137,6 +137,7 @@ export function makeCommonStyles(c: ThemePalette) {
       justifyContent: 'space-between',
       alignItems: 'center',
     },
+    logHeaderActions: { flexDirection: 'row', gap: 16 },
     clearBtn: { color: c.accent, fontSize: 13, fontWeight: '600' },
     logBox: {
       backgroundColor: c.logBg,

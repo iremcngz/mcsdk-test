@@ -21,19 +21,24 @@ import type {
   CallInfoEvent,
   CallTerminatedEvent,
   FloorUpdatedEvent,
-  McSdkCallState,
-  McSdkError,
-  McSdkFloorStatus,
   SdkErrorEvent,
 } from '../mcsdk';
 import { useSdkContext } from './SdkContext';
 import { MediaSession } from '../core/mediaSession';
 import { displayMcId } from '../features/calls/mcId';
+import { useCallAudio } from '../features/calls/useCallAudio';
+import {
+  CALL_AUDIO_CODEC,
+  USER_FACING_AUDIO_ERRORS,
+  USER_FACING_FLOOR_ERRORS,
+  floorFieldsAfter,
+  isGroupCall,
+  mapCallState,
+} from '../features/calls/sdkCall';
 import type {
   ActiveCall,
   CallEnd,
   CallRecord,
-  CallState,
   CallType,
   CommencementMode,
   FloorState,
@@ -45,88 +50,13 @@ function uuid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-// ── SDK → UI mapping ──────────────────────────────────────────────────────────
-
 /**
- * Maps McSdkCallState onto the UI's CallState.
- *
- * INCOMING is the only state that must show the ringing overlay. ACCEPTING and
- * the outgoing dial states are all "not yet talking" → connecting. TERMINATING /
- * TERMINATED are not mapped here: teardown is driven by onCallTerminated, which
- * also carries the reason, so treating them as a state change would race it.
+ * Half-duplex unless the call has no floor: a full-duplex private call says so
+ * with isFloorControlEnabled false, ambient listening has no floor either.
+ * isFloorControlEnabled is absent from an older bridge, hence the strict test.
  */
-function mapCallState(state: McSdkCallState): CallState | null {
-  switch (state) {
-    case 'INCOMING':
-      return 'ringing';
-    case 'ACCEPTING':
-    case 'OUTGOING':
-    case 'CALLING':
-    case 'RINGING':
-    case 'ESTABLISHING':
-    case 'REESTABLISHING':
-      return 'connecting';
-    case 'ACTIVE':
-      return 'active';
-    case 'TERMINATING':
-      return 'ending';
-    default:
-      return null;
-  }
-}
-
-/**
- * Maps FloorInfo.status onto the UI's floor state. The status is already from
- * our side: GRANTED means we hold the floor and TAKEN means someone else does.
- * `ownerId` cannot decide it — the SDK only sets it on Floor Taken, so on our
- * own grant it is empty or still names the previous talker.
- */
-function mapFloorState(status: McSdkFloorStatus): FloorState {
-  switch (status) {
-    case 'GRANTED':
-      return 'granted';
-    case 'TAKEN':
-      return 'busy';
-    case 'REQUESTED':
-      return 'requesting';
-    case 'QUEUED':
-    case 'GRANT_PENDING':
-      return 'queued';
-    default:
-      // IDLE, RELEASED, and every way a request or grant ends without the
-      // floor: DENIED, REVOKED, the timeouts, GRANT_EXPIRED.
-      return 'idle';
-  }
-}
-
-/** Floor channel failures the user should hear about: PTT cannot work at all. */
-const USER_FACING_FLOOR_ERRORS: ReadonlySet<McSdkError> = new Set<McSdkError>([
-  'FLOOR_CHANNEL_FAILED',
-  'FLOOR_SDP_INVALID',
-  'FLOOR_SEND_FAILED',
-]);
-
-/**
- * Why a request or grant ended without the floor, as `STATUS` or
- * `STATUS:REASON`. Undefined for statuses that are not such an ending.
- */
-function floorNoticeFor(e: FloorUpdatedEvent): string | undefined {
-  switch (e.status) {
-    case 'DENIED':
-      return `DENIED:${e.denyReason}`;
-    case 'REVOKED':
-      return `REVOKED:${e.revokeReason}`;
-    case 'REQUEST_TIMEOUT':
-    case 'QUEUE_TIMEOUT':
-    case 'GRANT_EXPIRED':
-      return e.status;
-    default:
-      return undefined;
-  }
-}
-
-/** MCPTT group/private calls are half-duplex; video is the full-duplex case. */
 function mapCallType(e: CallInfoEvent): CallType {
+  if (e.isFloorControlEnabled === false) return 'full_duplex';
   return e.type === 'AMBIENT_LISTENING' ? 'full_duplex' : 'half_duplex';
 }
 
@@ -135,6 +65,8 @@ function remoteLabel(e: CallInfoEvent): string {
   const uri = e.groupId || e.callerId || e.calleeId;
   return uri ? displayMcId(uri) : 'Unknown';
 }
+
+export { CALL_AUDIO_CODEC };
 
 // ── Context shape ─────────────────────────────────────────────────────────────
 
@@ -179,12 +111,15 @@ interface CallContextValue {
   /** Switches the audio route between loudspeaker and earpiece. */
   toggleSpeaker: () => void;
 
-  /**
-   * Microphone muted. UI state only for now: no call audio flows yet, so there
-   * is no uplink to gate. Resets when the call ends.
-   */
+  /** Microphone muted: closes the call's uplink gate. Resets when the call ends. */
   micMuted: boolean;
   toggleMute: () => void;
+
+  /**
+   * The private call whose audio holds the pipeline, or null. A group call's
+   * audio (TalkContext) yields to it.
+   */
+  audioCallId: string | null;
 
   /**
    * Manually join a call that is in manual-commencement mode.
@@ -226,6 +161,14 @@ interface CallContextValue {
 const CallContext = createContext<CallContextValue | null>(null);
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
+
+/**
+ * The call context, or null outside its provider — for the contexts that only
+ * defer to it (TalkContext yields the audio pipeline to a private call).
+ */
+export function useCallContextIfPresent(): CallContextValue | null {
+  return useContext(CallContext);
+}
 
 export function useCallContext(): CallContextValue {
   const ctx = useContext(CallContext);
@@ -285,6 +228,40 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     setMicMuted(false);
   }, [activeCall]);
 
+  // ── Call audio ──────────────────────────────────────────────────────────────
+  // An SDK call's audio runs through the native pipeline (MediaSession.
+  // startCallAudio) from the moment the call is active until it is not. Keyed
+  // on the call id alone, so floor and mute changes do not restart it.
+
+  const audioCallId =
+    activeCall?.sdkCallId && activeCall.state === 'active' && !activeCall.isVideo
+      ? activeCall.sdkCallId
+      : null;
+
+  // What the uplink gate should be: open only on a live SDK call, unmuted, and
+  // — on a half-duplex call — only while we hold the floor. The SDK drops
+  // frames sent without the floor anyway; gating here keeps the encoder idle
+  // and makes mute real on a full-duplex call, which has no floor to stop it.
+  const transmitWanted =
+    audioCallId !== null &&
+    !micMuted &&
+    (activeCall?.callType === 'full_duplex' || activeCall?.floorState === 'granted');
+
+  /** Puts an AUDIO:<reason> notice on the call whose audio this was about. */
+  const noteAudioProblem = useCallback((callId: string, reason: string) => {
+    setActiveCall(prev =>
+      prev?.sdkCallId === callId ? { ...prev, floorNotice: `AUDIO:${reason}` } : prev,
+    );
+  }, []);
+
+  useCallAudio({ callId: audioCallId, transmit: transmitWanted, onProblem: noteAudioProblem });
+
+  // The native pipeline outlives a JS reload (as the SDK does): a call's audio
+  // left running by the previous bundle has nobody to stop it but us.
+  useEffect(() => {
+    MediaSession.stopCallAudio().catch(() => {});
+  }, []);
+
   const setCommencementMode = useCallback((m: CommencementMode) => {
     setCommencementModeState(m);
   }, []);
@@ -320,6 +297,10 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     const subs = [
       // A new inbound call. Shows the ringing overlay via state='ringing'.
       sdk.onIncomingCall((e: CallInfoEvent) => {
+        // Group calls are the Talk screen's (TalkContext). Taking one here
+        // would raise the ringing overlay for a call the SDK has already
+        // answered, and drop the private call that was up.
+        if (isGroupCall(e)) return;
         setActiveCall(prev => {
           // A second call while one is up: the existing one is not ours to keep.
           if (prev) archive(prev);
@@ -329,6 +310,7 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
             contactName:      remoteLabel(e),
             sipUri:           e.callerId || e.groupId,
             callType:         mapCallType(e),
+            isVideo:          e.isVideo === true,
             direction:        'incoming',
             commencementMode: commencementModeRef.current,
             state:            'ringing',
@@ -341,6 +323,9 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
 
       // State transitions for a call we already know about.
       sdk.onCallUpdated((e: CallInfoEvent) => {
+        // Not least so that a group call we start is never adopted as the
+        // outgoing private call still waiting for its id, below.
+        if (isGroupCall(e)) return;
         const next = mapCallState(e.state);
         if (!next) return;
         setActiveCall(prev => {
@@ -351,14 +336,19 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
             prev = { ...prev, sdkCallId: e.callId };
           }
           if (prev.sdkCallId !== e.callId) return prev;
-          const isManual = prev.commencementMode === 'manual';
           // Entering 'active' is when the call really starts, so restart the
-          // timer — and in manual mode hold the user at the Join banner.
+          // timer. Never held at the Join banner, whatever the commencement
+          // mode: that mode is how the *called* party answers (TS 24.379), and
+          // the SDK only says ACTIVE once they have — there is nothing left for
+          // either side to join. Holding it here kept the caller on the dialling
+          // screen, which has no Join button, with the call's audio never
+          // started. The banner remains for simulated calls, which have no SDK
+          // to answer them.
           if (next === 'active') {
             return {
               ...prev,
-              state:           isManual ? 'connecting' : 'active',
-              needsManualJoin: isManual,
+              state:           'active',
+              needsManualJoin: false,
               startedAt:       Date.now(),
             };
           }
@@ -388,22 +378,9 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
             && activeCallRef.current?.sdkCallId === e.callId) {
           sdk.requestFloor(e.callId);
         }
-        setActiveCall(prev => {
-          if (!prev || prev.sdkCallId !== e.callId) return prev;
-          const floorState = mapFloorState(e.status);
-          // A notice outlives the update that raised it (an IDLE may follow a
-          // DENIED), and is cleared once a new request starts or succeeds.
-          const notice = floorNoticeFor(e);
-          const floorNotice = notice
-            ?? (floorState === 'requesting' || floorState === 'granted' ? undefined : prev.floorNotice);
-          return {
-            ...prev,
-            floorState,
-            floorOwner:    floorState === 'busy' ? e.ownerId || undefined : undefined,
-            queuePosition: floorState === 'queued' ? e.queuePosition : undefined,
-            floorNotice,
-          };
-        });
+        setActiveCall(prev =>
+          prev && prev.sdkCallId === e.callId ? { ...prev, ...floorFieldsAfter(prev, e) } : prev,
+        );
       }),
 
       // The floor channel failing is otherwise invisible: PTT does nothing and
@@ -411,9 +388,13 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
       // ever one call, so it goes on the active SDK call. The protocol-level
       // ones (malformed, unknown, unexpected source) are left to the log.
       sdk.onSdkError((e: SdkErrorEvent) => {
-        if (!USER_FACING_FLOOR_ERRORS.has(e.error)) return;
+        const notice =
+          USER_FACING_FLOOR_ERRORS.has(e.error) ? `ERROR:${e.error}` :
+          USER_FACING_AUDIO_ERRORS.has(e.error) ? `AUDIO:${e.error}` :
+          undefined;
+        if (!notice) return;
         setActiveCall(prev =>
-          prev?.sdkCallId ? { ...prev, floorNotice: `ERROR:${e.error}` } : prev,
+          prev?.sdkCallId ? { ...prev, floorNotice: notice } : prev,
         );
       }),
     ];
@@ -439,7 +420,7 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     // call stays local so the screens remain usable offline. Only a half-duplex
     // call has floor control; full-duplex is §11.1.2, with no floor to request.
     const sdk = sdkRef.current;
-    if (sdk) sdk.startPrivateCall(sipUri, mode === 'auto', callType === 'full_duplex');
+    if (sdk) sdk.startPrivateCall(sipUri, mode === 'auto', callType === 'full_duplex', CALL_AUDIO_CODEC);
 
     const call: ActiveCall = {
       id:               uuid(),
@@ -519,7 +500,8 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
       // Real calls are answered through the SDK; the resulting ACTIVE arrives
       // via onCallUpdated, so only move to 'connecting' optimistically here.
       if (prev.sdkCallId) {
-        sdkRef.current?.answerCall(prev.sdkCallId);
+        // An MCVideo call carries no audio plane; the SDK refuses a codec there.
+        sdkRef.current?.answerCall(prev.sdkCallId, prev.isVideo ? undefined : CALL_AUDIO_CODEC);
         return { ...prev, state: 'connecting' };
       }
       const isManual = commencementMode === 'manual';
@@ -626,6 +608,7 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     toggleSpeaker,
     micMuted,
     toggleMute,
+    audioCallId,
     joinCall,
     acceptCall,
     rejectCall,
@@ -639,7 +622,7 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     activeCall, callHistory, commencementMode,
     setCommencementMode, startCall, endCall,
     setFloorState, requestFloor, releaseFloor,
-    speakerOn, toggleSpeaker, micMuted, toggleMute,
+    speakerOn, toggleSpeaker, micMuted, toggleMute, audioCallId,
     joinCall, acceptCall, rejectCall, clearHistory,
     simulateIncomingCall, simulateAnswer,
     simulateFloorBusy, simulateFloorIdle,

@@ -48,14 +48,18 @@ export interface ActiveCall {
   commencementMode: CommencementMode;
   state: CallState;
   floorState: FloorState;
+  /** An MCVideo call: answered without an audio codec, and no call audio runs. */
+  isVideo?: boolean;
   /** Who is talking while floorState is 'busy' (the server's granted party). */
   floorOwner?: string;
   /** Our place in the floor queue while floorState is 'queued'. */
   queuePosition?: number;
   /**
-   * Why the last request ended without the floor, as the SDK's `STATUS` or
-   * `STATUS:REASON` (e.g. `DENIED:ANOTHER_CLIENT_HAS_PERMISSION`). Cleared when
-   * the next request starts.
+   * A short-lived notice for the call screen: why the last floor request ended
+   * without the floor, as `STATUS` or `STATUS:REASON` (e.g.
+   * `DENIED:ANOTHER_CLIENT_HAS_PERMISSION`), a floor channel error as
+   * `ERROR:<SdkError>`, or a call-audio problem as `AUDIO:<reason>`. Cleared
+   * when the next floor request starts.
    */
   floorNotice?: string;
   startedAt: number;        // Unix ms

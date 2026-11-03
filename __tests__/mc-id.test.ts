@@ -2,9 +2,10 @@
  * __tests__/mc-id.test.ts
  *
  * displayMcId: the MC ID out of whatever URI form the SDK hands over.
+ * toMcpttUri: the URI a contact is called at, from what someone typed.
  */
 
-import { displayMcId } from '../src/features/calls/mcId';
+import { displayMcId, toMcpttUri } from '../src/features/calls/mcId';
 
 describe('displayMcId', () => {
   it.each([
@@ -21,5 +22,27 @@ describe('displayMcId', () => {
 
   it('falls back to the input when nothing is left', () => {
     expect(displayMcId('sip:')).toBe('sip:');
+  });
+});
+
+describe('toMcpttUri', () => {
+  it.each([
+    ['mcuser-222',          'sip:mcptt.mcuser-222@ims.mnc001.mcc001.3gppnetwork.org'],
+    ['  mcuser-222 ',       'sip:mcptt.mcuser-222@ims.mnc001.mcc001.3gppnetwork.org'],
+    ['mcptt.mcuser-222',    'sip:mcptt.mcuser-222@ims.mnc001.mcc001.3gppnetwork.org'],
+    ['mcuser-222@ims.example.org', 'sip:mcuser-222@ims.example.org'],
+    ['sip:mcptt.mcuser-222@ims.mnc001.mcc001.3gppnetwork.org',
+     'sip:mcptt.mcuser-222@ims.mnc001.mcc001.3gppnetwork.org'],
+    ['SIPS:bob@example.org', 'SIPS:bob@example.org'],
+  ])('%s → %s', (input, uri) => {
+    expect(toMcpttUri(input)).toBe(uri);
+  });
+
+  it('is empty for empty input', () => {
+    expect(toMcpttUri('   ')).toBe('');
+  });
+
+  it('round-trips through displayMcId', () => {
+    expect(displayMcId(toMcpttUri('mcuser-222'))).toBe('mcuser-222');
   });
 });

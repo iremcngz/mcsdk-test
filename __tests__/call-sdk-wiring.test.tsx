@@ -7,7 +7,7 @@
  */
 
 import React from 'react';
-import { act, render, screen } from '@testing-library/react-native';
+import { act, render, screen, waitFor } from '@testing-library/react-native';
 
 jest.mock('react-native-safe-area-context', () => ({
   SafeAreaProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -43,8 +43,21 @@ const mockSdk = {
 };
 
 const mockSetRoute = jest.fn();
+const mockStartCallAudio = jest.fn((_callId: string) => Promise.resolve(true));
+const mockStopCallAudio = jest.fn(() => Promise.resolve());
+const mockSetTransmit = jest.fn();
 jest.mock('../src/core/mediaSession', () => ({
-  MediaSession: { setRoute: (...a: unknown[]) => mockSetRoute(...a) },
+  MediaSession: {
+    setRoute: (...a: unknown[]) => mockSetRoute(...a),
+    startCallAudio: (id: string) => mockStartCallAudio(id),
+    stopCallAudio: () => mockStopCallAudio(),
+    setTransmitEnabled: (on: boolean) => mockSetTransmit(on),
+  },
+}));
+
+let mockMicPermission = 'granted';
+jest.mock('../src/core/permissions', () => ({
+  ensureMicPermission: () => Promise.resolve(mockMicPermission),
 }));
 
 jest.mock('../src/contexts/SdkContext', () => ({
@@ -106,6 +119,11 @@ beforeEach(() => {
   mockSdk.startPrivateCall.mockClear();
   mockSdk.requestFloor.mockClear();
   mockSetRoute.mockClear();
+  mockStartCallAudio.mockClear();
+  mockStartCallAudio.mockImplementation(() => Promise.resolve(true));
+  mockStopCallAudio.mockClear();
+  mockSetTransmit.mockClear();
+  mockMicPermission = 'granted';
   mockSdk.releaseFloor.mockClear();
 });
 
@@ -136,10 +154,30 @@ describe('CallContext — SDK incoming call', () => {
     expect(screen.getByTestId('name')).toHaveTextContent('mcuser-222');
   });
 
-  it('prefers the group id for a group call', () => {
+  // Group calls are the Talk screen's: the SDK answers them itself, so taking
+  // one here would ring for a call that is already up.
+  it('leaves an incoming group call alone', () => {
     renderProbe();
     fire(incoming, callInfo({ type: 'GROUP', groupId: 'sip:group.a@example.org' }));
-    expect(screen.getByTestId('name')).toHaveTextContent('group.a');
+    expect(screen.getByTestId('state')).toHaveTextContent('none');
+  });
+
+  it('keeps the private call when a group call comes in', () => {
+    renderProbe();
+    fire(incoming, callInfo());
+    fire(incoming, callInfo({ callId: 'grp-1', type: 'GROUP', groupId: 'sip:group.a@example.org' }));
+    expect(screen.getByTestId('name')).toHaveTextContent('mcuser-222');
+    expect(screen.getByTestId('history')).toHaveTextContent('0');
+  });
+
+  // startCall() waits for the first outgoing id; a group call we start must
+  // not be the one it adopts.
+  it('does not adopt a group call as the outgoing private call', () => {
+    renderProbe();
+    act(() => { ctx.startCall('Bob', 'sip:bob@example.org', 'half_duplex'); });
+    fire(updated, callInfo({ callId: 'grp-1', type: 'GROUP', groupId: 'sip:group.a@example.org',
+                             state: 'ACTIVE', outgoing: true }));
+    expect(screen.getByTestId('state')).toHaveTextContent('connecting');
   });
 
   it('answers through the SDK using its call id', () => {
@@ -147,7 +185,7 @@ describe('CallContext — SDK incoming call', () => {
     fire(incoming, callInfo());
     act(() => { ctx.acceptCall(); });
 
-    expect(mockSdk.answerCall).toHaveBeenCalledWith('call-1');
+    expect(mockSdk.answerCall).toHaveBeenCalledWith('call-1', 'AMR_WB_OCTET_ALIGNED');
     // Stays 'connecting' until the SDK confirms ACTIVE — no optimistic jump.
     expect(screen.getByTestId('state')).toHaveTextContent('connecting');
   });
@@ -461,12 +499,161 @@ describe('CallContext — speaker and mute', () => {
   });
 });
 
+describe('CallContext — call audio', () => {
+  // Lets the async start (permission, then startCallAudio) run to completion.
+  const settle = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+  const activeSdkCall = async (over: Partial<any> = {}) => {
+    fire(incoming, callInfo(over));
+    fire(updated, callInfo({ state: 'ACTIVE', ...over }));
+    await settle();
+  };
+
+  const grant = () =>
+    fire(floor, { callId: 'call-1', ownerId: '', status: 'GRANTED', queuePosition: 0 });
+  const idle = () =>
+    fire(floor, { callId: 'call-1', ownerId: '', status: 'IDLE', queuePosition: 0 });
+
+  it('answers a video call without an audio codec', () => {
+    renderProbe();
+    fire(incoming, callInfo({ isVideo: true }));
+    act(() => { ctx.acceptCall(); });
+    expect(mockSdk.answerCall).toHaveBeenCalledWith('call-1', undefined);
+  });
+
+  // A JS reload leaves the native pipeline running; nothing else would stop it.
+  it('stops any call audio left over from a previous bundle on mount', () => {
+    renderProbe();
+    expect(mockStopCallAudio).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts call audio once the SDK call is active, not while ringing', async () => {
+    renderProbe();
+    fire(incoming, callInfo());
+    await settle();
+    expect(mockStartCallAudio).not.toHaveBeenCalled();
+
+    fire(updated, callInfo({ state: 'ACTIVE' }));
+    await settle();
+    expect(mockStartCallAudio).toHaveBeenCalledWith('call-1');
+  });
+
+  it('stops call audio when the call ends', async () => {
+    renderProbe();
+    await activeSdkCall();
+    mockStopCallAudio.mockClear();
+    fire(terminated, { callId: 'call-1', mode: 'CLOSED_REMOTELY', reason: 'NORMAL', sipCode: 200, sipReason: '' });
+    expect(mockStopCallAudio).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs no call audio for a simulated call', async () => {
+    renderProbe();
+    act(() => { ctx.simulateIncomingCall('Alice', 'sip:alice@example.org', 'half_duplex'); });
+    act(() => { ctx.acceptCall(); });
+    await settle();
+    expect(mockStartCallAudio).not.toHaveBeenCalled();
+  });
+
+  it('runs no call audio for a video call', async () => {
+    renderProbe();
+    await activeSdkCall({ isVideo: true });
+    expect(mockStartCallAudio).not.toHaveBeenCalled();
+  });
+
+  it('starts with the uplink shut on a half-duplex call', async () => {
+    renderProbe();
+    await activeSdkCall();
+    expect(mockSetTransmit).toHaveBeenLastCalledWith(false);
+  });
+
+  it('opens the uplink while we hold the floor, and shuts it after', async () => {
+    renderProbe();
+    await activeSdkCall();
+    grant();
+    expect(mockSetTransmit).toHaveBeenLastCalledWith(true);
+    idle();
+    expect(mockSetTransmit).toHaveBeenLastCalledWith(false);
+  });
+
+  it('keeps the uplink shut while someone else talks', async () => {
+    renderProbe();
+    await activeSdkCall();
+    fire(floor, { callId: 'call-1', ownerId: 'sip:x', status: 'TAKEN', queuePosition: 0 });
+    expect(mockSetTransmit).not.toHaveBeenCalledWith(true);
+  });
+
+  it('mute shuts the uplink even with the floor', async () => {
+    renderProbe();
+    await activeSdkCall();
+    grant();
+    act(() => { ctx.toggleMute(); });
+    expect(mockSetTransmit).toHaveBeenLastCalledWith(false);
+    act(() => { ctx.toggleMute(); });
+    expect(mockSetTransmit).toHaveBeenLastCalledWith(true);
+  });
+
+  // No floor on a full-duplex call: the uplink is open unless muted.
+  it('opens the uplink on a full-duplex call without any floor', async () => {
+    renderProbe();
+    await activeSdkCall({ isFloorControlEnabled: false });
+    expect(mockSetTransmit).toHaveBeenLastCalledWith(true);
+    act(() => { ctx.toggleMute(); });
+    expect(mockSetTransmit).toHaveBeenLastCalledWith(false);
+  });
+
+  // The floor came before the pipeline was up: applied once it is.
+  it('applies a floor granted while the audio was still starting', async () => {
+    let finish: (v: boolean) => void = () => {};
+    mockStartCallAudio.mockImplementation(() => new Promise<boolean>(r => { finish = r; }));
+    renderProbe();
+    await activeSdkCall();
+    grant();
+    expect(mockSetTransmit).not.toHaveBeenCalled(); // pipeline not up yet
+
+    await act(async () => { finish(true); await Promise.resolve(); });
+    expect(mockSetTransmit).toHaveBeenLastCalledWith(true);
+  });
+
+  it('says so on the call when the microphone permission is refused', async () => {
+    mockMicPermission = 'denied';
+    renderProbe();
+    await activeSdkCall();
+    expect(mockStartCallAudio).not.toHaveBeenCalled();
+    expect(screen.getByTestId('notice')).toHaveTextContent('AUDIO:MIC_DENIED');
+  });
+
+  it('says so on the call when the audio cannot start', async () => {
+    mockStartCallAudio.mockImplementation(() => Promise.reject(new Error('already running')));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    renderProbe();
+    await activeSdkCall();
+    expect(screen.getByTestId('notice')).toHaveTextContent('AUDIO:START_FAILED');
+    warn.mockRestore();
+  });
+
+  it('puts an SDK audio error that leaves the call silent on the call', async () => {
+    renderProbe();
+    await activeSdkCall();
+    fire(sdkError, { error: 'AUDIO_CODEC_UNSUPPORTED' });
+    expect(screen.getByTestId('notice')).toHaveTextContent('AUDIO:AUDIO_CODEC_UNSUPPORTED');
+  });
+
+  it('reads a call without floor control as full-duplex', () => {
+    renderProbe();
+    fire(incoming, callInfo({ isFloorControlEnabled: false }));
+    act(() => { ctx.acceptCall(); });
+    // full-duplex is what the probe cannot show directly; the uplink test above
+    // covers its effect. Here: the incoming call type follows the flag.
+    expect(ctx.activeCall?.callType).toBe('full_duplex');
+  });
+});
+
 describe('CallContext — outgoing calls', () => {
   it('places the call through the SDK', () => {
     renderProbe();
     act(() => { ctx.startCall('Bob', 'sip:bob@example.org', 'half_duplex'); });
 
-    expect(mockSdk.startPrivateCall).toHaveBeenCalledWith('sip:bob@example.org', true, false);
+    expect(mockSdk.startPrivateCall).toHaveBeenCalledWith('sip:bob@example.org', true, false, 'AMR_WB_OCTET_ALIGNED');
     // Never instantly active — the SDK decides when it connects.
     expect(screen.getByTestId('state')).toHaveTextContent('connecting');
   });
@@ -475,7 +662,7 @@ describe('CallContext — outgoing calls', () => {
     renderProbe();
     act(() => { ctx.startCall('Bob', 'sip:bob@example.org', 'full_duplex', 'manual'); });
 
-    expect(mockSdk.startPrivateCall).toHaveBeenCalledWith('sip:bob@example.org', false, true);
+    expect(mockSdk.startPrivateCall).toHaveBeenCalledWith('sip:bob@example.org', false, true, 'AMR_WB_OCTET_ALIGNED');
   });
 
   it('adopts the SDK call id so later events match', () => {
@@ -487,6 +674,28 @@ describe('CallContext — outgoing calls', () => {
 
     act(() => { ctx.endCall(); });
     expect(mockSdk.terminateCall).toHaveBeenCalledWith('out-1');
+  });
+
+  // Regression: manual mode used to hold the caller at a Join banner once the
+  // far end had answered — on the dialling screen, which has no Join button,
+  // so the call never reached the active screen and its audio never started.
+  it.each(['manual', 'auto'] as const)('goes active when the far end answers in %s mode', mode => {
+    renderProbe();
+    act(() => { ctx.startCall('Bob', 'sip:bob@example.org', 'half_duplex', mode); });
+    fire(updated, callInfo({ callId: 'out-1', state: 'RINGING', outgoing: true }));
+    expect(screen.getByTestId('state')).toHaveTextContent('connecting');
+
+    fire(updated, callInfo({ callId: 'out-1', state: 'ACTIVE', outgoing: true }));
+    expect(screen.getByTestId('state')).toHaveTextContent('active');
+    expect(ctx.activeCall?.needsManualJoin).toBe(false);
+  });
+
+  it('starts the call audio once a manual-mode call is answered', async () => {
+    renderProbe();
+    act(() => { ctx.startCall('Bob', 'sip:bob@example.org', 'half_duplex', 'manual'); });
+    fire(updated, callInfo({ callId: 'out-1', state: 'ACTIVE', outgoing: true }));
+
+    await waitFor(() => expect(mockStartCallAudio).toHaveBeenCalledWith('out-1'));
   });
 });
 

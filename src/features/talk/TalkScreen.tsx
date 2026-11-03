@@ -1,10 +1,14 @@
 /**
  * features/talk/TalkScreen.tsx
  *
- * Lightweight mock talk screen for the new Talk bottom tab.
- * This screen is intentionally UI-first: it renders a horizontal
- * group selector, a push-to-talk action area, receive/transmit/messages
- * controls, and simple start/end call buttons.
+ * The Talk tab: a horizontal group selector, a push-to-talk action area,
+ * receive/transmit/messages controls, and start/end call buttons.
+ *
+ * A group's call is the SDK's (TalkContext.sdkGroupCalls) whenever it has one:
+ * Start places it, PTT asks for the floor and letting go gives it back, End
+ * leaves it, and every state shown comes from the SDK's callbacks. Without an
+ * SDK call the group shows the mock panel's simulated state, kept per group
+ * in groupCalls, so the UI can still be exercised offline.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -20,7 +24,9 @@ import SoundLevel from 'react-native-sound-level';
 import { ensureMicPermission } from '../../core/permissions';
 import { MediaSession } from '../../core/mediaSession';
 import { useAppContext } from '../../contexts/AppContext';
-import { useTalkContext, PushState } from '../../contexts/TalkContext';
+import { useTalkContext, PushState, type GroupCallState, type SdkGroupCall } from '../../contexts/TalkContext';
+import { displayMcId } from '../calls/mcId';
+import { floorNoticeText, useTransientText } from '../calls/floorText';
 import { mapSoundLevel, useVoiceBars, VoiceMeterBars } from '../../shared/VoiceMeter';
 import { makeTalkStyles } from './styles';
 import { GroupActionMenu } from './components/GroupActionMenu';
@@ -31,19 +37,37 @@ import { MessagesScreen } from './MessagesScreen';
 import { BroadcastScreen } from './BroadcastScreen';
 
 
-// ── Mock timings ───────────────────────────────────────────────────────────
-// Artificial delays that stand in for real SDK round-trips while the native
-// bridge doesn't yet expose call/floor callbacks. When real callbacks land,
-// these spinners should be driven by SDK events instead of fixed timeouts.
-const MOCK_CALL_SETUP_MS  = 600;  // "starting call" spinner before it goes active
-const MOCK_FLOOR_GRANT_MS = 500;  // "requesting floor" spinner before push is granted
-const MOCK_AUTO_ACCEPT_MS = 3000; // incoming call auto-answers after this delay
+// A simulated incoming call (mock panel) auto-answers after this delay. Real
+// group calls need no such thing: the SDK answers them itself.
+const MOCK_AUTO_ACCEPT_MS = 3000;
 
 type TalkMode = 'receive' | 'transmit' | 'messages';
 
+/**
+ * The PTT button's state for an SDK group call. The floor is shown as ours
+ * only while PTT is held: on letting go the release is sent at once, so the
+ * button returns to "active" without waiting for the server's IDLE.
+ */
+function pushStateOf(call: SdkGroupCall, holding: boolean): PushState {
+  if (call.floorState === 'busy') return 'occupied';
+  if (call.floorState === 'granted' && holding) return 'accepted';
+  return 'idle';
+}
+
+/** An SDK group call in the shape the group selector and ordering read. */
+function viewOf(call: SdkGroupCall, holding: boolean): GroupCallState {
+  return { callActive: call.state === 'active', pushState: pushStateOf(call, holding), isHolding: holding };
+}
+
+/** Who holds the floor, for the PTT button: every talker in a multi-talker group. */
+function talkerNames(call: SdkGroupCall): string {
+  const ids = call.talkers.length ? call.talkers : call.floorOwner ? [call.floorOwner] : [];
+  return ids.map(displayMcId).join(', ');
+}
+
 export function TalkScreen() {
   const { c, tr, theme } = useAppContext();
-  const { affiliatedGroups, affiliationByGroup, applyAffiliation, groups: allGroups, groupsLoaded, setActiveGroups, pendingGroup, setPendingGroup, groupCalls, setGroupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, isBroadcasting, setIsBroadcasting } = useTalkContext();
+  const { affiliatedGroups, affiliationByGroup, applyAffiliation, groups: allGroups, groupsLoaded, setActiveGroups, pendingGroup, setPendingGroup, groupCalls, setGroupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, sdkGroupCalls, startGroupCall, endGroupCall, requestGroupFloor, releaseGroupFloor, setFocusedGroup, mutedGroups, toggleGroupMuted, isBroadcasting, setIsBroadcasting } = useTalkContext();
   const styles = useMemo(() => makeTalkStyles(c), [c]);
 
   // Only affiliated groups are selectable/listed; the rest live in the editor.
@@ -74,31 +98,55 @@ export function TalkScreen() {
   const initialGroupState = groupCalls[initialGroup];
   const [selectedGroup, setSelectedGroup] = useState(initialGroup);
   const [mode, setMode] = useState<TalkMode>('receive');
-  const [callActive, setCallActive] = useState(initialGroupState?.callActive ?? false);
-  const [pushState, setPushState] = useState(initialGroupState?.pushState ?? 'idle');
+  // The mock panel's simulated call for the selected group; see the header.
+  const [mockCallActive, setCallActive] = useState(initialGroupState?.callActive ?? false);
+  const [mockPushState, setPushState] = useState(initialGroupState?.pushState ?? 'idle');
   const [isHolding, setIsHolding] = useState(initialGroupState?.isHolding ?? false);
-  const [isLoading, setIsLoading] = useState(false);
   const [voiceLevel, setVoiceLevel] = useState(0);
   const [occupiedSpeaker, setOccupiedSpeaker] = useState('Another user');
   const [soundMonitoring, setSoundMonitoring] = useState(false);
   const [showMockPanel, setShowMockPanel] = useState(false);
   const [showGroupMenu, setShowGroupMenu] = useState(false);
   const [showAffEditor, setShowAffEditor] = useState(false);
-  const [muted, setMuted] = useState(false);
   const isFirstRender = useRef(true);
-  const prevCallActive = useRef(callActive);
   const [messagesGroup, setMessagesGroup] = useState<string | null>(null);
   const [incomingCalls, setIncomingCalls] = useState<Set<string>>(new Set());
+  const [startFailedText, setStartFailedText] = useState<string | undefined>(undefined);
+
+  // ── What the selected group shows ──────────────────────────────────────────
+  const sdkCall: SdkGroupCall | undefined = sdkGroupCalls[selectedGroup];
+  const groupMuted = !!mutedGroups[selectedGroup];
+
+  // The group shown is the one heard, when its call is up.
+  useEffect(() => { setFocusedGroup(selectedGroup); }, [selectedGroup, setFocusedGroup]);
+  const callActive = sdkCall ? sdkCall.state === 'active' : mockCallActive;
+  const pushState: PushState = sdkCall ? pushStateOf(sdkCall, isHolding) : mockPushState;
+  // Setting the call up, or waiting for the floor while PTT is held.
+  const isLoading = sdkCall
+    ? sdkCall.state !== 'active'
+      || (isHolding && (sdkCall.floorState === 'requesting' || sdkCall.floorState === 'queued'))
+    : false;
+  const occupiedName = sdkCall ? talkerNames(sdkCall) : occupiedSpeaker;
+  const floorNotice = useTransientText(floorNoticeText(tr, sdkCall?.floorNotice) ?? startFailedText);
+
+  /** Every group's call as shown: the SDK's where it has one, the mock's elsewhere. */
+  const viewCalls = useMemo(() => {
+    const view: Record<string, GroupCallState> = { ...groupCalls };
+    Object.values(sdkGroupCalls).forEach(call => {
+      view[call.groupId] = viewOf(call, call.groupId === selectedGroup && isHolding);
+    });
+    return view;
+  }, [groupCalls, sdkGroupCalls, selectedGroup, isHolding]);
 
   const orderedGroups = useMemo(() => {
-    const activeSet = new Set(GROUPS.filter(g => groupCalls[g]?.callActive));
+    const activeSet = new Set(GROUPS.filter(g => viewCalls[g]?.callActive));
     const everActive = activationOrder.filter(g => GROUPS.includes(g));
     const activeSorted = everActive.filter(g => activeSet.has(g)).reverse();
     const inactiveSorted = everActive.filter(g => !activeSet.has(g))
       .sort((a, b) => (lastClosedAt[b] ?? 0) - (lastClosedAt[a] ?? 0));
     const neverActive = GROUPS.filter(g => !everActive.includes(g));
     return [...activeSorted, ...inactiveSorted, ...neverActive];
-  }, [GROUPS, groupCalls, activationOrder, lastClosedAt]);
+  }, [GROUPS, viewCalls, activationOrder, lastClosedAt]);
   const spinAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const incomingPulse = useRef(new Animated.Value(1)).current;
@@ -110,7 +158,8 @@ export function TalkScreen() {
   const barAnims = useVoiceBars(voiceLevel);
 
   const talking = isHolding && callActive && pushState === 'accepted';
-  const buttonDisabled = pushState === 'occupied' || isLoading;
+  // Not while waiting for the floor: letting go then withdraws the request.
+  const buttonDisabled = pushState === 'occupied' || (isLoading && !isHolding);
 
   const pushButtonState = pushState === 'occupied'
     ? 'occupied'
@@ -152,7 +201,8 @@ const ringColor = pushState === 'occupied'
   const buttonStatusLabel = pushStatusLabel;
   const buttonHint = callActive ? tr.talkHoldHint : tr.talkNoCallHint;
 
-  // Save current group state on every change (skip initial mount to not overwrite persisted state)
+  // Save the mock state on every change (skip initial mount to not overwrite
+  // persisted state). Only the mock's: an SDK call's state lives in TalkContext.
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
@@ -160,32 +210,55 @@ const ringColor = pushState === 'occupied'
     }
     setGroupCalls(prev => ({
       ...prev,
-      [selectedGroup]: { callActive, pushState, isHolding },
+      [selectedGroup]: { callActive: mockCallActive, pushState: mockPushState, isHolding },
     }));
-  }, [callActive, pushState, isHolding, selectedGroup]);
+  }, [mockCallActive, mockPushState, isHolding, selectedGroup]);
 
-  // Track activation: record when a group becomes active
+  // Record each group's call going up and down — any group, since an SDK call
+  // comes up on its own, selected or not.
+  const activeRef = useRef(new Set<string>());
   useEffect(() => {
-    if (callActive) {
-      recordActivation(selectedGroup);
-    }
-  }, [callActive, selectedGroup, recordActivation]);
-
-  // Track close: record when a group's call transitions from active → inactive
-  useEffect(() => {
-    if (prevCallActive.current && !callActive) {
-      recordClose(selectedGroup);
-    }
-    prevCallActive.current = callActive;
-  }, [callActive, selectedGroup, recordClose]);
+    const active = new Set(Object.keys(viewCalls).filter(g => viewCalls[g].callActive));
+    active.forEach(g => { if (!activeRef.current.has(g)) recordActivation(g); });
+    activeRef.current.forEach(g => { if (!active.has(g)) recordClose(g); });
+    activeRef.current = active;
+  }, [viewCalls, recordActivation, recordClose]);
 
   // Sync active groups to TalkContext for the header badge
   useEffect(() => {
-    const active = Object.entries(groupCalls)
+    const active = Object.entries(viewCalls)
       .filter(([, v]) => v.callActive)
       .map(([k]) => ({ name: k, callActive: true }));
     setActiveGroups(active);
-  }, [groupCalls, setActiveGroups]);
+  }, [viewCalls, setActiveGroups]);
+
+  // A call we started that went away before it came up was refused — by the
+  // SDK, or by the server. Said once; the next Start clears it.
+  const prevSdkCallRef = useRef(sdkCall);
+  useEffect(() => {
+    const prev = prevSdkCallRef.current;
+    prevSdkCallRef.current = sdkCall;
+    if (prev && !sdkCall && prev.groupId === selectedGroup
+        && prev.startedBy === 'me' && prev.state !== 'active') {
+      setStartFailedText(tr.talkCallStartFailed);
+    }
+  }, [sdkCall, selectedGroup, tr]);
+
+  // The floor can turn busy while PTT is held (a deny, then someone else
+  // takes it); the button goes passive, so the hold ends here.
+  useEffect(() => {
+    if (sdkCall && pushState === 'occupied' && isHolding) {
+      setIsHolding(false);
+      releaseGroupFloor(selectedGroup);
+    }
+  }, [sdkCall, pushState, isHolding, selectedGroup, releaseGroupFloor]);
+
+  // The level meter follows talking, whichever way it was granted.
+  useEffect(() => {
+    if (talking) startSoundMonitoring();
+    else stopSoundMonitoring();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [talking]);
 
   // Navigate to pending group when TalkScreen mounts
   useEffect(() => {
@@ -255,22 +328,10 @@ const ringColor = pushState === 'occupied'
   const handleSelectGroup = (group: string) => {
     const gs = groupCalls[group];
     setSelectedGroup(group);
-    if (gs?.callActive) {
-      setCallActive(true);
-      setPushState(gs.pushState);
-      setIsHolding(gs.isHolding);
-      setIsLoading(false);
-    } else if (gs) {
-      setCallActive(gs.callActive);
-      setPushState(gs.pushState);
-      setIsHolding(gs.isHolding);
-      setIsLoading(false);
-    } else {
-      setCallActive(false);
-      setPushState('idle');
-      setIsHolding(false);
-      setIsLoading(false);
-    }
+    setStartFailedText(undefined);
+    setCallActive(gs?.callActive ?? false);
+    setPushState(gs?.pushState ?? 'idle');
+    setIsHolding(gs?.isHolding ?? false);
   };
 
   useEffect(() => {
@@ -351,6 +412,11 @@ const ringColor = pushState === 'occupied'
     return () => loop.stop();
   }, [incomingCalls.size, incomingPulse]);
 
+  const startCall = () => {
+    setStartFailedText(undefined);
+    startGroupCall(selectedGroup);
+  };
+
   const startSoundMonitoring = async () => {
     if (soundMonitoring) return;
     if ((await ensureMicPermission()) !== 'granted') return;
@@ -387,7 +453,7 @@ const ringColor = pushState === 'occupied'
         c={c}
         orderedGroups={orderedGroups}
         groupLabels={groupLabels}
-        groupCalls={groupCalls}
+        groupCalls={viewCalls}
         selectedGroup={selectedGroup}
         incomingCalls={incomingCalls}
         incomingPulse={incomingPulse}
@@ -407,6 +473,11 @@ const ringColor = pushState === 'occupied'
             testID="talk-selected-group">
             {selectedGroup}
           </Text>
+          {groupMuted && (
+            <Text style={styles.mutedIcon} accessibilityLabel={tr.talkGroupMutedHint} testID="talk-group-muted">
+              🔇
+            </Text>
+          )}
           <View style={styles.selectedActions}>
             <TouchableOpacity
               onPress={() => setShowMockPanel(!showMockPanel)}
@@ -434,7 +505,8 @@ const ringColor = pushState === 'occupied'
             styles={styles}
             tr={tr}
             onClose={() => setShowGroupMenu(false)}
-            onToggleMute={() => setMuted(prev => !prev)}
+            muted={groupMuted}
+            onToggleMute={() => toggleGroupMuted(selectedGroup)}
           />
         )}
 
@@ -494,34 +566,19 @@ const ringColor = pushState === 'occupied'
                 testID="talk-push-button"
                 onPressIn={() => {
                   if (pushState === 'occupied') return;
+                  // No call yet: this press starts one. MCPTT group calls ask
+                  // for no floor on setup, so talking takes another press.
                   if (!callActive) {
-                    setIsLoading(true);
-                    setTimeout(() => {
-                      setCallActive(true);
-                      setPushState('idle');
-                      setIsHolding(false);
-                      setIsLoading(false);
-                    }, MOCK_CALL_SETUP_MS);
-                    return;
-                  }
-                  if (pushState === 'idle') {
-                    setIsLoading(true);
-                    setTimeout(() => {
-                      setPushState('accepted');
-                      setIsHolding(true);
-                      startSoundMonitoring();
-                      setIsLoading(false);
-                    }, MOCK_FLOOR_GRANT_MS);
+                    if (!sdkCall) startCall();
                     return;
                   }
                   setIsHolding(true);
-                  startSoundMonitoring();
+                  if (sdkCall) requestGroupFloor(selectedGroup);
                 }}
                 onPressOut={() => {
-                  if (isHolding) {
-                    setIsHolding(false);
-                    stopSoundMonitoring();
-                  }
+                  if (!isHolding) return;
+                  setIsHolding(false);
+                  if (sdkCall) releaseGroupFloor(selectedGroup);
                 }}
                 disabled={buttonDisabled}
                 style={[
@@ -529,7 +586,7 @@ const ringColor = pushState === 'occupied'
                   { backgroundColor: pushButtonColor },
                   buttonDisabled && styles.pushButtonDisabled,
                 ]}>
-                {pushState === 'occupied' && <Text style={styles.buttonSpeakerName}>{occupiedSpeaker}</Text>}
+                {pushState === 'occupied' && !!occupiedName && <Text style={styles.buttonSpeakerName} testID="talk-speaker-name">{occupiedName}</Text>}
                 <View style={styles.voiceMeterContainer}>
                   <VoiceMeterBars
                     barAnims={barAnims}
@@ -542,6 +599,12 @@ const ringColor = pushState === 'occupied'
                 <Text testID="talk-status-text" style={[styles.pushButtonStatus, { color: c.textOnAccent }]}>{buttonStatusLabel}</Text>
               </Pressable>
             </Animated.View>
+            {/* Absolute, under the button, so a notice never moves the button. */}
+            {!!floorNotice && (
+              <Text style={styles.floorNotice} numberOfLines={2} testID="talk-floor-notice">
+                {floorNotice}
+              </Text>
+            )}
           </View>
 
         </View>
@@ -601,15 +664,8 @@ const ringColor = pushState === 'occupied'
             {!callActive && (
               <TouchableOpacity
                 testID="talk-start-button"
-                onPress={() => {
-                  setIsLoading(true);
-                  setTimeout(() => {
-                    setCallActive(true);
-                    setPushState('idle');
-                    setIsHolding(false);
-                    setIsLoading(false);
-                  }, MOCK_CALL_SETUP_MS);
-                }}
+                onPress={startCall}
+                disabled={isLoading}
                 activeOpacity={0.8}
                 style={[styles.actionButton, styles.startButton]}>
                 <Text style={styles.actionButtonIcon}>📞</Text>
@@ -620,6 +676,7 @@ const ringColor = pushState === 'occupied'
               testID="talk-end-button"
               disabled={!callActive}
               onPress={() => {
+                if (sdkCall) endGroupCall(selectedGroup);
                 setCallActive(false);
                 setPushState('idle');
                 setIsHolding(false);

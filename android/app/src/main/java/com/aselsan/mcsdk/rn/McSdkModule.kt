@@ -3,6 +3,9 @@ package com.aselsan.mcsdk.rn
 import com.aselsan.mcsdk.Alarm
 import com.aselsan.mcsdk.AlarmListener
 import com.aselsan.mcsdk.AlarmSeverity
+import com.aselsan.mcsdk.AudioCodec
+import com.aselsan.mcsdk.AudioFrame
+import com.aselsan.mcsdk.AudioInfo
 import com.aselsan.mcsdk.CallInfo
 import com.aselsan.mcsdk.Document
 import com.aselsan.mcsdk.DocumentType
@@ -20,6 +23,9 @@ import com.aselsan.mcsdk.IdentityInfo
 import com.aselsan.mcsdk.SdkListener
 import com.aselsan.mcsdk.SdkParams
 import com.aselsan.mcsdk.TerminationInfo
+import com.aselsan.mcsdk.ReceptionInfo
+import com.aselsan.mcsdk.TransmissionInfo
+import com.aselsan.mcsdk.rn.media.CallAudioRouter
 import com.facebook.react.bridge.Arguments
 import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
@@ -40,9 +46,14 @@ private const val EVENT_INCOMING_CALL   = "McSdkIncomingCall"
 private const val EVENT_CALL_UPDATED    = "McSdkCallUpdated"
 private const val EVENT_CALL_TERMINATED = "McSdkCallTerminated"
 private const val EVENT_FLOOR_UPDATED   = "McSdkFloorUpdated"
+private const val EVENT_AUDIO_INFO_UPDATED   = "McSdkAudioInfoUpdated"
 private const val EVENT_IDENTITY_UPDATED     = "McSdkIdentityUpdated"
 private const val EVENT_GROUPS_UPDATED       = "McSdkGroupsUpdated"
 private const val EVENT_AFFILIATIONS_UPDATED = "McSdkAffiliationsUpdated"
+private const val EVENT_READY                = "McSdkReady"
+private const val EVENT_TERMINATED           = "McSdkTerminated"
+private const val EVENT_TRANSMISSION_UPDATED = "McSdkTransmissionUpdated"
+private const val EVENT_RECEPTION_UPDATED    = "McSdkReceptionUpdated"
 
 class McSdkModule(
     private val context: ReactApplicationContext,
@@ -146,7 +157,8 @@ class McSdkModule(
      * One logcat line per event reaching JS — what the SDK actually told the
      * app, which its own log lines do not show (e.g. a termination's mode and
      * reason). McSdkLog is left out: ~450/s, and its text is already in logcat
-     * under the SDK tag. Capped so a large document or group list stays one line.
+     * under the SDK tag. Capped so a large document or group list stays one line;
+     * the cap clears a full CallInfo or FloorInfo, which 300 used to cut short.
      */
     private fun logEvent(e: PendingEvent) {
         val body = try {
@@ -154,7 +166,7 @@ class McSdkModule(
         } catch (ex: Exception) {
             "<unreadable: ${ex.message}>"
         }
-        Log.d("McSdkBridge", "event=${e.name} ${body.take(300)}")
+        Log.d("McSdkBridge", "event=${e.name} ${body.take(1000)}")
     }
 
     private fun stopEventPump() {
@@ -202,6 +214,13 @@ class McSdkModule(
             sdk!!.setListener(this)
             sdk!!.setAlarmListener(this)
             sdk!!.setLogListener(this)
+
+            // The uplink of a call's audio: SdkFrameSink → router → here. Reads
+            // `sdk` at send time, so a destroy() leaves it sending to nothing
+            // rather than to a released instance.
+            CallAudioRouter.sender = CallAudioRouter.Sender { callId, payload, captureTimeUs ->
+                sdk?.sendAudioFrame(callId, payload, captureTimeUs)
+            }
         } catch (t: Throwable) {
             Log.e("McSdkBridge", "create() failed: ${t.message}", t)
             throw RuntimeException("McSdk.create() failed: ${t.message}", t)
@@ -362,14 +381,67 @@ class McSdkModule(
      * — neither side arbitrates transmission, so there is no floor to request
      * and audio flows both ways while the call is selected. The default (false)
      * is §11.1.1 "with floor control", i.e. half-duplex PTT.
+     *
+     * audioCodec names the AMR-WB framing the app's encoder produces — an
+     * AudioCodec constant such as "AMR_WB_OCTET_ALIGNED". It is the call's only
+     * audio payload type and the SDK sends the app's bytes as that, verbatim.
+     * Empty leaves the choice to the SDK (its default is octet-aligned too).
+     * One method rather than an overload: @ReactMethod names must be unique.
      */
     @ReactMethod
-    fun startPrivateCall(mcId: String, autoCommence: Boolean, fullDuplex: Boolean) {
-        sdk?.startPrivateCall(mcId, autoCommence, fullDuplex)
+    fun startPrivateCall(mcId: String, autoCommence: Boolean, fullDuplex: Boolean, audioCodec: String) {
+        val s = sdk ?: return
+        if (audioCodec.isEmpty()) {
+            s.startPrivateCall(mcId, autoCommence, fullDuplex)
+            return
+        }
+        val codec = audioCodecOf(audioCodec) ?: return
+        s.startPrivateCall(mcId, autoCommence, fullDuplex, codec)
     }
 
-    @ReactMethod fun startGroupCall(groupId: String) { sdk?.startGroupCall(groupId) }
-    @ReactMethod fun answerCall(callId: String)      { sdk?.answerCall(callId) }
+    /**
+     * The SDK's AudioCodec for a name from JS, or null — logged — for one it
+     * does not know. Refusing beats guessing: a framing the encoder does not
+     * produce would reach the far end as noise.
+     */
+    private fun audioCodecOf(name: String): AudioCodec? =
+        try {
+            AudioCodec.valueOf(name)
+        } catch (e: IllegalArgumentException) {
+            Log.e("McSdkBridge", "unknown audio codec '$name' — call not placed/answered")
+            null
+        }
+
+    /**
+     * audioCodec as for startPrivateCall: the framing this device sends to the
+     * group, and empty for the SDK's default. It is this member's choice only —
+     * the group's other members each name their own.
+     */
+    @ReactMethod
+    fun startGroupCall(groupId: String, audioCodec: String) {
+        val s = sdk ?: return
+        if (audioCodec.isEmpty()) {
+            s.startGroupCall(groupId)
+            return
+        }
+        val codec = audioCodecOf(audioCodec) ?: return
+        s.startGroupCall(groupId, codec)
+    }
+    /**
+     * audioCodec as for startPrivateCall. Pass empty for an MCVideo call: its
+     * media plane carries no audio, and answering one with a codec is refused
+     * (CALL_CODEC_INVALID) — the codec-less answer picks per call kind.
+     */
+    @ReactMethod
+    fun answerCall(callId: String, audioCodec: String) {
+        val s = sdk ?: return
+        if (audioCodec.isEmpty()) {
+            s.answerCall(callId)
+            return
+        }
+        val codec = audioCodecOf(audioCodec) ?: return
+        s.answerCall(callId, codec)
+    }
     @ReactMethod fun rejectCall(callId: String)      { sdk?.rejectCall(callId) }
     @ReactMethod fun terminateCall(callId: String)   { sdk?.terminateCall(callId) }
 
@@ -525,9 +597,12 @@ class McSdkModule(
         sdkInitialized = true
         initPromise?.resolve(true)
         initPromise = null
+        emit(EVENT_READY, Arguments.createMap())
     }
 
-    override fun onTerminated() {}
+    override fun onTerminated() {
+        emit(EVENT_TERMINATED, Arguments.createMap())
+    }
 
     /**
      * Every SDK-level failure arrives here, and until now the body was empty —
@@ -620,12 +695,15 @@ class McSdkModule(
      * The user's MC identity — which services are registered (authorized).
      * The access token is deliberately NOT forwarded to JS: it is a credential
      * the UI has no use for, and the SDK already holds it for its own requests.
+     * Everything emitted here also lands in the logs, so only whether one is
+     * present goes across.
      */
     override fun onIdentityUpdated(identity: IdentityInfo) {
         emit(EVENT_IDENTITY_UPDATED, Arguments.createMap().apply {
             putBoolean("isPtt",   identity.isPtt)
             putBoolean("isVideo", identity.isVideo)
             putBoolean("isData",  identity.isData)
+            putBoolean("hasToken", !identity.token.isNullOrEmpty())
         })
     }
 
@@ -673,6 +751,14 @@ class McSdkModule(
         putString("callerId", c.callerId)
         putString("calleeId", c.calleeId)
         putString("groupId", c.groupId)
+        putInt("sipCode", c.sipCode)
+        putString("sipReason", c.sipReason)
+        // Added in 98fb4c6. isFloorControlEnabled tells a full-duplex private
+        // call (§11.1.2) from a PTT one; isVideo marks an MCVideo call, which
+        // must be answered without an audio codec.
+        putBoolean("isFloorControlEnabled", c.isFloorControlEnabled)
+        putBoolean("isVideo", c.isVideo)
+        putBoolean("isAutoCommencement", c.isAutoCommencement)
     }
 
     override fun onIncomingCall(callInfo: CallInfo) {
@@ -724,11 +810,15 @@ class McSdkModule(
             putBoolean("isMultiTalker", floorInfo.isMultiTalker)
             putBoolean("overridingWithoutRevoke", floorInfo.overridingWithoutRevoke)
             putBoolean("overriddenWithoutRevoke", floorInfo.overriddenWithoutRevoke)
-            // Floor Indicator bits, already decoded by the SDK's helpers.
+            // Floor Indicator bits, already decoded by the SDK's helpers. The raw
+            // value goes along for the logs, in case a bit has no helper yet.
+            putInt("floorIndicator", floorInfo.floorIndicator)
+            putBoolean("isNormalCall", floorInfo.isNormalCall())
             putBoolean("isBroadcastCall", floorInfo.isBroadcastCall())
             putBoolean("isSystemCall", floorInfo.isSystemCall())
             putBoolean("isQueueingSupported", floorInfo.isQueueingSupported())
             putBoolean("isDualFloor", floorInfo.isDualFloor())
+            putBoolean("isTemporaryGroup", floorInfo.isTemporaryGroup())
             putArray("talkers", Arguments.createArray().apply {
                 floorInfo.talkers.forEach { t ->
                     pushMap(Arguments.createMap().apply {
@@ -740,6 +830,83 @@ class McSdkModule(
                 }
             })
         })
+    }
+
+    /**
+     * MCVideo transmission control (TS 24.581 §6.2): our own permission to send
+     * video. Nothing in JS acts on it yet, so it only reaches the logs. SSRCs are
+     * unsigned 32-bit in Java's long; a double carries them exactly.
+     */
+    override fun onTransmissionUpdated(transmissionInfo: TransmissionInfo) {
+        emit(EVENT_TRANSMISSION_UPDATED, Arguments.createMap().apply {
+            putString("callId", transmissionInfo.callId)
+            putString("status", transmissionInfo.status.name)
+            putInt("queuePosition", transmissionInfo.queuePosition)
+            putInt("queuePriority", transmissionInfo.queuePriority)
+            putInt("grantedDuration", transmissionInfo.grantedDuration)
+            putInt("grantedPriority", transmissionInfo.grantedPriority)
+            putDouble("audioSsrc", transmissionInfo.audioSsrc.toDouble())
+            putDouble("videoSsrc", transmissionInfo.videoSsrc.toDouble())
+            putString("rejectReason", transmissionInfo.rejectReason.name)
+            putString("revokeReason", transmissionInfo.revokeReason.name)
+            putBoolean("isEmergency", transmissionInfo.isEmergency)
+            putBoolean("isImminentPeril", transmissionInfo.isImminentPeril)
+            putBoolean("isBroadcast", transmissionInfo.isBroadcast)
+            putInt("transmissionIndicator", transmissionInfo.transmissionIndicator)
+        })
+    }
+
+    /** MCVideo: one remote transmitter's stream from our side. Logs only, as above. */
+    override fun onReceptionUpdated(receptionInfo: ReceptionInfo) {
+        emit(EVENT_RECEPTION_UPDATED, Arguments.createMap().apply {
+            putString("callId", receptionInfo.callId)
+            putString("transmitterId", receptionInfo.transmitterId)
+            putString("functionalAlias", receptionInfo.functionalAlias)
+            putDouble("audioSsrc", receptionInfo.audioSsrc.toDouble())
+            putDouble("videoSsrc", receptionInfo.videoSsrc.toDouble())
+            putString("status", receptionInfo.status.name)
+            putBoolean("automatic", receptionInfo.automatic)
+            putString("overridingId", receptionInfo.overridingId)
+            putString("rejectReason", receptionInfo.rejectReason.name)
+        })
+    }
+
+    /**
+     * A call's audio stream: what SDP settled on, and whether RTP is flowing.
+     * Rare (call setup, a re-INVITE, flow starting or stopping), so it goes
+     * through the event queue like the rest. Nothing in JS acts on it yet; the
+     * event log is the point for now — it shows the negotiated AMR-WB framing
+     * (fmtp) without digging the SDP out of the SIP bodies.
+     *
+     * Its sibling onAudioFrame below does NOT take this path: frames must never
+     * be queued to JS.
+     */
+    override fun onAudioInfoUpdated(audioInfo: AudioInfo) {
+        emit(EVENT_AUDIO_INFO_UPDATED, Arguments.createMap().apply {
+            putString("callId", audioInfo.callId)
+            putString("encoding", audioInfo.format?.encoding ?: "")
+            // Unsigned 32-bit in Java's long; a double carries it exactly.
+            putDouble("clockRate", (audioInfo.format?.clockRate ?: 0L).toDouble())
+            putString("fmtp", audioInfo.format?.fmtp ?: "")
+            putString("flow", audioInfo.flow?.name ?: "")
+            putString("path", audioInfo.path?.name ?: "")
+            putBoolean("encrypted", audioInfo.encrypted)
+        })
+    }
+
+    /**
+     * One received audio frame of a call, ~50 a second on the SDK's media
+     * thread. Straight to the native audio pipeline through CallAudioRouter:
+     * no event queue, no JS, no log line — while this runs the SDK is not
+     * reading its socket, and anything slow here would be heard as loss.
+     *
+     * An empty frame is one the SDK marks lost; it carries no speech, and the
+     * jitter buffer conceals the gap on its own.
+     */
+    override fun onAudioFrame(frame: AudioFrame) {
+        val data = frame.data ?: return
+        if (data.isEmpty()) return
+        CallAudioRouter.deliver(frame.callId, frame.ssrc, data, frame.timestampUs, frame.firstOfBurst)
     }
 
     // ── AlarmListener ─────────────────────────────────────────────────────────

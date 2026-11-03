@@ -251,6 +251,23 @@ export function makeTalkStyles(c: ThemePalette) {
       borderRadius: 3,
       minHeight: 4,
     },
+    // Right after the group name; the auto margin keeps the actions on the right.
+    mutedIcon: {
+      fontSize: 16,
+      marginLeft: 6,
+      marginRight: 'auto',
+    },
+    // Under the PTT button, out of the layout so it never moves the button.
+    floorNotice: {
+      position: 'absolute',
+      top: '100%',
+      left: 0,
+      right: 0,
+      color: c.warn,
+      fontSize: 13,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
     pushButtonStatus: {
       fontSize: 22,
       fontWeight: '700',

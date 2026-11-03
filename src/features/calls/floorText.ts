@@ -20,8 +20,8 @@ export function floorTalkerText(tr: Translations, call: ActiveCall): string {
 }
 
 /**
- * Text for a CallContext floorNotice (`STATUS`, `STATUS:REASON` or
- * `ERROR:<SdkError>`). Reasons without a text of their own fall back to the
+ * Text for a CallContext floorNotice (`STATUS`, `STATUS:REASON`,
+ * `ERROR:<SdkError>` or `AUDIO:<reason>`). Reasons without a text of their own fall back to the
  * generic denied/revoked line, so a new SDK reason still reads sensibly.
  */
 export function floorNoticeText(tr: Translations, notice: string | undefined): string | undefined {
@@ -46,6 +46,12 @@ export function floorNoticeText(tr: Translations, notice: string | undefined): s
     case 'QUEUE_TIMEOUT':   return tr.floorQueueTimeout;
     case 'GRANT_EXPIRED':   return tr.floorGrantExpired;
     case 'ERROR':           return tr.floorErrorUnreachable;
+    case 'AUDIO':
+      switch (reason) {
+        case 'MIC_DENIED':              return tr.callAudioMicDenied;
+        case 'AUDIO_CODEC_UNSUPPORTED': return tr.callAudioCodecUnsupported;
+        default:                        return tr.callAudioFailed;
+      }
     default:                return undefined;
   }
 }

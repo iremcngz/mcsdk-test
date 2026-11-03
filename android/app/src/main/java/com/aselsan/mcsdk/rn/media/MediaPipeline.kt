@@ -1,8 +1,11 @@
 package com.aselsan.mcsdk.rn.media
 
 import android.content.Context
+import android.net.wifi.WifiManager
+import android.os.Build
 import android.util.Log
 import java.io.File
+import java.util.Locale
 
 /**
  * MediaPipeline — brings the uplink up and down in the right order.
@@ -31,10 +34,32 @@ class MediaPipeline(context: Context) {
 
     companion object {
         private const val TAG = "McSdkPipeline"
+
+        /** Concealment on a call: 5 frames = 100 ms, then silence. */
+        private const val CALL_MAX_CONCEAL_FRAMES = 5
+
+        /**
+         * A call's starting jitter budget: 4 frames = 80 ms, as for a file or
+         * the UDP test. 200 ms was tried; the shorter start is kept because
+         * rebuffering already deepens the buffer to whatever stall the network
+         * actually produces (measured on Wi-Fi: clumps up to ~300 ms apart),
+         * so a calm link is not made to pay for a bad one.
+         */
+        private const val CALL_TARGET_FRAMES = 4
+
+        /**
+         * 64 frames = 1.28 s. Rebuffering lets the depth grow to the longest
+         * stall, and a clump must still fit on top of it.
+         */
+        private const val CALL_CAPACITY_FRAMES = 64
+
+        private const val STATS_TAG = "McSdkCallStats"
+        private const val STATS_FIELDS = 19
     }
 
     private val session = AudioSessionManager(context)
     private val mediaDir = File(context.cacheDir, "media")
+    private val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
 
     private var capture: AudioCapture? = null
     // The interface, not FileFrameSink: the destination is swapped for
@@ -100,6 +125,7 @@ class MediaPipeline(context: Context) {
         // interface the capture thread talks to.
         val fileSink = s as? FileFrameSink
         val udpSink = s as? UdpFrameSink
+        val sdkSink = s as? SdkFrameSink
         return Stats(
             running = c?.isRunning == true,
             transmitting = c?.isTransmitting == true,
@@ -115,9 +141,9 @@ class MediaPipeline(context: Context) {
             aec = effects?.aec == true,
             ns = effects?.ns == true,
             error = lastError ?: c?.lastError ?: udpSink?.lastError,
-            packetsSent = udpSink?.framesSent ?: 0,
-            sendErrors = udpSink?.sendErrors ?: 0,
-            target = udpSink?.target,
+            packetsSent = udpSink?.framesSent ?: sdkSink?.framesSent ?: 0,
+            sendErrors = udpSink?.sendErrors ?: sdkSink?.droppedFrames ?: 0,
+            target = udpSink?.target ?: sdkSink?.target,
         )
     }
 
@@ -167,7 +193,11 @@ class MediaPipeline(context: Context) {
      * [makeSink] runs only once everything it depends on is held, so a sink is
      * never constructed for a start that was already doomed.
      */
-    private fun startCapture(codecName: String, makeSink: (AudioCodec) -> AudioFrameSink): AudioFrameSink? {
+    private fun startCapture(
+        codecName: String,
+        transmitInitially: Boolean = true,
+        makeSink: (AudioCodec) -> AudioFrameSink,
+    ): AudioFrameSink? {
         if (isRunning) {
             lastError = "already running"
             return null
@@ -220,6 +250,9 @@ class MediaPipeline(context: Context) {
 
         val snk = makeSink(cd)
         val cap = AudioCapture(cd)
+        // Before start, so not one frame slips through a gate that should be
+        // shut: on a call nothing may go out until the floor says so.
+        cap.setTransmitEnabled(transmitInitially)
 
         try {
             snk.open(cd)
@@ -272,6 +305,15 @@ class MediaPipeline(context: Context) {
     /** Gates the uplink without tearing capture down. Floor control lands here. */
     fun setTransmitEnabled(enabled: Boolean) {
         capture?.setTransmitEnabled(enabled)
+    }
+
+    /**
+     * Silences what is received, leaving the call and the uplink as they are —
+     * a group's "stop listening". Applies to the playback running now; a new
+     * one starts unmuted.
+     */
+    fun setPlaybackMuted(muted: Boolean) {
+        playback?.muted = muted
     }
 
     /**
@@ -375,6 +417,7 @@ class MediaPipeline(context: Context) {
         // set belongs in AudioFrameSource, which is what the jitter buffer sees.
         val fileSrc = s as? FileFrameSource
         val udpSrc = s as? UdpFrameSource
+        val sdkSrc = s as? SdkFrameSource
         return PlaybackStats(
             running = p?.isRunning == true,
             finished = p?.isFinished == true,
@@ -393,11 +436,11 @@ class MediaPipeline(context: Context) {
             duplicateFrames = j?.duplicateFrames ?: 0,
             jitterDepth = j?.depth() ?: 0,
             error = p?.lastError ?: s?.lastError,
-            packetsReceived = udpSrc?.packetsReceived ?: 0,
-            malformedPackets = udpSrc?.malformedPackets ?: 0,
+            packetsReceived = udpSrc?.packetsReceived ?: sdkSrc?.packetsReceived ?: 0,
+            malformedPackets = udpSrc?.malformedPackets ?: sdkSrc?.malformedPackets ?: 0,
             lostPackets = udpSrc?.lostPackets ?: 0,
             localPort = udpSrc?.port ?: 0,
-            remoteSsrc = udpSrc?.remoteSsrcValue ?: 0,
+            remoteSsrc = udpSrc?.remoteSsrcValue ?: sdkSrc?.remoteSsrcValue ?: 0,
         )
     }
 
@@ -466,7 +509,7 @@ class MediaPipeline(context: Context) {
             sourceActive = { src.isRunning },
             onFinished = { Log.d(TAG, "playback reached end of ${file.name}") },
         )
-        src.setListener { payload, len, timestamp -> jb.put(payload, len, timestamp) }
+        src.setListener { payload, len, timestamp, _ -> jb.put(payload, len, timestamp) }
 
         if (!pb.start()) {
             lastError = pb.lastError ?: "playback failed to start"
@@ -549,7 +592,10 @@ class MediaPipeline(context: Context) {
             sourceActive = { src.isRunning },
             onFinished = { Log.d(TAG, "udp playback stopped") },
         )
-        src.setListener { payload, len, timestamp -> jb.put(payload, len, timestamp) }
+        src.setListener { payload, len, timestamp, firstOfBurst ->
+            if (firstOfBurst) jb.restartBurst()
+            jb.put(payload, len, timestamp)
+        }
 
         if (!pb.start()) {
             lastError = pb.lastError ?: "playback failed to start"
@@ -579,6 +625,262 @@ class MediaPipeline(context: Context) {
         source = null
         jitter = null
         playCodec = null
+    }
+
+    // ── A call's audio through the SDK ────────────────────────────────────────
+
+    /** The call whose audio is running through the SDK, or null. */
+    @Volatile
+    var callAudioId: String? = null
+        private set
+
+    /**
+     * Runs a call's audio through the SDK: capture → AMR-WB → SdkFrameSink on
+     * the way out, SdkFrameSource → jitter buffer → AMR-WB → playback on the
+     * way in. The same chain the Audio tab's UDP test proved, with the SDK at
+     * both ends instead of a socket.
+     *
+     * The uplink starts gated: nothing is sent until [setTransmitEnabled] opens
+     * it — on a half-duplex call that is the floor being granted.
+     *
+     * Fails, leaving nothing running, if a test session already holds capture
+     * or playback, or either half cannot start.
+     */
+    @Synchronized
+    fun startCallAudio(callId: String): Boolean {
+        if (callAudioId != null) {
+            lastError = "call audio already running for $callAudioId"
+            return false
+        }
+        if (startCapture("AMR-WB", transmitInitially = false) { SdkFrameSink(callId) } == null) {
+            return false
+        }
+        if (!startSdkPlayback(callId)) {
+            stop()
+            return false
+        }
+        callAudioId = callId
+        Log.d(TAG, "call audio started: callId=$callId")
+        acquireWifiLock()
+        startCallStats()
+        return true
+    }
+
+    /**
+     * Stops a call's audio. Safe to call when none is running.
+     *
+     * With [onlyFor], only that call's: a stop that arrives late — from a call
+     * whose start was still in flight when another call took the pipeline —
+     * must not end the audio of the call that took it.
+     */
+    @Synchronized
+    fun stopCallAudio(onlyFor: String? = null) {
+        val id = callAudioId ?: return
+        if (onlyFor != null && onlyFor != id) {
+            Log.d(TAG, "call audio stop for $onlyFor ignored: $id holds the pipeline")
+            return
+        }
+        stopCallStats()
+        releaseWifiLock()
+        stopPlayback()
+        stop()
+        callAudioId = null
+        Log.d(TAG, "call audio stopped: callId=$id")
+    }
+
+    // ── Wi-Fi power save ──────────────────────────────────────────────────────
+
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    /**
+     * Keeps Wi-Fi out of power save for as long as a call's audio runs. A
+     * dozing phone only collects its packets from the AP at the beacons it
+     * wakes for, so a 20 ms stream arrives in clumps: measured ~300 ms apart
+     * (three beacon intervals) on a call, and the jitter buffer holds 80 ms.
+     *
+     * LOW_LATENCY is the mode made for this (API 29+), and it only applies
+     * while the app is in the foreground with the screen on — as it is while
+     * someone holds the PTT button. Below 29 HIGH_PERF is all there is; most
+     * devices turn power save off for it, but that is the vendor's choice.
+     *
+     * Not reference counted: one lock per call, released when it ends.
+     */
+    private fun acquireWifiLock() {
+        val wm = wifi ?: return
+        if (wifiLock?.isHeld == true) return
+        @Suppress("DEPRECATION")
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        try {
+            wifiLock = wm.createWifiLock(mode, "McSdkCallAudio").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+            Log.d(TAG, "wifi lock held: mode=$mode")
+        } catch (e: Exception) {
+            // Audio still works without it, only less evenly — not worth
+            // failing the call for.
+            Log.w(TAG, "wifi lock failed: ${e.message}")
+            wifiLock = null
+        }
+    }
+
+    private fun releaseWifiLock() {
+        try {
+            wifiLock?.let { if (it.isHeld) it.release() }
+        } catch (e: Exception) {
+            Log.w(TAG, "wifi lock release failed: ${e.message}")
+        }
+        wifiLock = null
+    }
+
+    // ── Call stats, once a second ─────────────────────────────────────────────
+
+    private var statsThread: Thread? = null
+
+    /**
+     * Logs one McSdkCallStats line a second while a call's audio runs. Counts
+     * are per second, lag/depth/jitter are the value at that moment. Both
+     * directions share a line so the two phones' logs can be read side by
+     * side: one phone's UP sent should reappear as the other's DOWN pkt, and
+     * the difference is what the network lost.
+     *
+     * On its own thread, polling counters the real-time threads already keep —
+     * nothing is added to the capture, playback or SDK media paths.
+     */
+    private fun startCallStats() {
+        stopCallStats()
+        val t = Thread({
+            val prev = IntArray(STATS_FIELDS)
+            val now = IntArray(STATS_FIELDS)
+            while (true) {
+                try {
+                    Thread.sleep(1000)
+                } catch (e: InterruptedException) {
+                    break
+                }
+                val cap = capture
+                val snk = sink as? SdkFrameSink
+                val enc = codec as? AmrWbCodec
+                val src = source as? SdkFrameSource
+                val jb = jitter
+                val pb = playback
+                val dec = playCodec as? AmrWbCodec
+
+                now[0] = cap?.capturedFrames ?: 0
+                now[1] = cap?.encodedFrames ?: 0
+                now[2] = snk?.framesSent ?: 0
+                now[3] = snk?.droppedFrames ?: 0
+                now[4] = snk?.timestampGapFrames ?: 0
+                now[5] = enc?.encoderInputDropped ?: 0
+                now[6] = src?.packetsReceived ?: 0
+                now[7] = src?.framesDelivered ?: 0
+                now[8] = src?.burstStarts ?: 0
+                now[9] = src?.timestampGapFrames ?: 0
+                now[10] = jb?.lateFrames ?: 0
+                now[11] = jb?.duplicateFrames ?: 0
+                now[12] = jb?.overflowFrames ?: 0
+                now[13] = jb?.playedFrames ?: 0
+                now[14] = jb?.concealedFrames ?: 0
+                now[15] = jb?.underrunFrames ?: 0
+                now[16] = pb?.decodeFailureCount ?: 0
+                now[17] = dec?.decoderInputDropped ?: 0
+                now[18] = jb?.rebufferCount ?: 0
+                val d = IntArray(STATS_FIELDS) { now[it] - prev[it] }
+                now.copyInto(prev)
+
+                Log.i(STATS_TAG, String.format(Locale.US,
+                    "UP tx=%d cap=%d enc=%d sent=%d notSent=%d tsGap=%d encDrop=%d encLag=%d | " +
+                    "DOWN pkt=%d frm=%d burst=%d tsGap=%d late=%d dup=%d ovf=%d played=%d " +
+                    "conceal=%d underrun=%d rebuf=%d decMiss=%d decDrop=%d decLag=%d depth=%d " +
+                    "jitter=%.1fms maxGap=%dms",
+                    if (cap?.isTransmitting == true) 1 else 0,
+                    d[0], d[1], d[2], d[3], d[4], d[5], enc?.encoderLag ?: 0,
+                    d[6], d[7], d[8], d[9], d[10], d[11], d[12], d[13],
+                    d[14], d[15], d[18], d[16], d[17], dec?.decoderLag ?: 0, jb?.depth() ?: 0,
+                    (src?.interarrivalJitterUs ?: 0L) / 1000.0,
+                    (src?.takeMaxArrivalGapUs() ?: 0L) / 1000))
+            }
+        }, STATS_TAG)
+        t.isDaemon = true
+        t.start()
+        statsThread = t
+    }
+
+    private fun stopCallStats() {
+        statsThread?.let {
+            it.interrupt()
+            it.join(1000)
+        }
+        statsThread = null
+    }
+
+    /**
+     * Playback fed by the SDK. As the UDP receive, except that the source has
+     * no socket or thread — frames arrive on the SDK's media thread — and the
+     * jitter buffer bounds its concealment: on a PTT call the stream stops
+     * between talk bursts, and an unbounded repeat of the last frame would buzz
+     * through every pause.
+     */
+    private fun startSdkPlayback(callId: String): Boolean {
+        if (playback?.isRunning == true) {
+            lastError = "playback already running"
+            return false
+        }
+        val amr = AmrWbCodec()
+        if (!amr.startDecoder()) {
+            lastError = amr.lastError ?: "AMR-WB decoder unavailable"
+            Log.e(TAG, lastError!!)
+            return false
+        }
+        if (!acquireSession()) {
+            lastError = "audio focus refused — another app owns the audio device"
+            Log.e(TAG, lastError!!)
+            amr.release()
+            return false
+        }
+
+        val jb = JitterBuffer(
+            amr,
+            targetFrames = CALL_TARGET_FRAMES,
+            capacityFrames = CALL_CAPACITY_FRAMES,
+            maxConcealFrames = CALL_MAX_CONCEAL_FRAMES,
+            rebufferOnStall = true,
+        )
+        val src = SdkFrameSource(callId)
+        // Active for as long as the call's audio runs: silence between bursts
+        // is normal, and must not read as the stream having ended.
+        val pb = AudioPlayback(
+            amr, jb,
+            sourceActive = { src.isRunning },
+            onFinished = { Log.d(TAG, "sdk playback stopped") },
+        )
+        src.setListener { payload, len, timestamp, firstOfBurst ->
+            if (firstOfBurst) jb.restartBurst()
+            jb.put(payload, len, timestamp)
+        }
+
+        if (!pb.start()) {
+            lastError = pb.lastError ?: "playback failed to start"
+            Log.e(TAG, lastError!!)
+            teardownPlayback(null, null, amr)
+            return false
+        }
+        if (!src.start(amr)) {
+            lastError = src.lastError ?: "source failed to start"
+            Log.e(TAG, lastError!!)
+            teardownPlayback(pb, null, amr)
+            return false
+        }
+
+        source = src
+        jitter = jb
+        playback = pb
+        playCodec = amr
+        return true
     }
 
     /**

@@ -74,6 +74,15 @@ class AudioPlayback(
     /** Frames the decoder produced no samples for. */
     val decodeFailureCount: Int get() = decodeFailures.get()
 
+    /**
+     * Plays silence in place of what arrives, while the stream itself carries
+     * on: the frames are still decoded, so the decoder's state stays current
+     * and unmuting is heard from the next frame rather than after a glitch.
+     * Read once per frame by the playback thread.
+     */
+    @Volatile
+    var muted: Boolean = false
+
     /** 0 until [start] succeeds. */
     var audioSessionId: Int = 0
         private set
@@ -195,6 +204,8 @@ class AudioPlayback(
                 samples = codec.decode(encoded, len, pcm)
                 if (samples <= 0) decodeFailures.incrementAndGet()
             }
+
+            if (samples > 0 && muted) java.util.Arrays.fill(pcm, 0, samples, 0)
 
             if (samples <= 0) {
                 // Nothing to play: before priming, on a genuine underrun, or

@@ -4,6 +4,7 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import android.util.Log
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * AmrWbCodec — AMR-WB (G.722.2) via the platform encoder. The MCPTT codec.
@@ -76,6 +77,28 @@ class AmrWbCodec(
     var lastError: String? = null
         private set
 
+    // ── Queue counters, for the call stats line ───────────────────────────────
+    // One input in and at most one output out per call, both with zero wait:
+    // when the output is not ready yet the frame comes out on a later call, so
+    // fed − out is how many frames sit inside MediaCodec. A lag that only grows
+    // means outputs are being left behind, and a full queue then refuses input.
+
+    private val encFed = AtomicInteger(0)
+    private val encOut = AtomicInteger(0)
+    private val encInDropped = AtomicInteger(0)
+    private val decFed = AtomicInteger(0)
+    private val decOut = AtomicInteger(0)
+    private val decInDropped = AtomicInteger(0)
+
+    /** PCM frames refused because the encoder had no free input buffer — lost speech. */
+    val encoderInputDropped: Int get() = encInDropped.get()
+    /** Frames fed to the encoder whose output has not been taken yet. */
+    val encoderLag: Int get() = encFed.get() - encOut.get()
+    /** Received frames refused because the decoder had no free input buffer. */
+    val decoderInputDropped: Int get() = decInDropped.get()
+    /** Frames fed to the decoder whose PCM has not been taken yet. */
+    val decoderLag: Int get() = decFed.get() - decOut.get()
+
     /** Opens the encoder. Returns false and sets [lastError] on failure. */
     fun start(): Boolean {
         if (encoder != null) return true
@@ -132,7 +155,10 @@ class AmrWbCodec(
                     // MediaCodec wants a monotonic value.
                     mc.queueInputBuffer(inIdx, 0, count * 2, presentationUs, 0)
                     presentationUs += count * 1_000_000L / sampleRate
+                    encFed.incrementAndGet()
                 }
+            } else {
+                encInDropped.incrementAndGet()
             }
 
             // ── Drain ─────────────────────────────────────────────────────────
@@ -150,6 +176,7 @@ class AmrWbCodec(
                         outBuf.position(encInfo.offset)
                         outBuf.get(out, 0, written)
                     }
+                    encOut.incrementAndGet()
                 }
                 mc.releaseOutputBuffer(outIdx, false)
                 return written
@@ -223,7 +250,10 @@ class AmrWbCodec(
                     inBuf.put(payload, 0, len)
                     mc.queueInputBuffer(inIdx, 0, len, decodeUs, 0)
                     decodeUs += frameSamples * 1_000_000L / sampleRate
+                    decFed.incrementAndGet()
                 }
+            } else {
+                decInDropped.incrementAndGet()
             }
 
             // ── Drain ─────────────────────────────────────────────────────────
@@ -246,6 +276,7 @@ class AmrWbCodec(
                             pos += 2
                         }
                     }
+                    decOut.incrementAndGet()
                 }
                 mc.releaseOutputBuffer(outIdx, false)
                 return samples

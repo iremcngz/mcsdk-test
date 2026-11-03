@@ -263,7 +263,8 @@ class FileFrameSource(
     }
 
     private fun emit(buf: ByteArray, len: Int, timestamp: Int) {
-        listener?.onFrame(buf, len, timestamp)
+        // A recording is one continuous burst.
+        listener?.onFrame(buf, len, timestamp, false)
         delivered.incrementAndGet()
     }
 

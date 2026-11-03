@@ -235,7 +235,7 @@ class UdpFrameSource(
 
                 // Straight to the jitter buffer with the timestamp from the
                 // wire. No decode here, deliberately.
-                out.onFrame(payload, len, header.timestamp)
+                out.onFrame(payload, len, header.timestamp, header.marker)
                 delivered.incrementAndGet()
             }
         } catch (e: Exception) {
