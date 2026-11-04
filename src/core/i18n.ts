@@ -319,6 +319,44 @@ export interface Translations {
   /** An interruption took the audio device away mid-call. */
   audioInterrupted: (reason: string) => string;
 
+  // ── Video over UDP (Video tab)
+  tabVideo: string;
+  videoTitle: string;
+  videoStatusIdle: string;
+  videoStatusSending: string;
+  videoStatusReceiving: string;
+  videoPermissionDenied: string;
+  videoPermissionBlocked: string;
+  videoPeerSection: string;
+  videoPeerIp: string;
+  videoPort: string;
+  videoSend: string;
+  videoStopSend: string;
+  videoReceive: string;
+  videoStopReceive: string;
+  videoSendSection: string;
+  videoReceiveSection: string;
+  videoTarget: string;
+  videoSize: string;
+  videoProfile: string;
+  videoFrames: string;
+  videoKeyFrames: string;
+  videoFps: string;
+  videoBitrate: string;
+  videoPacketsSent: string;
+  videoSendErrors: string;
+  videoNoConfig: string;
+  videoPacketsReceived: string;
+  videoPacketsLost: string;
+  videoFramesReceived: string;
+  videoFramesDecoded: string;
+  videoFramesLate: string;
+  videoNetworkWeak: string;
+  videoNetworkLost: string;
+  videoFramesDiscarded: string;
+  videoKeyRequests: string;
+  videoHint: string;
+
   // ── Audio capture diagnostics (Audio tab)
   tabAudio: string;
   audioTitle: string;
@@ -671,6 +709,42 @@ const tr: Translations = {
   micPermissionBlocked: 'Mikrofon izni kalıcı olarak reddedildi. Uygulama ayarlarından açmanız gerekiyor.',
   audioInterrupted:     reason => `Ses yolu kesildi (${reason})`,
 
+  tabVideo:               'Video',
+  videoTitle:             'Video',
+  videoStatusIdle:        'durdu',
+  videoStatusSending:     'gönderiyor',
+  videoStatusReceiving:   'alıyor',
+  videoPermissionDenied:  'Kamera izni verilmedi.',
+  videoPermissionBlocked: 'Kamera izni kapalı — Android ayarlarından açın.',
+  videoPeerSection:       'Bağlantı',
+  videoPeerIp:            'Karşı telefonun IP\'si',
+  videoPort:              'Port',
+  videoSend:              '▶ GÖNDERMEYİ BAŞLAT',
+  videoStopSend:          '■ GÖNDERMEYİ DURDUR',
+  videoReceive:           '▶ ALMAYI BAŞLAT',
+  videoStopReceive:       '■ ALMAYI DURDUR',
+  videoSendSection:       'Gönderilen',
+  videoReceiveSection:    'Alınan',
+  videoTarget:            'Hedef',
+  videoSize:              'Çözünürlük',
+  videoProfile:           'H.264 profili',
+  videoFrames:            'Gönderilen kare',
+  videoKeyFrames:         'Anahtar kare',
+  videoFps:               'Ortalama FPS',
+  videoBitrate:           'Ortalama bit hızı',
+  videoPacketsSent:       'Gönderilen paket',
+  videoSendErrors:        'Gönderme hatası',
+  videoNoConfig:          'SPS/PPS olmayan anahtar kare',
+  videoPacketsReceived:   'Alınan paket',
+  videoPacketsLost:       'Kayıp paket',
+  videoFramesReceived:    'Tamamlanan kare',
+  videoFramesDecoded:     'Ekrana çizilen kare',
+  videoFramesLate:        'Geç kalan kare',
+  videoNetworkWeak:       'Ağ zayıf: görüntü takılabilir',
+  videoNetworkLost:       'Görüntü gelmiyor: bağlantıyı kontrol edin',
+  videoFramesDiscarded:   'Atılan kare',
+  videoKeyRequests:       'İstenen anahtar kare',
+  videoHint:              'İki telefonda da aynı portu kullanın. Görüntüyü alan telefonda ALMAYI BAŞLAT\'a, gönderen telefonda karşı IP\'yi yazıp GÖNDERMEYİ BAŞLAT\'a basın.',
   tabAudio:               'Ses',
   audioTitle:             'Ses Yakalama',
   audioDeviceSection:     'Cihaz',
@@ -1019,6 +1093,42 @@ const en: Translations = {
   micPermissionBlocked: 'Microphone permission is permanently denied. Enable it in the app settings.',
   audioInterrupted:     reason => `Audio path interrupted (${reason})`,
 
+  tabVideo:               'Video',
+  videoTitle:             'Video',
+  videoStatusIdle:        'idle',
+  videoStatusSending:     'sending',
+  videoStatusReceiving:   'receiving',
+  videoPermissionDenied:  'Camera permission denied.',
+  videoPermissionBlocked: 'Camera permission is off — enable it in Android settings.',
+  videoPeerSection:       'Connection',
+  videoPeerIp:            'Other phone\'s IP',
+  videoPort:              'Port',
+  videoSend:              '▶ START SENDING',
+  videoStopSend:          '■ STOP SENDING',
+  videoReceive:           '▶ START RECEIVING',
+  videoStopReceive:       '■ STOP RECEIVING',
+  videoSendSection:       'Sent',
+  videoReceiveSection:    'Received',
+  videoTarget:            'Target',
+  videoSize:              'Resolution',
+  videoProfile:           'H.264 profile',
+  videoFrames:            'Frames sent',
+  videoKeyFrames:         'Key frames',
+  videoFps:               'Average FPS',
+  videoBitrate:           'Average bitrate',
+  videoPacketsSent:       'Packets sent',
+  videoSendErrors:        'Send errors',
+  videoNoConfig:          'Key frames without SPS/PPS',
+  videoPacketsReceived:   'Packets received',
+  videoPacketsLost:       'Packets lost',
+  videoFramesReceived:    'Frames completed',
+  videoFramesDecoded:     'Frames drawn',
+  videoFramesLate:        'Frames late',
+  videoNetworkWeak:       'Weak network: the picture may stutter',
+  videoNetworkLost:       'No picture coming in: check the connection',
+  videoFramesDiscarded:   'Frames discarded',
+  videoKeyRequests:       'Key frames requested',
+  videoHint:              'Use the same port on both phones. On the phone that shows the picture press START RECEIVING; on the phone that films, type the other phone\'s IP and press START SENDING.',
   tabAudio:               'Audio',
   audioTitle:             'Audio Capture',
   audioDeviceSection:     'Device',

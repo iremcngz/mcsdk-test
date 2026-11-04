@@ -23,6 +23,7 @@ import { ContactsScreen } from '../features/contacts/ContactsScreen';
 import { CallsTab }       from '../features/calls/CallsTab';
 import { TalkScreen }     from '../features/talk/TalkScreen';
 import { AudioScreen }    from '../features/audio/AudioScreen';
+import { VideoScreen }    from '../features/video/VideoScreen';
 import { OutgoingCallScreen } from '../features/calls/OutgoingCallScreen';
 import { ActiveCallFullScreen } from '../features/calls/ActiveCallFullScreen';
 import { IncomingCallOverlay } from '../features/calls/IncomingCallOverlay';
@@ -34,6 +35,7 @@ const TABS: { id: Screen; icon: string }[] = [
   { id: 'calls',    icon: '📞' },
   { id: 'talk',     icon: '🎙️' },
   { id: 'audio',    icon: '🔊' },
+  { id: 'video',    icon: '🎥' },
   { id: 'metrics',  icon: '📊' },
   { id: 'sdklogs',  icon: '📋' },
   { id: 'settings', icon: '⚙️' },
@@ -76,6 +78,7 @@ export function TabNavigator() {
     calls:    tr.tabCalls,
     talk:     tr.tabTalk,
     audio:    tr.tabAudio,
+    video:    tr.tabVideo,
     incall:   'In Call',
     callactive: 'Active Call',
   };
@@ -391,6 +394,7 @@ export function TabNavigator() {
         {screen === 'calls'    && <CallsTab />}
         {screen === 'talk'     && <TalkScreen />}
         {screen === 'audio'    && <AudioScreen />}
+        {screen === 'video'    && <VideoScreen />}
         {screen === 'incall'   && <OutgoingCallScreen />}
         {screen === 'callactive' && <ActiveCallFullScreen />}
       </View>

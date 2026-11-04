@@ -15,6 +15,10 @@ android/.../rn/media/   the JS bridge and foreground service; subpackages below
   audio/                pipeline, capture, playback, routing, jitter buffer
   audio/codec/          AMR-WB, PCMU, the RTP payload framing
   audio/transport/      sinks and sources (file, UDP, SDK), CallAudioRouter
+  video/                sender and receiver pipelines, camera, GL rotation
+  video/codec/          MediaCodec H.264 encoder and decoder, key frames, playout delay
+  video/transport/      VideoFrameSink/Source (the seam the SDK plugs into), UDP + RTP
+  video/view/           the native view the decoder draws into
 MCSDK/            git submodule: the C++ SDK source
 ```
 

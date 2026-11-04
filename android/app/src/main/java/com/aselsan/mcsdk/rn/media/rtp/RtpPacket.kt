@@ -68,13 +68,29 @@ object RtpPacket {
         // valid frame of the wrong length and corrupt everything after it.
         if (len < 0 || out.size < total) return -1
 
+        writeHeader(out, timestamp, sequenceNumber, ssrc, marker, payloadType)
+        System.arraycopy(payload, 0, out, HEADER_BYTES, len)
+        return total
+    }
+
+    /**
+     * Writes only the fixed header, for a payload assembled in place behind it:
+     * an H.264 fragment is its own two bytes plus a slice of a larger frame, so
+     * there is no one array to hand to [write]. [out] must hold HEADER_BYTES.
+     */
+    fun writeHeader(
+        out: ByteArray,
+        timestamp: Int,
+        sequenceNumber: Int,
+        ssrc: Int,
+        marker: Boolean,
+        payloadType: Int = DEFAULT_PAYLOAD_TYPE,
+    ) {
         out[0] = FLAGS_V2.toByte()
         out[1] = (((if (marker) 0x80 else 0x00)) or (payloadType and 0x7F)).toByte()
         writeU16(out, 2, sequenceNumber)
         writeU32(out, 4, timestamp)
         writeU32(out, 8, ssrc)
-        System.arraycopy(payload, 0, out, HEADER_BYTES, len)
-        return total
     }
 
     /**
