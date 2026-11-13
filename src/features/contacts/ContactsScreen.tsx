@@ -4,8 +4,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
 import { useCallContext } from '../../contexts/CallContext';
 import { useNavigation } from '../../contexts/NavigationContext';
+import { useTalkContext } from '../../contexts/TalkContext';
 import { initDb, getAllContacts, insertContact, seedContacts, type Contact } from '../../core/db';
-import { toMcpttUri } from '../calls/mcId';
+import { AuthSettings } from '../../core/settings';
+import { displayMcId, toMcpttUri } from '../calls/mcId';
 import { makeContactsStyles } from './styles';
 import type {
   ContactFilter,
@@ -26,21 +28,29 @@ import {
   mockUserStatus,
 } from './mockData';
 
-const GROUPS = ['group1', 'group2', 'group3', 'group4', 'group5', 'group6', 'group7'];
+/** Case- and accent-insensitive enough for the names the server hands out. */
+const byName = (a: { name: string }, b: { name: string }) =>
+  a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export function ContactsScreen() {
   const { c, tr } = useAppContext();
-  const { startCall } = useCallContext();
+  const { startCall, startVideoCall } = useCallContext();
   const { setScreen } = useNavigation();
+  // The groups the server provisioned for this user (SdkListener::onGroupsUpdated),
+  // in place of the seven `group1`..`group7` placeholders this list used to show.
+  // Empty until registration completes, which the Groups empty state covers.
+  const { groups: sdkGroups } = useTalkContext();
   const cs            = useMemo(() => makeContactsStyles(c), [c]);
   const PRESENCE_COLOR = useMemo(() => makePresenceColors(c), [c]);
   const insets        = useSafeAreaInsets();
 
   const [contacts,   setContacts]   = useState<Contact[]>([]);
   const [query,      setQuery]      = useState('');
-  const [filter,     setFilter]     = useState<ContactFilter>('all');
+  // People by default: the groups are on the Talk screen, and a call is placed
+  // from here against a person.
+  const [filter,     setFilter]     = useState<ContactFilter>('people');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [presence,   setPresence]   = useState<Record<number, PresenceStatus>>({});
   const [callInfo,   setCallInfo]   = useState<Record<number, CallInfo>>({});
@@ -112,22 +122,53 @@ export function ContactsScreen() {
     setSelectedId(id);
   }, [newName, newSipUri, contacts, tr, loadContacts, closeAddForm]);
 
+  /**
+   * The SDK's groups as list rows. Negative ids keep them from colliding with
+   * the SQLite contact ids the list keys and the selection are built on; the
+   * index is used rather than a hash of the group id so the id stays stable
+   * and small, and the list is sorted before the ids are handed out so a row
+   * does not change id when the server sends the list in another order.
+   *
+   * `name` may be empty (McSdkGroupInfo) — the group id is the fallback, which
+   * is also what the detail panel dials.
+   */
   const groupContacts: GroupItem[] = useMemo(() =>
-    GROUPS.map((g, i) => ({
-      id: -(i + 1),
-      name: g,
-      sip_uri: `${g}@test.com`,
-      notes: '',
-      created_at: 0,
-      __isGroup: true as const,
-    })),
-  []);
+    [...sdkGroups]
+      .map(g => ({ groupId: g.groupId, name: g.name || g.groupId }))
+      .sort(byName)
+      .map((g, i) => ({
+        id: -(i + 1),
+        name: g.name,
+        sip_uri: g.groupId,
+        notes: '',
+        created_at: 0,
+        __isGroup: true as const,
+      })),
+  [sdkGroups]);
+
+  /**
+   * The user themselves is dropped from the list: a contact row's only purpose
+   * is to call that person, and the server refuses a call to oneself. Matched
+   * on the MC ID rather than the whole URI, since the stored row carries the
+   * MCPTT form (`sip:mcptt.mcuser-111@…`) while what we know is the bare login
+   * name the user typed — and the name column is matched too, because that is
+   * what the seed rows are called.
+   */
+  const peopleContacts = useMemo(() => {
+    const me = AuthSettings.getLastUsername()?.trim().toLowerCase();
+    const rows = me
+      ? contacts.filter(ct =>
+          displayMcId(ct.sip_uri).toLowerCase() !== me
+          && ct.name.trim().toLowerCase() !== me)
+      : contacts;
+    return [...rows].sort(byName);
+  }, [contacts]);
 
   const allItems = useMemo(() => {
-    const people: (Contact | GroupItem)[] = filter === 'groups' ? [] : contacts;
+    const people: (Contact | GroupItem)[] = filter === 'groups' ? [] : peopleContacts;
     const groups: (Contact | GroupItem)[] = filter === 'people' ? [] : groupContacts;
     return [...people, ...groups];
-  }, [contacts, groupContacts, filter]);
+  }, [peopleContacts, groupContacts, filter]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -267,6 +308,29 @@ export function ContactsScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* MCVideo private calls: video both ways, no audio. MC rings the
+                other phone, AC is answered by it. */}
+            <View style={cs.videoRow}>
+              <TouchableOpacity
+                testID="contact-video-mc"
+                style={[cs.videoBtn, cs.videoMc]}
+                onPress={() => {
+                  startVideoCall(item.name, item.sip_uri, 'manual');
+                  setScreen('incall');
+                }}>
+                <Text style={cs.videoMcText}>🎥 {tr.contactVideoMc}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="contact-video-ac"
+                style={[cs.videoBtn, cs.videoAc]}
+                onPress={() => {
+                  startVideoCall(item.name, item.sip_uri, 'auto');
+                  setScreen('incall');
+                }}>
+                <Text style={cs.videoAcText}>🎥 {tr.contactVideoAc}</Text>
+              </TouchableOpacity>
+            </View>
+
             <View style={cs.infoSection}>
               <Text style={cs.infoSectionTitle}>Call Info</Text>
               <View style={cs.infoRow}>
@@ -294,7 +358,7 @@ export function ContactsScreen() {
         )}
       </View>
     );
-  }, [cs, PRESENCE_COLOR, presence, selectedId, callInfo, userInfo, handleSelect, startCall, setScreen]);
+  }, [cs, PRESENCE_COLOR, presence, selectedId, callInfo, userInfo, handleSelect, startCall, startVideoCall, setScreen, tr]);
 
   const filterTabs: { key: ContactFilter; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -388,7 +452,11 @@ export function ContactsScreen() {
         ListEmptyComponent={
           <View style={cs.emptyWrap}>
             <Text style={cs.emptyIcon}>{filter === 'groups' ? '👥' : '👤'}</Text>
-            <Text style={cs.emptyText}>{filter === 'groups' ? 'No groups found.' : 'No contacts found.'}</Text>
+            <Text style={cs.emptyText}>
+              {filter === 'groups' && !query.trim()
+                ? tr.contactGroupsPending
+                : filter === 'groups' ? 'No groups found.' : 'No contacts found.'}
+            </Text>
           </View>
         }
       />

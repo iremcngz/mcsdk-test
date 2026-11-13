@@ -40,3 +40,25 @@ export function toMcpttUri(input: string, domain: string = DEFAULT_MCPTT_DOMAIN)
   if (s.includes('@')) return `sip:${s}`;
   return `sip:mcptt.${s.replace(/^mcptt\./i, '')}@${domain}`;
 }
+
+/**
+ * The MCVideo ID of a contact, for addressing an MCVideo call.
+ *
+ * Each service names a user differently — the IdMS token carries `mcptt_id`,
+ * `mcvideo_id` and `mcdata_id` separately — and a contact is stored under its
+ * MCPTT form. The MCVideo server does not know `sip:mcptt.mcuser-111@…` as one
+ * of its users and refuses the INVITE with `403` and
+ * `Warning: 399 … "144 user not authorized to call this particular user"`.
+ *
+ * So a service prefix on the user part (`mcptt.`, `mcdata.`) becomes
+ * `mcvideo.`, and a bare MC ID gets the full MCVideo form. A URI with no
+ * service prefix (`sip:bob@example.org`) is kept as it is: nothing in it says
+ * the server builds its IDs this way.
+ */
+export function toMcvideoUri(input: string, domain: string = DEFAULT_MCPTT_DOMAIN): string {
+  const s = input.trim();
+  if (!s) return '';
+  if (!/^(sips?|tel):/i.test(s) && !s.includes('@'))
+    return `sip:mcvideo.${s.replace(/^(mcptt|mcvideo|mcdata)\./i, '')}@${domain}`;
+  return s.replace(/^(<?sips?:)(mcptt|mcdata)\./i, '$1mcvideo.');
+}

@@ -1,6 +1,7 @@
 package com.aselsan.mcsdk.rn.media.video
 
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -58,6 +59,9 @@ object VideoRotation {
      * as fits an [outWidth]x[outHeight] frame. A picture that does not match the frame's
      * shape (the phone was turned after sending began) gets black bars rather than
      * being stretched: the frame's own size cannot change without restarting the encoder.
+     *
+     * @param cover fill the whole frame instead, cropping what overflows: how a camera
+     *        preview is shown, where bars would read as the picture being smaller.
      */
     fun quadMatrix(
         contentWidth: Int,
@@ -66,6 +70,7 @@ object VideoRotation {
         outHeight: Int,
         rotation: Int,
         out: FloatArray,
+        cover: Boolean = false,
     ) {
         val (cos, sin) = when (rotation) {
             90 -> 0f to 1f
@@ -76,7 +81,9 @@ object VideoRotation {
         val sideways = rotation == 90 || rotation == 270
         val turnedWidth = if (sideways) contentHeight else contentWidth
         val turnedHeight = if (sideways) contentWidth else contentHeight
-        val scale = min(outWidth.toFloat() / turnedWidth, outHeight.toFloat() / turnedHeight)
+        val toWidth = outWidth.toFloat() / turnedWidth
+        val toHeight = outHeight.toFloat() / turnedHeight
+        val scale = if (cover) max(toWidth, toHeight) else min(toWidth, toHeight)
 
         val sx = scale * contentWidth / outWidth
         val sy = scale * contentHeight / outHeight

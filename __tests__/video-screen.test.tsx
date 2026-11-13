@@ -73,6 +73,7 @@ const idleReceive = {
   height: 0,
   packetsReceived: 0,
   packetsLost: 0,
+  framesMissed: 0,
   framesReceived: 0,
   framesDiscarded: 0,
   framesDecoded: 0,

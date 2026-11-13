@@ -9,6 +9,11 @@ package com.aselsan.mcsdk.rn.media.video
  * buffer covered them, and a warning based on them would never go away. For the same
  * reason signal strength is not used.
  *
+ * Loss comes in two forms: packets, where the source counts them, and frames missing
+ * from the sender's capture times, where it cannot (the SDK's). The second needs a
+ * wider margin than the first: it is an estimate, and a sender can skip a frame of
+ * its own.
+ *
  * A warning needs to last before it shows and stay clear before it goes, so one bad
  * moment neither raises it nor makes it flicker. Before the first frame nothing is
  * reported, since a sender that has not started yet says nothing about the network.
@@ -27,6 +32,7 @@ class VideoNetworkMonitor {
 
         const val MAX_LOSS_PERCENT = 2.0
         const val MAX_LATE_PERCENT = 5.0
+        const val MAX_MISSED_PERCENT = 10.0
 
         /** One is normal: joining a stream in mid-frame costs exactly that. */
         const val MAX_DISCARDED = 1
@@ -39,6 +45,7 @@ class VideoNetworkMonitor {
         val frames: Int,
         val discarded: Int,
         val late: Int,
+        val missed: Int,
     )
 
     private val samples = ArrayDeque<Sample>()
@@ -53,8 +60,16 @@ class VideoNetworkMonitor {
      *
      * @return what to tell the viewer now
      */
-    fun onSample(nowMs: Long, packets: Int, lost: Int, frames: Int, discarded: Int, late: Int): Quality {
-        samples.addLast(Sample(nowMs, packets, lost, frames, discarded, late))
+    fun onSample(
+        nowMs: Long,
+        packets: Int,
+        lost: Int,
+        frames: Int,
+        discarded: Int,
+        late: Int,
+        missed: Int = 0,
+    ): Quality {
+        samples.addLast(Sample(nowMs, packets, lost, frames, discarded, late, missed))
         while (samples.size > 1 && nowMs - samples.first().nowMs > WINDOW_MS) samples.removeFirst()
 
         if (frames > lastFrames) {
@@ -93,11 +108,14 @@ class VideoNetworkMonitor {
         val frames = to.frames - from.frames
         val late = to.late - from.late
         val discarded = to.discarded - from.discarded
+        val missed = to.missed - from.missed
 
         val lossPercent = if (packets > 0) lost * 100.0 / packets else 0.0
         val latePercent = if (frames > 0) late * 100.0 / frames else 0.0
+        val missedPercent = if (frames + missed > 0) missed * 100.0 / (frames + missed) else 0.0
         return lossPercent > MAX_LOSS_PERCENT ||
             latePercent > MAX_LATE_PERCENT ||
+            missedPercent > MAX_MISSED_PERCENT ||
             discarded > MAX_DISCARDED
     }
 }

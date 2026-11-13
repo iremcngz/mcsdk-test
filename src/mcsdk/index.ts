@@ -23,6 +23,9 @@ import type {
     CallTerminatedEvent,
     FloorUpdatedEvent,
     AudioInfoUpdatedEvent,
+    VideoUpdatedEvent,
+    TransmissionUpdatedEvent,
+    ReceptionUpdatedEvent,
     McSdkAudioCodec,
 } from './types';
 
@@ -53,6 +56,7 @@ export const McSdkEvents = {
     Terminated:           'McSdkTerminated',
     TransmissionUpdated:  'McSdkTransmissionUpdated',
     ReceptionUpdated:     'McSdkReceptionUpdated',
+    VideoUpdated:         'McSdkVideoUpdated',
 } as const;
 
 // ── Emitter (singleton, lazily created) ───────────────────────────────────────
@@ -282,8 +286,23 @@ export class McSdk {
         NativeMcSdk.startGroupCall(groupId, audioCodec ?? '');
     }
     /**
+     * An MCVideo call to the group, separate from its MCPTT one: the SDK's calls
+     * carry one media plane each. Video goes out once requestTransmission is granted.
+     */
+    startVideoGroupCall(groupId: string): void {
+        NativeMcSdk.startVideoGroupCall(groupId);
+    }
+    /**
+     * An MCVideo call to one user (TS 24.281 §10.2). It carries video and no audio,
+     * and has no transmission control: both sides send while it is up, with no
+     * requestTransmission and no receiveMedia. `autoCommence` as for startPrivateCall.
+     */
+    startVideoPrivateCall(mcId: string, autoCommence = true): void {
+        NativeMcSdk.startVideoPrivateCall(mcId, autoCommence);
+    }
+    /**
      * `audioCodec` as for startPrivateCall. Leave it out for an MCVideo call,
-     * whose media plane carries no audio — the SDK refuses a codec there.
+     * whose media plane carries no audio: the bridge names H.264 instead.
      */
     answerCall(callId: string, audioCodec?: McSdkAudioCodec): void {
         NativeMcSdk.answerCall(callId, audioCodec ?? '');
@@ -307,6 +326,17 @@ export class McSdk {
 
     requestFloor(callId: string): void     { NativeMcSdk.requestFloor(callId); }
     releaseFloor(callId: string): void     { NativeMcSdk.releaseFloor(callId); }
+
+    // ── Transmission control (MCVideo) ─────────────────────────────────────────
+
+    /** Asks to send video; the answer arrives as onTransmissionUpdated. */
+    requestTransmission(callId: string): void { NativeMcSdk.requestTransmission(callId); }
+    /** Stops sending video, or withdraws a request still waiting. */
+    endTransmission(callId: string): void     { NativeMcSdk.endTransmission(callId); }
+    /** Starts receiving a transmitter that onReceptionUpdated reported AVAILABLE. */
+    receiveMedia(callId: string, transmitterId: string): void {
+        NativeMcSdk.receiveMedia(callId, transmitterId);
+    }
 
     setIdentity(mcId: string, password: string, clientId: string = ''): void {
         NativeMcSdk.setIdentity(mcId, password, clientId);
@@ -351,9 +381,24 @@ export class McSdk {
         return emitter().addListener(McSdkEvents.FloorUpdated, handler);
     }
 
-    /** A call's audio stream changed: negotiated format, or RTP starting/stopping. */
+    /** A call's audio stream came up: its negotiated format. */
     onAudioInfoUpdated(handler: (e: AudioInfoUpdatedEvent) => void) {
         return emitter().addListener(McSdkEvents.AudioInfoUpdated, handler);
+    }
+
+    /** A call's video stream changed: negotiated format, or RTP starting/stopping. */
+    onVideoUpdated(handler: (e: VideoUpdatedEvent) => void) {
+        return emitter().addListener(McSdkEvents.VideoUpdated, handler);
+    }
+
+    /** Our own video transmission changed: requested, queued, granted, ended. */
+    onTransmissionUpdated(handler: (e: TransmissionUpdatedEvent) => void) {
+        return emitter().addListener(McSdkEvents.TransmissionUpdated, handler);
+    }
+
+    /** A remote transmitter's stream changed, from our side. */
+    onReceptionUpdated(handler: (e: ReceptionUpdatedEvent) => void) {
+        return emitter().addListener(McSdkEvents.ReceptionUpdated, handler);
     }
 
     onSdsSent(handler: (e: SdsSentEvent) => void) {

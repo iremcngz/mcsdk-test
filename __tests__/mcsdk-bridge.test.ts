@@ -378,13 +378,13 @@ describe('McSdk calls — audio codec', () => {
 });
 
 describe('McSdk.onAudioInfoUpdated', () => {
-    it('delivers the negotiated format and flow', () => {
+    it('delivers the negotiated format', () => {
         const sdk = new McSdk();
         const handler = jest.fn();
         sdk.onAudioInfoUpdated(handler);
         const e = {
             callId: 'call-1', encoding: 'AMR-WB', clockRate: 16000,
-            fmtp: 'octet-align=1;crc=0', flow: 'FLOWING', path: 'UNICAST', encrypted: false,
+            fmtp: 'octet-align=1;crc=0', path: 'UNICAST', encrypted: false,
         };
         emitNativeEvent('McSdkAudioInfoUpdated', e);
         expect(handler).toHaveBeenCalledWith(e);

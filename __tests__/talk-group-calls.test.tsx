@@ -15,6 +15,9 @@ const updated: Handler<any>[] = [];
 const terminated: Handler<any>[] = [];
 const floor: Handler<any>[] = [];
 const sdkError: Handler<any>[] = [];
+const groupsHandlers: Handler<any>[] = [];
+const reception: Handler<any>[] = [];
+const affiliationHandlers: Handler<any>[] = [];
 
 const sub = (list: Handler<any>[]) => (h: Handler<any>) => {
   list.push(h);
@@ -24,13 +27,16 @@ const sub = (list: Handler<any>[]) => (h: Handler<any>) => {
 const mockSdk = {
   affiliate: jest.fn(),
   deaffiliate: jest.fn(),
-  onGroupsUpdated: () => ({ remove: () => {} }),
-  onAffiliationsUpdated: () => ({ remove: () => {} }),
+  onGroupsUpdated: sub(groupsHandlers),
+  onAffiliationsUpdated: sub(affiliationHandlers),
   onIdentityUpdated: () => ({ remove: () => {} }),
   onIncomingCall: sub(incoming),
   onCallUpdated: sub(updated),
   onCallTerminated: sub(terminated),
   onFloorUpdated: sub(floor),
+  onTransmissionUpdated: sub([]),
+  onReceptionUpdated: sub(reception),
+  receiveMedia: jest.fn(),
   onSdkError: sub(sdkError),
   startGroupCall: jest.fn(),
   terminateCall: jest.fn(),
@@ -44,6 +50,7 @@ jest.mock('../src/contexts/SdkContext', () => ({
 
 import {
   GROUP_CALL_START_TIMEOUT_MS,
+  RECEIVE_ENDED_NOTICE_MS,
   TalkContextProvider,
   useTalkContext,
 } from '../src/contexts/TalkContext';
@@ -79,6 +86,7 @@ const floorEvent = (over: Partial<any> = {}) => ({
 beforeEach(() => {
   incoming.length = 0; updated.length = 0; terminated.length = 0; floor.length = 0;
   sdkError.length = 0;
+  groupsHandlers.length = 0; affiliationHandlers.length = 0; reception.length = 0;
   jest.clearAllMocks();
   render(<TalkContextProvider><Probe /></TalkContextProvider>);
 });
@@ -167,6 +175,108 @@ describe('TalkContext — SDK group calls', () => {
     fire(updated, groupCall({ state: 'ACTIVE' }));
     fire(updated, groupCall({ callId: 'grp-9', groupId: 'sip:group.other@x', state: 'ACTIVE' }));
     expect(Object.keys(ctx.sdkGroupCalls).sort()).toEqual([G2, 'sip:group.other@x'].sort());
+  });
+});
+
+// The SDK reports who started an incoming group call where the group should be.
+describe('TalkContext — an incoming call that names no group of ours', () => {
+  const G3 = 'sip:group.other@ims.mnc001.mcc001.3gppnetwork.org';
+  const CALLER = 'sip:mcptt.mcuser-111@ims.mnc001.mcc001.3gppnetwork.org';
+  const group = (groupId: string) => ({ groupId, name: groupId, isPtt: true, isVideo: true, isData: false });
+
+  const withGroups = (...ids: string[]) => {
+    const groups = ids.map(group);
+    act(() => { groupsHandlers.forEach(h => h({ groups })); });
+    act(() => { affiliationHandlers.forEach(h => h({ groups })); });
+  };
+
+  it('goes under the group on screen', () => {
+    withGroups(G2, G3);
+    act(() => ctx.setFocusedGroup(G3));
+    fire(incoming, groupCall({ groupId: CALLER }));
+    expect(ctx.sdkGroupCalls[G3].sdkCallId).toBe('grp-1');
+    expect(ctx.sdkGroupCalls[CALLER]).toBeUndefined();
+  });
+
+  it('goes under the first affiliated group before Talk has been opened', () => {
+    withGroups(G2, G3);
+    fire(incoming, groupCall({ groupId: CALLER }));
+    expect(ctx.sdkGroupCalls[G2].sdkCallId).toBe('grp-1');
+  });
+
+  it('stays under its group when the screen moves on', () => {
+    withGroups(G2, G3);
+    act(() => ctx.setFocusedGroup(G2));
+    fire(incoming, groupCall({ groupId: CALLER }));
+    act(() => ctx.setFocusedGroup(G3));
+    fire(updated, groupCall({ groupId: CALLER, state: 'ACTIVE' }));
+
+    expect(ctx.sdkGroupCalls[G2].state).toBe('active');
+    expect(ctx.sdkGroupCalls[G3]).toBeUndefined();
+  });
+
+  it('does not take over a group that already has a call', () => {
+    withGroups(G2, G3);
+    act(() => ctx.setFocusedGroup(G2));
+    fire(updated, groupCall({ callId: 'mine', state: 'ACTIVE', outgoing: true }));
+    fire(incoming, groupCall({ groupId: CALLER }));
+
+    expect(ctx.sdkGroupCalls[G2].sdkCallId).toBe('mine');
+    expect(ctx.sdkGroupCalls[G3].sdkCallId).toBe('grp-1');
+  });
+
+  it('leaves a call that names one of our groups where it says', () => {
+    withGroups(G2, G3);
+    act(() => ctx.setFocusedGroup(G3));
+    fire(incoming, groupCall());
+    expect(ctx.sdkGroupCalls[G2].sdkCallId).toBe('grp-1');
+  });
+
+  it('leaves the MCVideo call beside the group\'s MCPTT one out of this', () => {
+    withGroups(G2);
+    fire(updated, groupCall({ state: 'ACTIVE' }));
+    fire(incoming, groupCall({ callId: 'vid-1', groupId: CALLER, isVideo: true }));
+    expect(ctx.sdkGroupCalls[G2].sdkCallId).toBe('grp-1');
+  });
+});
+
+describe('TalkContext — the receive view when the transmission ends', () => {
+  const videoCall = () => groupCall({ callId: 'vid-1', state: 'ACTIVE', isVideo: true });
+  const ending = { callId: 'vid-1', transmitterId: 'alice', status: 'TRANSMISSION_ENDED', automatic: false };
+
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  const watching = () => {
+    act(() => ctx.setFocusedGroup(G2));
+    fire(updated, videoCall());
+    act(() => ctx.setIsWatchingVideo(true));
+  };
+
+  it('goes back to Talk a moment after the server says it ended', () => {
+    watching();
+    fire(reception, ending);
+    expect(ctx.videoTransmissionEnded).toBe(true);
+    expect(ctx.isWatchingVideo).toBe(true);
+
+    act(() => { jest.advanceTimersByTime(RECEIVE_ENDED_NOTICE_MS); });
+    expect(ctx.isWatchingVideo).toBe(false);
+    expect(ctx.videoTransmissionEnded).toBe(false);
+  });
+
+  it('stays if somebody else starts before it closes', () => {
+    watching();
+    fire(reception, ending);
+    fire(reception, { ...ending, transmitterId: 'bob', status: 'AVAILABLE' });
+
+    act(() => { jest.advanceTimersByTime(RECEIVE_ENDED_NOTICE_MS * 2); });
+    expect(ctx.isWatchingVideo).toBe(true);
+  });
+
+  it('stays while nothing has ended', () => {
+    watching();
+    act(() => { jest.advanceTimersByTime(RECEIVE_ENDED_NOTICE_MS * 2); });
+    expect(ctx.isWatchingVideo).toBe(true);
   });
 });
 

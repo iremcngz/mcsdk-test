@@ -21,6 +21,7 @@ jest.mock('react-native-sound-level', () => ({
 
 jest.mock('../src/core/permissions', () => ({
   ensureMicPermission: jest.fn(async () => 'granted'),
+  ensureCameraPermission: jest.fn(async () => 'granted'),
 }));
 
 // A group call's audio is TalkContext's (talk-group-audio.test). The level
@@ -189,6 +190,9 @@ const mockSdk = {
   onCallUpdated:    sub(callListeners.updated),
   onCallTerminated: sub(callListeners.terminated),
   onFloorUpdated:   sub(callListeners.floor),
+  startVideoGroupCall: jest.fn(),
+  onTransmissionUpdated: sub(new Set()),
+  onReceptionUpdated: sub(new Set()),
   onSdkError:       sub(callListeners.error),
 };
 
@@ -349,6 +353,22 @@ describe('TalkScreen — visual state and actions', () => {
     // TalkScreen (and its push button) unmounts.
     fireEvent.press(screen.getByTestId('talk-mode-transmit'));
     expect(screen.queryByTestId('talk-push-button')).toBeNull();
+    // Nothing goes out until the record button on that screen: see group-video-send.test.
+    expect(screen.getByTestId('talk-broadcast-record')).toBeTruthy();
+    expect(mockSdk.startVideoGroupCall).not.toHaveBeenCalled();
+  });
+
+  it('opens the receive screen when receive is pressed, and closes it again', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+
+    fireEvent.press(screen.getByTestId('talk-mode-receive'));
+    expect(screen.getByTestId('talk-receive-screen')).toBeTruthy();
+    expect(screen.queryByTestId('talk-push-button')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('talk-receive-stop'));
+    expect(screen.queryByTestId('talk-receive-screen')).toBeNull();
+    expect(screen.getByTestId('talk-push-button')).toBeTruthy();
   });
 
   it('shows group avatar blue when call active and idle', () => {

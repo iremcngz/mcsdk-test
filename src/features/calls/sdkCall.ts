@@ -24,6 +24,34 @@ export function isGroupCall(e: CallInfoEvent): boolean {
   return e.type === 'GROUP';
 }
 
+/** What is known about the user's groups, to place an incoming group call by. */
+export interface GroupHints {
+  /** Every group the user has. Empty until the SDK has reported them. */
+  known: ReadonlySet<string>;
+  /** Where a call that names none of them may go, best first. */
+  candidates: ReadonlyArray<string | null>;
+}
+
+/**
+ * The group a group call belongs to.
+ *
+ * TEMPORARY, until the SDK reports the group. On an incoming group call its groupId
+ * is who started it (`sip:mcptt.<user>@…`): CallMachine::OnInviteReceived stores the
+ * calling user there. Taken as it is, the call shows under no group, and the screen
+ * offers to start a call the server then refuses as busy.
+ *
+ * So a call that names no group of ours goes to the first free candidate. With one
+ * group that is always right; with several, a call can show under the wrong one.
+ */
+export function incomingCallGroup(
+  e: CallInfoEvent,
+  hints: GroupHints,
+  isTaken: (groupId: string) => boolean,
+): string {
+  if (e.outgoing || hints.known.size === 0 || hints.known.has(e.groupId)) return e.groupId;
+  return hints.candidates.find((g): g is string => !!g && !isTaken(g)) ?? e.groupId;
+}
+
 // ── SDK → UI mapping ──────────────────────────────────────────────────────────
 
 /**

@@ -64,6 +64,20 @@ export function makeCommonStyles(c: ThemePalette) {
     },
     cardTitle: { fontSize: 13, fontWeight: '600', color: c.accent, marginBottom: 8 },
 
+    // A collapsible card's header row: the title on the left, a chevron plus a
+    // Show/Hide word on the right. `cardHeaderTitle` drops cardTitle's bottom
+    // margin so a collapsed card is only as tall as its header.
+    cardHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    cardHeaderTitle:  { marginBottom: 0 },
+    cardHeaderToggle: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    cardHeaderHint:   { fontSize: 11, color: c.textMuted, fontWeight: '600' },
+    cardHeaderChevron:{ fontSize: 11, color: c.textMuted },
+    cardBody:         { marginTop: 8 },
+
     // ── Switch row ───────────────────────────────────────────────────────────
     switchRow: {
       flexDirection: 'row',
@@ -129,6 +143,9 @@ export function makeCommonStyles(c: ThemePalette) {
     btnDestroy:  { backgroundColor: c.error },
     btnSetParams:{ backgroundColor: c.primary },
     btnInit:     { backgroundColor: c.warn },
+    // The one-press bring-up: accent rather than a step colour, since it is the
+    // shortcut for all three steps and not a fourth one.
+    btnStartAll: { backgroundColor: c.accent },
     btnDisabled: { opacity: 0.4 },
 
     // ── Log console ──────────────────────────────────────────────────────────
@@ -155,6 +172,17 @@ export function makeCommonStyles(c: ThemePalette) {
       marginBottom: 2,
     },
     logTime:  { color: c.textMuted },
+    // Home's row pointing at the console's new home under Tools.
+    logMovedRow: {
+      backgroundColor: c.surface,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      marginTop: 4,
+    },
+    logMovedText: { color: c.accent, fontSize: 14, fontWeight: '700' },
     logError: { color: c.error },
     logWarn:  { color: c.warn },
     logSdk:   { color: c.sdkLog },
@@ -183,6 +211,9 @@ export function makeCommonStyles(c: ThemePalette) {
 
     // ── Segment controls (Settings) ──────────────────────────────────────────
     segRow:        { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 6 },
+    /** A seg that splits the row evenly with its siblings, rather than sizing
+     *  to its label — Home's log filter, where two tabs share the width. */
+    segFill:       { flex: 1, alignItems: 'center', marginTop: 0 },
     seg:           { borderWidth: 1, borderColor: c.border, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
     segActive:     { backgroundColor: c.accent, borderColor: c.accent },
     segText:       { color: c.textMuted, fontSize: 13 },

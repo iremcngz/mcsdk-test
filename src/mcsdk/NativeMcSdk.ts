@@ -43,6 +43,9 @@ export interface Spec extends TurboModule {
     // audioCodec: an McSdkAudioCodec name, or '' for the SDK's default.
     startPrivateCall(mcId: string, autoCommence: boolean, fullDuplex: boolean, audioCodec: string): void;
     startGroupCall(groupId: string, audioCodec: string): void;
+    startVideoGroupCall(groupId: string): void;
+    // An MCVideo private call (TS 24.281 §10.2): video only, no transmission control.
+    startVideoPrivateCall(mcId: string, autoCommence: boolean): void;
     answerCall(callId: string, audioCodec: string): void;
     rejectCall(callId: string): void;
     terminateCall(callId: string): void;
@@ -61,6 +64,11 @@ export interface Spec extends TurboModule {
     // Floor control
     requestFloor(callId: string): void;
     releaseFloor(callId: string): void;
+
+    // Transmission control (MCVideo)
+    requestTransmission(callId: string): void;
+    endTransmission(callId: string): void;
+    receiveMedia(callId: string, transmitterId: string): void;
 
     // Identity and registration
     setIdentity(mcId: string, password: string, clientId: string): void;

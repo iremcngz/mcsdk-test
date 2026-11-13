@@ -9,12 +9,23 @@
  */
 
 import { NativeModules, Platform } from 'react-native';
+import { VideoTuningSettings, type VideoTuning } from './settings';
 
 // Read defensively, as in mediaSession.ts: absent when the native module has not
 // been rebuilt into the app, and under Jest.
 const Native = NativeModules?.McSdkVideo;
 
 const isSupported = Platform?.OS === 'android' && Native != null;
+
+/**
+ * Hands the settings screen's video choices to the native side. Called before every
+ * start, so a camera always starts with what is saved now, and by the settings screen
+ * on each change, so freezeOnLoss reaches a running receiver at once.
+ */
+function applyTuning(t: VideoTuning = VideoTuningSettings.load()): void {
+  if (!isSupported) return;
+  Native.setTuning(t.bitrateKbps, t.frameRate, t.keyFrameIntervalSeconds, t.freezeOnLoss);
+}
 
 /** The sender's counters. They keep the last run's values after it stops. */
 export interface VideoSendStats {
@@ -46,6 +57,11 @@ export interface VideoReceiveStats {
   height: number;
   packetsReceived: number;
   packetsLost: number;
+  /**
+   * Frames the sender captured that never arrived, told from gaps in capture time.
+   * The SDK's frames come with no packets to count, so this is their loss.
+   */
+  framesMissed: number;
   /** Frames put back together whole. */
   framesReceived: number;
   /** Frames dropped for missing a packet. */
@@ -70,13 +86,57 @@ export const VideoSession = {
   /** False on iOS and wherever the native module is missing. */
   isSupported,
 
+  applyTuning,
+
   /**
    * Starts sending the camera to a peer as RTP over UDP. CAMERA must already be
    * granted (ensureCameraPermission). Rejects with the reason on failure.
    */
   async startSend(host: string, port: number): Promise<void> {
     if (!isSupported) return;
+    applyTuning();
     return Native.startSend(host, port);
+  },
+
+  /**
+   * Starts the camera for a call. Its picture appears in a mounted LocalVideoView
+   * and nothing is sent until setCallTarget. CAMERA must already be granted. Resolves
+   * false where there is no pipeline (iOS, tests); rejects with the reason on failure.
+   */
+  async startCallCamera(): Promise<boolean> {
+    if (!isSupported) return false;
+    applyTuning();
+    await Native.startCallCamera();
+    return true;
+  },
+
+  /** The call to send the camera to from now on, or null to stop sending. */
+  setCallTarget(callId: string | null): void {
+    if (!isSupported) return;
+    Native.setCallTarget(callId ?? '');
+  },
+
+  async stopCallCamera(): Promise<void> {
+    if (!isSupported) return;
+    return Native.stopCallCamera();
+  },
+
+  /**
+   * Starts showing a call's received video in a mounted RemoteVideoView, from the
+   * call setCallReceiveSource names; stopReceive ends it. Resolves false where there
+   * is no pipeline (iOS, tests); rejects with the reason on failure.
+   */
+  async startCallReceive(): Promise<boolean> {
+    if (!isSupported) return false;
+    applyTuning();
+    await Native.startCallReceive();
+    return true;
+  },
+
+  /** The call to show from now on, or null for none. */
+  setCallReceiveSource(callId: string | null): void {
+    if (!isSupported) return;
+    Native.setCallReceiveSource(callId ?? '');
   },
 
   async stopSend(): Promise<void> {
@@ -90,6 +150,7 @@ export const VideoSession = {
    */
   async startReceive(port: number): Promise<void> {
     if (!isSupported) return;
+    applyTuning();
     return Native.startReceive(port);
   },
 

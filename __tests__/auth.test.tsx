@@ -239,23 +239,35 @@ describe('LoginScreen component', () => {
     expect(screen.queryByText('Invalid username or password')).toBeNull();
   });
 
-  it('does NOT call login() when both fields are empty — login() still called with empty strings → returns false', async () => {
-    // login() is called with empty strings; AppContext returns false for empty inputs.
+  it('submits an empty username as-is — AppContext returns false for it', async () => {
+    // The password field starts prefilled with the test server's password, so
+    // an untouched form submits that with whatever username is there.
     mockLogin.mockResolvedValue(false);
     render(<LoginScreen />);
     await act(async () => { fireEvent.press(screen.getByText('Login')); });
-    expect(mockLogin).toHaveBeenCalledWith('', '');
+    expect(mockLogin).toHaveBeenCalledWith('', '12345678');
   });
 
-  // Coming back takes only the password.
+  it('starts with the test server password filled in, and can be typed over', async () => {
+    mockLogin.mockResolvedValue(true);
+    render(<LoginScreen />);
+    expect(screen.getByPlaceholderText('Password').props.value).toBe('12345678');
+
+    fireEvent.changeText(screen.getByPlaceholderText('Username'), 'mcuser-222');
+    fireEvent.changeText(screen.getByPlaceholderText('Password'), 'other-pass');
+    await act(async () => { fireEvent.press(screen.getByText('Login')); });
+    expect(mockLogin).toHaveBeenCalledWith('mcuser-222', 'other-pass');
+  });
+
+  // Coming back takes no typing at all: the last username and the test
+  // server's password are both already there.
   it('starts with the last username that logged in on this device', async () => {
     const last = jest.spyOn(AuthSettings, 'getLastUsername').mockReturnValue('mcuser-111');
     mockLogin.mockResolvedValue(true);
     render(<LoginScreen />);
     expect(screen.getByPlaceholderText('Username').props.value).toBe('mcuser-111');
-    expect(screen.getByPlaceholderText('Password').props.value).toBe('');
+    expect(screen.getByPlaceholderText('Password').props.value).toBe('12345678');
 
-    fireEvent.changeText(screen.getByPlaceholderText('Password'), '12345678');
     await act(async () => { fireEvent.press(screen.getByText('Login')); });
     expect(mockLogin).toHaveBeenCalledWith('mcuser-111', '12345678');
     last.mockRestore();

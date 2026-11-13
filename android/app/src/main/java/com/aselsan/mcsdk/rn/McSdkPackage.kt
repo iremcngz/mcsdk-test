@@ -6,6 +6,7 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.uimanager.ViewManager
 import com.aselsan.mcsdk.rn.media.MediaBridgeModule
 import com.aselsan.mcsdk.rn.media.VideoBridgeModule
+import com.aselsan.mcsdk.rn.media.video.view.LocalVideoViewManager
 import com.aselsan.mcsdk.rn.media.video.view.RemoteVideoViewManager
 
 class McSdkPackage : ReactPackage {
@@ -13,5 +14,5 @@ class McSdkPackage : ReactPackage {
         listOf(McSdkModule(context), MediaBridgeModule(context), VideoBridgeModule(context))
 
     override fun createViewManagers(context: ReactApplicationContext): List<ViewManager<*, *>> =
-        listOf(RemoteVideoViewManager())
+        listOf(RemoteVideoViewManager(), LocalVideoViewManager())
 }

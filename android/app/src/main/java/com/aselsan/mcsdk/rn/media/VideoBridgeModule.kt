@@ -7,6 +7,7 @@ import android.util.Log
 import android.view.WindowManager
 import com.aselsan.mcsdk.rn.media.video.VideoPipeline
 import com.aselsan.mcsdk.rn.media.video.VideoReceiver
+import com.aselsan.mcsdk.rn.media.video.VideoTuning
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -59,6 +60,78 @@ class VideoBridgeModule(context: ReactApplicationContext) : ReactContextBaseJava
             promise.reject("video_send", e)
         }
         keepAwake()
+    }
+
+    /**
+     * Starts the camera for a call. Its picture appears in any mounted
+     * McSdkLocalVideoView; nothing is sent until [setCallTarget]. Needs CAMERA granted.
+     */
+    @ReactMethod
+    fun startCallCamera(promise: Promise) {
+        try {
+            if (sender.startCall()) {
+                promise.resolve(null)
+            } else {
+                promise.reject("video_send", sender.stats().error ?: "could not start the camera")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startCallCamera failed: ${e.message}", e)
+            promise.reject("video_send", e)
+        }
+        keepAwake()
+    }
+
+    /**
+     * The settings screen's video choices (VideoTuning). Bitrate, frame rate and key
+     * frame interval apply from the next camera start; freezeOnLoss at once.
+     */
+    @ReactMethod
+    fun setTuning(bitrateKbps: Double, frameRate: Double, keyFrameIntervalSeconds: Double, freezeOnLoss: Boolean) {
+        VideoTuning.set(bitrateKbps.toInt(), frameRate.toInt(), keyFrameIntervalSeconds.toInt(), freezeOnLoss)
+        Log.d(TAG, "tuning: ${VideoTuning.config()} freezeOnLoss=$freezeOnLoss")
+    }
+
+    /** The call to send the camera to from now on. Empty stops sending, the camera staying on. */
+    @ReactMethod
+    fun setCallTarget(callId: String) {
+        sender.setCallTarget(callId.ifEmpty { null })
+    }
+
+    @ReactMethod
+    fun stopCallCamera(promise: Promise) {
+        try {
+            sender.stopCall()
+            promise.resolve(null)
+        } catch (e: Exception) {
+            Log.e(TAG, "stopCallCamera failed: ${e.message}", e)
+            promise.reject("video_send", e)
+        }
+        keepAwake()
+    }
+
+    /**
+     * Starts showing a call's received video in any mounted McSdkVideoView, from the
+     * call [setCallReceiveSource] names.
+     */
+    @ReactMethod
+    fun startCallReceive(promise: Promise) {
+        try {
+            if (receiver.startCall()) {
+                promise.resolve(null)
+            } else {
+                promise.reject("video_receive", receiver.stats().error ?: "could not start receiving")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startCallReceive failed: ${e.message}", e)
+            promise.reject("video_receive", e)
+        }
+        keepAwake()
+    }
+
+    /** The call to show from now on. Empty for none. */
+    @ReactMethod
+    fun setCallReceiveSource(callId: String) {
+        receiver.setCallSource(callId.ifEmpty { null })
     }
 
     /** Starts listening on [port]. The picture appears in any mounted McSdkVideoView. */
@@ -115,6 +188,7 @@ class VideoBridgeModule(context: ReactApplicationContext) : ReactContextBaseJava
                 putInt("height", r.height)
                 putInt("packetsReceived", r.packetsReceived)
                 putInt("packetsLost", r.packetsLost)
+                putInt("framesMissed", r.framesMissed)
                 putInt("framesReceived", r.framesReceived)
                 putInt("framesDiscarded", r.framesDiscarded)
                 putInt("framesDecoded", r.framesDecoded)
@@ -176,7 +250,7 @@ class VideoBridgeModule(context: ReactApplicationContext) : ReactContextBaseJava
 
     /** A JS reload must not leave the camera locked by something nobody can stop. */
     override fun invalidate() {
-        sender.stop()
+        sender.stopCall()
         receiver.stop()
         releaseWifiLock()
         super.invalidate()

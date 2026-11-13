@@ -1,33 +1,38 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 import { useAppContext } from '../../contexts/AppContext';
+import { LocalVideoView } from '../video/LocalVideoView';
+import type { VideoSendNotice } from './useGroupVideoSend';
 
 interface BroadcastScreenProps {
   group: string;
+  /** The user has pressed the record button; the server may not have allowed it yet. */
+  requested: boolean;
+  /** Frames are going out: this, not the press, is what REC and its timer show. */
+  isTransmitting: boolean;
+  notice: VideoSendNotice | null;
+  onToggleTransmit: () => void;
   onStop: () => void;
 }
 
-export function BroadcastScreen({ group, onStop }: BroadcastScreenProps) {
-  const { c } = useAppContext();
+export function BroadcastScreen({ group, requested, isTransmitting, notice, onToggleTransmit, onStop }: BroadcastScreenProps) {
+  const { c, tr } = useAppContext();
   const insets = useSafeAreaInsets();
 
-  const [isTransmitting, setIsTransmitting] = useState(false);
+  const noticeText = notice === 'TIME_UP' ? tr.talkVideoTimeUp
+    : notice === 'FAILED' ? tr.talkVideoFailed
+    : notice === 'ENDED' ? tr.talkVideoEnded
+    : null;
+
   const [isPttPressed, setIsPttPressed] = useState(false);
-  const [isFrontCamera, setIsFrontCamera] = useState(false);
+  // The video sender has the back camera; it cannot switch yet, so this changes nothing.
+  const [, setIsFrontCamera] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [pttElapsed, setPttElapsed] = useState(0);
   const [isSomeoneElseTalking, setIsSomeoneElseTalking] = useState(false); // gerçek uygulamada socket/context'ten gelecek
   const pttScale = useRef(new Animated.Value(1)).current;
   const recPulse = useRef(new Animated.Value(1)).current;
-
-  const device = useCameraDevice(isFrontCamera ? 'front' : 'back');
-  const { hasPermission, requestPermission } = useCameraPermission();
-
-  useEffect(() => {
-    if (!hasPermission) requestPermission();
-  }, [hasPermission, requestPermission]);
 
   // Timer only runs while transmitting; resets when recording starts
   useEffect(() => {
@@ -72,17 +77,14 @@ export function BroadcastScreen({ group, onStop }: BroadcastScreenProps) {
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  const handleToggleTransmit = () => {
-    setIsTransmitting(prev => !prev);
-  };
-
   const s = StyleSheet.create({
     root: { flex: 1, backgroundColor: '#000' },
     camera: {
       ...StyleSheet.absoluteFill,
     },
     topBar: {
-      position: 'absolute', top: insets.top - 35, left: 16, right: 16,
+      // Never above the screen: with no inset that would take the ✕ out of reach.
+      position: 'absolute', top: Math.max(insets.top - 35, 12), left: 16, right: 16,
       flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     },
     recBadge: {
@@ -102,6 +104,8 @@ export function BroadcastScreen({ group, onStop }: BroadcastScreenProps) {
       fontVariant: ['tabular-nums'] as any,
     },
     groupLabel: {
+      // A group's URI is long: it gives way, or it pushes the ✕ off the screen.
+      flexShrink: 1, marginHorizontal: 8,
       color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: '600',
       backgroundColor: 'rgba(0,0,0,0.45)',
       paddingHorizontal: 14, paddingVertical: 4, borderRadius: 12,
@@ -155,19 +159,18 @@ export function BroadcastScreen({ group, onStop }: BroadcastScreenProps) {
     stopIcon: {
       color: 'rgba(255,255,255,0.8)', fontSize: 15, fontWeight: '700',
     },
+    notice: {
+      position: 'absolute', top: '45%', alignSelf: 'center',
+      color: c.textPrimary, fontSize: 15, fontWeight: '600',
+      backgroundColor: c.surface,
+      paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, overflow: 'hidden',
+    },
   } as Record<string, any>);
 
   return (
     <View style={s.root}>
-      {device && (
-        <Camera
-          style={StyleSheet.absoluteFill}
-          device={device}
-          isActive={true}
-          enableNativeZoomGesture
-          enableNativeTapToFocusGesture
-        />
-      )}
+      {/* The picture being sent: useGroupVideoSend runs the camera while this view is open. */}
+      <LocalVideoView style={StyleSheet.absoluteFill} />
 
       <View style={s.topBar}>
         <View style={s.recBadge}>
@@ -175,18 +178,21 @@ export function BroadcastScreen({ group, onStop }: BroadcastScreenProps) {
           <Text style={s.recText}>{isTransmitting ? 'REC' : 'STANDBY'}</Text>
           {isTransmitting && <Text style={s.timer}>{formatTime(elapsed)}</Text>}
         </View>
-        <Text style={s.groupLabel}>{group}</Text>
+        <Text style={s.groupLabel} numberOfLines={1}>{group}</Text>
         <TouchableOpacity style={s.stopButton} onPress={onStop} activeOpacity={0.7}>
           <Text style={s.stopIcon}>✕</Text>
         </TouchableOpacity>
       </View>
 
+      {noticeText && <Text style={s.notice} testID="talk-broadcast-notice">{noticeText}</Text>}
+
       <View style={s.bottomBar}>
         <TouchableOpacity
-          style={[s.sideButton, isTransmitting && s.sideButtonActive]}
-          onPress={handleToggleTransmit}
-          activeOpacity={0.7}>
-          <Text style={s.sideButtonIcon}>{isTransmitting ? '⏹️' : '🔴'}</Text>
+          style={[s.sideButton, requested && s.sideButtonActive]}
+          onPress={onToggleTransmit}
+          activeOpacity={0.7}
+          testID="talk-broadcast-record">
+          <Text style={s.sideButtonIcon}>{requested ? '⏹️' : '🔴'}</Text>
         </TouchableOpacity>
 
         <View style={s.pttWrapper}>

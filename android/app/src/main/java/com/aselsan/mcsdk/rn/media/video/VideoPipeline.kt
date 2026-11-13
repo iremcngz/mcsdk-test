@@ -2,15 +2,21 @@ package com.aselsan.mcsdk.rn.media.video
 
 import android.content.Context
 import android.util.Log
+import android.view.Surface
+import android.view.WindowManager
 import com.aselsan.mcsdk.rn.media.video.codec.H264FrameAssembler
+import com.aselsan.mcsdk.rn.media.video.codec.KeyFramePacer
 import com.aselsan.mcsdk.rn.media.video.codec.VideoEncoder
+import com.aselsan.mcsdk.rn.media.video.transport.SdkVideoFrameSink
 import com.aselsan.mcsdk.rn.media.video.transport.UdpVideoFrameSink
 import com.aselsan.mcsdk.rn.media.video.transport.VideoFrameSink
+import com.aselsan.mcsdk.rn.media.video.view.LocalVideoSurface
 
 /**
  * VideoPipeline — the uplink's parts, and the order they start and stop in:
  *
  *   camera → VideoRotator → encoder → H264FrameAssembler → VideoFrameSink
+ *                         → the preview's Surface, on a call
  *
  * Startup runs from the destination back to the camera, so nothing is produced
  * before there is somewhere for it to go. Teardown is the exact reverse and runs on
@@ -30,11 +36,14 @@ class VideoPipeline(context: Context) {
 
     private val capture = VideoCapture(context)
     private val orientation = DeviceOrientation(context)
+    private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
     private var rotator: VideoRotator? = null
     private var encoder: VideoEncoder? = null
     private var assembler: H264FrameAssembler? = null
+    private var pacer: KeyFramePacer? = null
     private var sink: VideoFrameSink? = null
+    private var callSink: SdkVideoFrameSink? = null
     private var active: VideoConfig? = null
 
     @Volatile
@@ -63,7 +72,7 @@ class VideoPipeline(context: Context) {
     fun stats(): Stats {
         val a = assembler
         val span = if (a != null && a.firstTimeUs >= 0) (a.lastTimeUs - a.firstTimeUs) / 1_000_000.0 else 0.0
-        val udp = sink as? UdpVideoFrameSink
+        val out = sink
         return Stats(
             running = encoder != null,
             width = active?.width ?: 0,
@@ -74,10 +83,10 @@ class VideoPipeline(context: Context) {
             keyFramesWithoutConfig = a?.keyFramesWithoutConfig ?: 0,
             seconds = span,
             profileLevelId = a?.profileLevelId,
-            packetsSent = udp?.packetsSent ?: 0,
-            sendErrors = udp?.sendErrors ?: 0,
-            target = udp?.target,
-            error = startError ?: capture.lastError ?: encoder?.lastError ?: udp?.lastError,
+            packetsSent = out?.packetsSent ?: 0,
+            sendErrors = out?.sendErrors ?: 0,
+            target = out?.target,
+            error = startError ?: capture.lastError ?: encoder?.lastError ?: out?.lastError,
         )
     }
 
@@ -89,7 +98,66 @@ class VideoPipeline(context: Context) {
     @Synchronized
     fun startUdp(host: String, port: Int): Boolean = start(UdpVideoFrameSink(host, port))
 
-    private fun start(newSink: VideoFrameSink, wanted: VideoConfig = VideoConfig()): Boolean {
+    /**
+     * Starts the camera for a call, showing its picture in the local view but sending
+     * nothing until [setCallTarget] names a call. The encoder runs from here on, so that
+     * sending can begin the moment permission comes.
+     *
+     * LocalVideoSurface is called outside this object's lock, here and in [stopCall],
+     * for the reason VideoReceiver gives: it calls back with its own lock held, so the
+     * order is always its lock, then this one.
+     *
+     * @return false on failure, with stats().error set
+     */
+    fun startCall(): Boolean {
+        if (!openCallSink()) return false
+        LocalVideoSurface.setListener { surface -> onPreviewSurface(surface) }
+        return true
+    }
+
+    @Synchronized
+    private fun openCallSink(): Boolean {
+        val newSink = SdkVideoFrameSink()
+        if (!start(newSink, transmitEnabled = false)) return false
+        callSink = newSink
+        return true
+    }
+
+    /** With LocalVideoSurface's lock held. The Surface is usable until this returns. */
+    @Synchronized
+    private fun onPreviewSurface(surface: Surface?) {
+        rotator?.setPreview(surface)
+    }
+
+    /** The call to send to from now on, or null to stop sending. The camera stays on. */
+    @Synchronized
+    fun setCallTarget(callId: String?) {
+        val s = callSink ?: return
+        s.callId = callId
+        setTransmitEnabled(callId != null)
+    }
+
+    /** Safe when not running. */
+    fun stopCall() {
+        LocalVideoSurface.setListener(null)
+        stop()
+    }
+
+    /** The display's rotation, as DeviceOrientation's angle for the same way up. */
+    @Suppress("DEPRECATION")
+    private fun displayAngle(): Int = when (windowManager.defaultDisplay.rotation) {
+        Surface.ROTATION_90 -> 270
+        Surface.ROTATION_180 -> 180
+        Surface.ROTATION_270 -> 90
+        else -> 0
+    }
+
+    private fun start(
+        newSink: VideoFrameSink,
+        // Read at each start: the settings screen may have changed it since the last.
+        wanted: VideoConfig = VideoTuning.config(),
+        transmitEnabled: Boolean = true,
+    ): Boolean {
         if (encoder != null) {
             startError = "already sending"
             return false
@@ -111,11 +179,25 @@ class VideoPipeline(context: Context) {
         val stalls = FrameGapMeter(STALL_MS) { gap, captured, key ->
             Log.d(TAG, "stall: no frame from the encoder for $gap ms, captured $captured ms apart, key=$key")
         }
+        // The encoder is built from the assembler, so the pacer reaches it through this.
+        var pacedEncoder: VideoEncoder? = null
+        val newPacer = KeyFramePacer(
+            intervalSeconds = config.keyFrameIntervalSeconds,
+            requestKeyFrame = { pacedEncoder?.requestKeyFrame() },
+            onFirstForced = { since ->
+                Log.d(TAG, "encoder made no key frame in $since ms " +
+                           "(interval ${config.keyFrameIntervalSeconds} s): asking for them")
+            },
+        )
         val newAssembler = H264FrameAssembler { data, len, timeUs, key ->
             stalls.onFrame(System.currentTimeMillis(), timeUs, key)
+            newPacer.onFrame(timeUs, key)
             newSink.onFrame(data, len, timeUs, key)
         }
+        newAssembler.transmitEnabled = transmitEnabled
         val newEncoder = VideoEncoder(config, newAssembler)
+        pacedEncoder = newEncoder
+        pacer = newPacer
         val newRotator = VideoRotator(
             cameraWidth = camera.width,
             cameraHeight = camera.height,
@@ -123,6 +205,7 @@ class VideoPipeline(context: Context) {
             outHeight = config.height,
             sensorOrientation = capture.sensorOrientation,
             deviceAngle = { orientation.angle },
+            displayAngle = ::displayAngle,
         )
 
         try {
@@ -186,7 +269,9 @@ class VideoPipeline(context: Context) {
         }
         encoder = null
         sink?.close()
+        callSink = null
         Log.d(TAG, "stopped: frames=${assembler?.framesDelivered} keys=${assembler?.keyFrames} " +
+                   "forcedKeys=${pacer?.forced ?: 0} " +
                    "bytes=${assembler?.bytesDelivered} profile=${assembler?.profileLevelId}")
     }
 }

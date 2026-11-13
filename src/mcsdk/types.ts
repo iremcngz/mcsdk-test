@@ -65,7 +65,20 @@ export type McSdkError =
     | 'AUDIO_UNKNOWN_CALL'
     /** A call was started or answered with no codec for the plane it carries. */
     | 'CALL_CODEC_INVALID'
-    | 'CALL_MEDIA_PORTS_UNAVAILABLE';
+    | 'CALL_MEDIA_PORTS_UNAVAILABLE'
+    // ── A call's video plane (SDK 4b29ee21), the audio family's mirror.
+    /** The call's video RTP socket could not be opened. */
+    | 'VIDEO_CHANNEL_FAILED'
+    /** The negotiated SDP names no usable video stream: no video. */
+    | 'VIDEO_SDP_INVALID'
+    /** A frame could not go out: no socket or peer, a network error, or not Annex B. */
+    | 'VIDEO_SEND_FAILED'
+    /** The offer carried no H.264 we can produce: the call goes ahead without video. */
+    | 'VIDEO_CODEC_UNSUPPORTED'
+    /** RTP from an address other than the peer the SDP named. */
+    | 'VIDEO_MESSAGE_UNEXPECTED_SOURCE'
+    | 'VIDEO_MESSAGE_MALFORMED'
+    | 'VIDEO_UNKNOWN_CALL';
 
 /**
  * The AMR-WB RTP framing a call's audio uses (RFC 4867 §8.3), named at call
@@ -79,8 +92,7 @@ export type McSdkAudioCodec =
     | 'AMR_WB_OCTET_ALIGNED_CRC';
 
 /**
- * Payload of McSdkAudioInfoUpdated: a call's audio stream — what SDP settled
- * on, and whether RTP is arriving.
+ * Payload of McSdkAudioInfoUpdated: a call's audio stream — what SDP settled on.
  */
 export interface AudioInfoUpdatedEvent {
     callId:    string;
@@ -90,10 +102,85 @@ export interface AudioInfoUpdatedEvent {
     clockRate: number;
     /** What follows a=fmtp:<pt>, e.g. "octet-align=1;crc=0". */
     fmtp:      string;
-    /** IDLE (nothing arriving — normal between talk bursts), FLOWING, SUSPENDED. */
+    path:      'UNICAST' | 'RELAYED' | 'MULTICAST' | '';
+    encrypted: boolean;
+}
+
+/**
+ * Payload of McSdkVideoUpdated: a call's video stream — what SDP settled on, and
+ * whether RTP is arriving, which is the one field that changes.
+ */
+export interface VideoUpdatedEvent {
+    callId:    string;
+    /** a=rtpmap encoding name, "H264". */
+    encoding:  string;
+    /** RTP clock rate, 90000. */
+    clockRate: number;
+    /** What follows a=fmtp:<pt>, e.g. "profile-level-id=42e01f;packetization-mode=1". */
+    fmtp:      string;
     flow:      'IDLE' | 'FLOWING' | 'STALLED' | 'SUSPENDED' | '';
     path:      'UNICAST' | 'RELAYED' | 'MULTICAST' | '';
     encrypted: boolean;
+}
+
+/** Where our own video transmission stands on an MCVideo call (TS 24.581 §6.2). */
+export type McSdkTransmissionStatus =
+    | 'UNKNOWN'
+    | 'IDLE'
+    | 'REQUESTED'
+    | 'QUEUED'
+    | 'GRANTED'
+    | 'ENDING'
+    | 'ENDED'
+    | 'REJECTED'
+    | 'REVOKED'
+    | 'ENDED_BY_SERVER'
+    | 'QUEUE_CANCELLED'
+    | 'REQUEST_TIMEOUT'
+    | 'QUEUE_TIMEOUT'
+    | 'END_TIMEOUT';
+
+/** Payload of McSdkTransmissionUpdated. */
+export interface TransmissionUpdatedEvent {
+    callId:          string;
+    status:          McSdkTransmissionStatus;
+    queuePosition:   number;
+    queuePriority:   number;
+    grantedDuration: number;
+    grantedPriority: number;
+    audioSsrc:       number;
+    videoSsrc:       number;
+    rejectReason:    string;
+    revokeReason:    string;
+    isEmergency:     boolean;
+    isImminentPeril: boolean;
+    isBroadcast:     boolean;
+    transmissionIndicator: number;
+}
+
+/** Payload of McSdkReceptionUpdated: one remote transmitter's stream, from our side. */
+export interface ReceptionUpdatedEvent {
+    callId:          string;
+    transmitterId:   string;
+    functionalAlias: string;
+    audioSsrc:       number;
+    videoSsrc:       number;
+    status:
+        | 'UNKNOWN'
+        | 'AVAILABLE'
+        | 'REQUESTED'
+        | 'RECEIVING'
+        | 'ENDING'
+        | 'ENDED'
+        | 'REJECTED'
+        | 'OVERRIDDEN'
+        | 'TRANSMISSION_ENDED'
+        | 'REQUEST_TIMEOUT'
+        | 'RELEASE_TIMEOUT';
+    /** The server sends it without being asked: receiveMedia is not needed. */
+    automatic:       boolean;
+    overridingId:    string;
+    rejectReason:    string;
 }
 
 /** Payload of McSdkSdkError. */
@@ -224,6 +311,16 @@ export interface RegistrationEvent {
     state: number | string;
     phase: number | string;
     progress: number;
+    /**
+     * The bridge replayed a registration that happened before this JS side
+     * existed, rather than the SDK reporting a change right now.
+     *
+     * Closing the app does not kill the process, so the SDK can still be
+     * registered while a fresh JS side comes up knowing nothing — and the SDK
+     * only reports registration when it *changes*. Android's bridge remembers
+     * the last state and replays it on create(); this flag says so, for the log.
+     */
+    replayed?: boolean;
 }
 
 /**

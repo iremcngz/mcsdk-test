@@ -158,6 +158,8 @@ const makeSdkInstance = () => ({
   onCallUpdated:          jest.fn().mockReturnValue({ remove: jest.fn() }),
   onCallTerminated:       jest.fn().mockReturnValue({ remove: jest.fn() }),
   onFloorUpdated:         jest.fn().mockReturnValue({ remove: jest.fn() }),
+  onTransmissionUpdated:  jest.fn().mockReturnValue({ remove: jest.fn() }),
+  onReceptionUpdated:     jest.fn().mockReturnValue({ remove: jest.fn() }),
 });
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -190,7 +192,18 @@ beforeEach(() => {
  * screen the instant the action that produced it returns. waitFor polls instead
  * of sleeping a fixed 250 ms, which keeps the suite fast.
  */
+/**
+ * Opens the Log Console. It used to be a 200px box in the middle of Home; it is
+ * a screen of its own under Tools now (Tools tab → the Log Console row), so
+ * anything asserting on a log line has to navigate there first.
+ */
+function openLogConsole() {
+  fireEvent.press(screen.getByText('Tools'));
+  fireEvent.press(screen.getByTestId('tool-logs'));
+}
+
 async function expectLog(pattern: RegExp) {
+  openLogConsole();
   await waitFor(() => expect(screen.getByText(pattern)).toBeTruthy());
 }
 
@@ -260,8 +273,9 @@ describe('Initial render', () => {
     expect(screen.getByText('Init')).toBeTruthy();
   });
 
-  it('shows the empty log placeholder', () => {
+  it('shows the empty log placeholder on the Log Console screen', () => {
     render(<App />);
+    openLogConsole();
     expect(screen.getByText('Logs will appear here…')).toBeTruthy();
   });
 
@@ -302,6 +316,33 @@ describe('handleCreate', () => {
     // App subscribes to SDK LOG events so they appear in the console
     const sdk = await renderAndCreate();
     expect(sdk.onLog).toHaveBeenCalledTimes(1);
+  });
+
+  // The SDK's own stream used to be written into the Log Console as well as
+  // the SDK Logs screen. That put every line in two places, and at the ~450
+  // events a second the default params produce it buried the app's own lines
+  // and the listener events underneath it. Each screen has one job now.
+  it('keeps the SDK stream out of the Log Console', async () => {
+    const sdk = await renderAndCreate();
+    const emitSdkLog = sdk.onLog.mock.calls[0][0];
+    await act(async () => {
+      emitSdkLog({ level: 2, log: 'PjsipModule::OnRxRequest cseq=1' });
+    });
+    openLogConsole();
+    await waitFor(() => expect(screen.getByText(/nativeCreate\(\) OK/)).toBeTruthy());
+    expect(screen.queryByText(/PjsipModule::OnRxRequest/)).toBeNull();
+  });
+
+  it('still shows the SDK stream on the SDK Logs screen', async () => {
+    const sdk = await renderAndCreate();
+    const emitSdkLog = sdk.onLog.mock.calls[0][0];
+    await act(async () => {
+      emitSdkLog({ level: 2, log: 'PjsipModule::OnRxRequest cseq=1' });
+    });
+    fireEvent.press(screen.getByText('Tools'));
+    fireEvent.press(screen.getByTestId('tool-sdklogs'));
+    await waitFor(() =>
+      expect(screen.getByText(/PjsipModule::OnRxRequest/)).toBeTruthy());
   });
 
   it('pressing Create a second time does NOT construct another instance', async () => {
@@ -427,6 +468,8 @@ describe('handleSetParams', () => {
 
   it('respects an updated HTTP port TextInput value', async () => {
     const sdk = await renderAndCreate();
+    // The parameter cards start collapsed, so the input is not mounted yet.
+    fireEvent.press(screen.getByTestId('card-http'));
     fireEvent.changeText(screen.getByDisplayValue('8008'), '9090');
     await act(async () => {
       fireEvent.press(screen.getByText('② Set Parameters'));
@@ -436,6 +479,7 @@ describe('handleSetParams', () => {
 
   it('respects an updated SIP UDP port TextInput value', async () => {
     const sdk = await renderAndCreate();
+    fireEvent.press(screen.getByTestId('card-sip'));
     // sipUdpPort and sipTcpPort both default to '5060'; getAllByDisplayValue
     // returns them in render order — sipUdpPort is the first occurrence.
     const [udpInput] = screen.getAllByDisplayValue('5060');
@@ -482,9 +526,7 @@ describe('handleInit', () => {
     await act(async () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));
     });
-    await waitFor(() => {
-      expect(screen.getByText(/init\(\) returned: true/)).toBeTruthy();
-    });
+    await expectLog(/init\(\) returned: true/);
   });
 
   it('does NOT show INITIALIZED badge when sdk.init resolves to false', async () => {
@@ -493,9 +535,9 @@ describe('handleInit', () => {
     await act(async () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));
     });
-    await waitFor(() => {
-      expect(screen.getByText(/init\(\) returned: false/)).toBeTruthy();
-    });
+    await expectLog(/init\(\) returned: false/);
+    // The badge lives on Home, which the log console navigated away from.
+    fireEvent.press(screen.getByText('Home'));
     expect(screen.queryAllByText('INITIALIZED')).toHaveLength(0);
   });
 
@@ -505,9 +547,8 @@ describe('handleInit', () => {
     await act(async () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));
     });
-    await waitFor(() => {
-      expect(screen.getByText(/init\(\) threw: pjsip assertion failed/)).toBeTruthy();
-    });
+    await expectLog(/init\(\) threw: pjsip assertion failed/);
+    fireEvent.press(screen.getByText('Home'));
     expect(screen.queryAllByText('INITIALIZED')).toHaveLength(0);
   });
 
@@ -603,11 +644,13 @@ describe('Log console', () => {
 
   it('shows the placeholder text when no logs exist', () => {
     render(<App />);
+    openLogConsole();
     expect(screen.getByText('Logs will appear here…')).toBeTruthy();
   });
 
   it('hides the placeholder once a log entry exists', async () => {
     await renderAndCreate();
+    openLogConsole();
     // waitFor, not a bare assertion: the placeholder goes away when the first
     // batch of log entries lands in state, which is up to a flush interval
     // after Create returns.
@@ -618,10 +661,188 @@ describe('Log console', () => {
 
   it('Clear button removes all log entries and restores placeholder', async () => {
     await renderAndCreate();
+    openLogConsole();
     await act(async () => {
-      fireEvent.press(screen.getByText('Clear'));
+      fireEvent.press(screen.getByTestId('log-console-clear'));
     });
     expect(screen.getByText('Logs will appear here…')).toBeTruthy();
+  });
+
+  it('Listener only switches to the listener-event view', async () => {
+    await renderAndCreate();
+    openLogConsole();
+    // Create logs to the app console, not through a listener callback, so it is
+    // in the All view and out of the Listener-only one.
+    await waitFor(() => expect(screen.getByText(/McSdk\(\) → nativeCreate\(\) OK/)).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('log-console-listener-only'));
+    });
+    expect(screen.queryByText(/McSdk\(\) → nativeCreate\(\) OK/)).toBeNull();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('log-console-all'));
+    });
+    expect(screen.getByText(/McSdk\(\) → nativeCreate\(\) OK/)).toBeTruthy();
+  });
+
+  it('is reached from the Tools menu', () => {
+    render(<App />);
+    fireEvent.press(screen.getByText('Tools'));
+    expect(screen.getByTestId('tool-logs')).toBeTruthy();
+  });
+
+  it('the SDK Logs screen is still its own entry beside it', () => {
+    render(<App />);
+    fireEvent.press(screen.getByText('Tools'));
+    expect(screen.getByTestId('tool-sdklogs')).toBeTruthy();
+  });
+
+  // The call simulator used to sit under the call history, on a tab whose
+  // subject is real calls — and none of its calls are real. It is a Tools
+  // screen now, and the Calls tab shows history alone.
+  it('the mock call panel opens from Tools, not the Calls tab', () => {
+    render(<App />);
+    fireEvent.press(screen.getByText('Calls'));
+    expect(screen.queryByText(/Mock Kontrol|Mock Control/)).toBeNull();
+    fireEvent.press(screen.getByText('Tools'));
+    fireEvent.press(screen.getByTestId('tool-mockcalls'));
+    expect(screen.getByTestId('mock-calls-panel')).toBeTruthy();
+  });
+
+  it('the mock panel still places a simulated call from its own screen', () => {
+    render(<App />);
+    fireEvent.press(screen.getByText('Tools'));
+    fireEvent.press(screen.getByTestId('tool-mockcalls'));
+    fireEvent.press(screen.getByText(/Incoming HD|Gelen HD/));
+    // A simulated incoming call takes over the Calls tab as a real one would.
+    expect(screen.queryByTestId('mock-calls-panel')).toBeNull();
+  });
+
+  it('is also reached from the link under Home\'s own console', () => {
+    render(<App />);
+    fireEvent.press(screen.getByTestId('home-log-console-link'));
+    expect(screen.getByTestId('log-console-listener-only')).toBeTruthy();
+  });
+});
+
+// =============================================================================
+// 6b. Home's own log console
+// =============================================================================
+
+describe("Home's log console", () => {
+  // scrollToEnd is a native method on the host component; in the test renderer
+  // it exists on the instance the ref points at, so spy on the prototype.
+  const scrollToEndSpy = jest.spyOn(
+    require('react-native').ScrollView.prototype,
+    'scrollToEnd',
+  ).mockImplementation(() => {});
+
+  beforeEach(() => scrollToEndSpy.mockClear());
+  afterAll(() => scrollToEndSpy.mockRestore());
+
+  /**
+   * WHAT: Home carries a small console again, under the registration bar.
+   * WHY:  It was moved out wholesale when the full screen was built, which left
+   *       Home with nothing to watch while registration ran. It is back as the
+   *       tail only — the full buffer stays on the Tools screen, since a mapped
+   *       ScrollView cannot hold 5000 mounted <Text> nodes.
+   */
+
+  it('renders a console on Home with its placeholder when empty', () => {
+    render(<App />);
+    // Still on Home, not the Tools screen.
+    expect(screen.getByText('SDK Lifecycle')).toBeTruthy();
+    expect(screen.getByTestId('home-log-clear')).toBeTruthy();
+    expect(screen.getByText(/Loglar burada görünecek|Logs will appear here/)).toBeTruthy();
+  });
+
+  it('shows what the app logged, without leaving Home', async () => {
+    // Create writes its own lines through SdkContext's addLog. They land in a
+    // ref and move into state on the 250 ms flush, so this has to wait for it.
+    await renderAndCreate();
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Loglar burada görünecek|Logs will appear here/),
+      ).toBeNull(),
+    );
+    // The lines showed up here — the Tools screen was never opened.
+    expect(screen.getByText('SDK Lifecycle')).toBeTruthy();
+  });
+
+  it('filters to the listener stream without leaving Home', async () => {
+    await renderAndCreate();
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Loglar burada görünecek|Logs will appear here/),
+      ).toBeNull(),
+    );
+
+    // The app's own create/init lines are in the mixed stream only, so they are
+    // what must disappear when the view narrows to the SDK callbacks.
+    const appLine = screen.queryByText(/nativeCreate\(\) OK/);
+    expect(appLine).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('home-log-listener-only'));
+    });
+    expect(screen.getByText('SDK Lifecycle')).toBeTruthy();
+    expect(screen.queryByText(/nativeCreate\(\) OK/)).toBeNull();
+
+    // And back.
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('home-log-all'));
+    });
+    expect(screen.queryByText(/nativeCreate\(\) OK/)).toBeTruthy();
+  });
+
+  it('stops following the tail once scrolled up, and resumes at the bottom', async () => {
+    await renderAndCreate();
+    const box = screen.getByTestId('home-log-scroll');
+
+    // Parked at the tail to begin with, so new entries are followed.
+    fireEvent(box, 'contentSizeChange', 0, 400);
+    expect(scrollToEndSpy).toHaveBeenCalled();
+
+    // Scrolled up: 100 + 200 is well short of the 1000pt content.
+    scrollToEndSpy.mockClear();
+    fireEvent.scroll(box, {
+      nativeEvent: {
+        contentOffset:      { x: 0, y: 100 },
+        contentSize:        { width: 0, height: 1000 },
+        layoutMeasurement:  { width: 0, height: 200 },
+      },
+    });
+    fireEvent(box, 'contentSizeChange', 0, 1100);
+    expect(scrollToEndSpy).not.toHaveBeenCalled();
+
+    // Back at the bottom: 800 + 200 reaches the end, so following resumes.
+    fireEvent.scroll(box, {
+      nativeEvent: {
+        contentOffset:      { x: 0, y: 800 },
+        contentSize:        { width: 0, height: 1000 },
+        layoutMeasurement:  { width: 0, height: 200 },
+      },
+    });
+    fireEvent(box, 'contentSizeChange', 0, 1200);
+    expect(scrollToEndSpy).toHaveBeenCalled();
+  });
+
+  it('clears the buffer from Home, and the full screen agrees', async () => {
+    await renderAndCreate();
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Loglar burada görünecek|Logs will appear here/),
+      ).toBeNull(),
+    );
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('home-log-clear'));
+    });
+    expect(screen.getByText(/Loglar burada görünecek|Logs will appear here/)).toBeTruthy();
+
+    // One buffer, two views: the Tools screen must be empty too. clearLogs also
+    // drops the pending queue, or the next flush would refill what was cleared.
+    fireEvent.press(screen.getByTestId('home-log-console-link'));
+    expect(screen.getByText(/Loglar burada görünecek|Logs will appear here/)).toBeTruthy();
   });
 });
 
@@ -645,6 +866,65 @@ describe('Tab navigation', () => {
     render(<App />);
     fireEvent.press(screen.getByText('Metrics'));
     expect(screen.getByText(/No metrics yet/)).toBeTruthy();
+  });
+
+  // ── The not-registered banner ────────────────────────────────────────────
+  // Registration runs for ~35 s after init() and can fail, so a user on
+  // another tab needs to know the server is not reachable yet. The banner says
+  // so without blocking navigation: Audio and Video touch no SDK and are what
+  // you test while unregistered, and Talk/Calls work offline through the
+  // simulate helpers.
+
+  it('shows the not-registered banner on a tab away from Home', () => {
+    render(<App />);
+    fireEvent.press(screen.getByText('Metrics'));
+    expect(screen.getByTestId('not-registered-banner')).toBeTruthy();
+  });
+
+  it('does not show the banner on Home, where the badge already says it', () => {
+    render(<App />);
+    expect(screen.queryByTestId('not-registered-banner')).toBeNull();
+  });
+
+  it('the banner returns to Home when pressed', () => {
+    render(<App />);
+    fireEvent.press(screen.getByText('Metrics'));
+    fireEvent.press(screen.getByTestId('not-registered-go-home'));
+    expect(screen.getByText('SDK Lifecycle')).toBeTruthy();
+  });
+
+  // The banner was 11pt, small enough to be read as chrome and missed. Its
+  // size is the whole point of the change, so it is guarded rather than left to
+  // a visual check.
+  it('sets the banner text large enough to read', () => {
+    render(<App />);
+    fireEvent.press(screen.getByText('Metrics'));
+    const text = screen.getByTestId('not-registered-banner-text');
+    const flat = ([] as any[]).concat(text.props.style).filter(Boolean);
+    const size = flat.reduce((n, st) => st?.fontSize ?? n, 0);
+    expect(size).toBeGreaterThanOrEqual(14);
+  });
+
+  it('the banner still allows reaching the other tabs', () => {
+    render(<App />);
+    // Navigation is never blocked — pressing a marked tab must still work.
+    fireEvent.press(screen.getByText('Contacts'));
+    expect(screen.getByTestId('not-registered-banner')).toBeTruthy();
+  });
+
+  it('the banner goes away once the SDK reports REGISTERED', async () => {
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    fireEvent.press(screen.getByText('Metrics'));
+    expect(screen.getByTestId('not-registered-banner')).toBeTruthy();
+
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => { registrationCb({ progress: 100, phase: 'DONE', state: 'REGISTERED' }); });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('not-registered-banner')).toBeNull());
   });
 
   it('pressing Home tab from Metrics returns to Home', () => {
@@ -766,6 +1046,120 @@ describe('MetricsScreen', () => {
     expect(screen.getByText(/Last fetched:/)).toBeTruthy();
   });
 
+  // ── Age line and auto refresh ──────────────────────────────────────────────
+  // A bare clock time does not say how stale the numbers are without doing the
+  // arithmetic, and reading a counter as it moves meant pressing Fetch over and
+  // over. The age line answers the first; the toggle answers the second, and
+  // leaves the manual path exactly as it was when it is off.
+
+  it('says how long ago the fetch was, next to the timestamp', async () => {
+    const sdk = await renderAndCreate();
+    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    fireEvent.press(screen.getByText('Metrics'));
+    await act(async () => {
+      fireEvent.press(screen.getByText('Fetch'));
+    });
+    expect(screen.getByTestId('metrics-age')).toBeTruthy();
+    expect(screen.getByText('just now')).toBeTruthy();
+  });
+
+  it('counts the age up in seconds while nothing is fetched', async () => {
+    jest.useFakeTimers();
+    try {
+      const sdk = await renderAndCreate();
+      sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+      fireEvent.press(screen.getByText('Metrics'));
+      await act(async () => {
+        fireEvent.press(screen.getByText('Fetch'));
+      });
+      await act(async () => { jest.advanceTimersByTime(12_000); });
+      expect(screen.getByText('12 s ago')).toBeTruthy();
+      // Past a minute it switches unit rather than counting to 90.
+      await act(async () => { jest.advanceTimersByTime(60_000); });
+      expect(screen.getByText('1 min ago')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('shows no age line before the first fetch', () => {
+    render(<App />);
+    fireEvent.press(screen.getByText('Metrics'));
+    expect(screen.queryByTestId('metrics-age')).toBeNull();
+  });
+
+  it('auto refresh is off to begin with, and fetches nothing by itself', async () => {
+    const sdk = await renderAndCreate();
+    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    jest.useFakeTimers();
+    try {
+      fireEvent.press(screen.getByText('Metrics'));
+      await act(async () => { jest.advanceTimersByTime(30_000); });
+      expect(sdk.listMetrics).not.toHaveBeenCalled();
+      expect(screen.getByText(/fetch by hand with Fetch/)).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('auto refresh fetches at once when switched on, then on its interval', async () => {
+    const sdk = await renderAndCreate();
+    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    jest.useFakeTimers();
+    try {
+      fireEvent.press(screen.getByText('Metrics'));
+      await act(async () => {
+        fireEvent(screen.getByTestId('metrics-auto-refresh'), 'valueChange', true);
+      });
+      // Switched on → one fetch, without waiting out the first interval.
+      expect(sdk.listMetrics).toHaveBeenCalledTimes(1);
+      await act(async () => { jest.advanceTimersByTime(5_000); });
+      expect(sdk.listMetrics).toHaveBeenCalledTimes(2);
+      await act(async () => { jest.advanceTimersByTime(10_000); });
+      expect(sdk.listMetrics).toHaveBeenCalledTimes(4);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('auto refresh stops fetching once switched back off', async () => {
+    const sdk = await renderAndCreate();
+    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    jest.useFakeTimers();
+    try {
+      fireEvent.press(screen.getByText('Metrics'));
+      await act(async () => {
+        fireEvent(screen.getByTestId('metrics-auto-refresh'), 'valueChange', true);
+      });
+      await act(async () => { jest.advanceTimersByTime(10_000); });
+      const before = sdk.listMetrics.mock.calls.length;
+      await act(async () => {
+        fireEvent(screen.getByTestId('metrics-auto-refresh'), 'valueChange', false);
+      });
+      await act(async () => { jest.advanceTimersByTime(30_000); });
+      expect(sdk.listMetrics).toHaveBeenCalledTimes(before);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('Fetch still works while auto refresh is on', async () => {
+    const sdk = await renderAndCreate();
+    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    jest.useFakeTimers();
+    try {
+      fireEvent.press(screen.getByText('Metrics'));
+      await act(async () => {
+        fireEvent(screen.getByTestId('metrics-auto-refresh'), 'valueChange', true);
+      });
+      const before = sdk.listMetrics.mock.calls.length;
+      await act(async () => { fireEvent.press(screen.getByText('Fetch')); });
+      expect(sdk.listMetrics).toHaveBeenCalledTimes(before + 1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('shows error message when sdk.listMetrics throws', async () => {
     const sdk = await renderAndCreate();
     sdk.listMetrics.mockImplementation(() => { throw new Error('metrics unavailable'); });
@@ -875,9 +1269,7 @@ describe('Registration progress bar', () => {
     await act(async () => {
       fireEvent.press(screen.getByText('③ Initialize SDK'));
     });
-    await waitFor(() => {
-      expect(screen.getByText(/init\(\) returned: false/)).toBeTruthy();
-    });
+    await expectLog(/init\(\) returned: false/);
     expect(sdk.register).not.toHaveBeenCalled();
   });
 
@@ -933,6 +1325,117 @@ describe('Registration progress bar', () => {
     await waitFor(() => {
       expect(screen.getByText(/Registered/)).toBeTruthy();
     });
+  });
+
+  // ── The status badge following the registration ──────────────────────────
+  // init() only means init() returned; registration runs for ~35 s after it.
+  // The badge has to say which of the two we are in, and it reads the SDK's
+  // own state — numbers on iOS, RegistrationState.name on Android, plus the
+  // two strings the Android bridge writes itself ("REGISTERED", "FAILED").
+
+  it('badge turns REGISTERED when the SDK reports state 2 (iOS ordinal)', async () => {
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    await waitFor(() => expect(screen.getAllByText('INITIALIZED')[0]).toBeTruthy());
+
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => { registrationCb({ progress: 100, phase: 6, state: 2 }); });
+
+    await waitFor(() => expect(screen.getAllByText('REGISTERED')[0]).toBeTruthy());
+    expect(screen.queryAllByText('INITIALIZED')).toHaveLength(0);
+  });
+
+  it('badge turns REGISTERED on the Android string state', async () => {
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    // What McSdkModule.onRegistered() emits.
+    act(() => { registrationCb({ progress: 100, phase: 'DONE', state: 'REGISTERED' }); });
+    await waitFor(() => expect(screen.getAllByText('REGISTERED')[0]).toBeTruthy());
+  });
+
+  it.each([
+    ['UNREGISTERED',  'the state that contains REGISTERED as a substring'],
+    ['UNREGISTERING', 'the state that contains REGISTERI as a substring'],
+    ['REGISTERING',   'still in progress'],
+    ['FAILED',        'what onRegistrationFailed emits'],
+  ])('stays INITIALIZED on state %s (%s)', async (state) => {
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => { registrationCb({ progress: 50, phase: 'SIP_REGISTERING', state }); });
+
+    await waitFor(() => expect(screen.getAllByText('INITIALIZED')[0]).toBeTruthy());
+    expect(screen.queryAllByText('REGISTERED')).toHaveLength(0);
+  });
+
+  // ── A registration replayed by the bridge ────────────────────────────────
+  // Closing the app does not kill the process, so the native SDK can still be
+  // registered while a fresh JS side comes up knowing nothing — and the SDK
+  // reports registration only when it *changes*. The Android bridge remembers
+  // the last state and replays it on create(), flagged `replayed`, so the app
+  // shows where it really stands instead of waiting for a registration that
+  // already happened.
+
+  it('a replayed REGISTERED event sets the badge', async () => {
+    const sdk = await renderAndCreate();
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => {
+      registrationCb({ progress: 100, phase: 'DONE', state: 'REGISTERED', replayed: true });
+    });
+    await waitFor(() => expect(screen.getAllByText('REGISTERED')[0]).toBeTruthy());
+  });
+
+  it('a replayed event says so in the log', async () => {
+    const sdk = await renderAndCreate();
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => {
+      registrationCb({ progress: 100, phase: 'DONE', state: 'REGISTERED', replayed: true });
+    });
+    // Without this line a REGISTERED badge with no registration flow in the
+    // log reads as a bug.
+    await expectLog(/registration state restored from the running SDK/);
+  });
+
+  it('an ordinary registration event is not logged as a replay', async () => {
+    const sdk = await renderAndCreate();
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => {
+      registrationCb({ progress: 100, phase: 'DONE', state: 'REGISTERED' });
+    });
+    await waitFor(() => expect(screen.getAllByText('REGISTERED')[0]).toBeTruthy());
+    expect(screen.queryByText(/restored from the running SDK/)).toBeNull();
+  });
+
+  it('a replayed UNREGISTERED event leaves the badge unregistered', async () => {
+    const sdk = await renderAndCreate();
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    // What a process that was torn down mid-teardown would replay.
+    act(() => {
+      registrationCb({ progress: 0, phase: 'IDLE', state: 'UNREGISTERED', replayed: true });
+    });
+    await waitFor(() => expect(screen.queryAllByText('REGISTERED')).toHaveLength(0));
+  });
+
+  it('badge goes back from REGISTERED when the registration is lost', async () => {
+    const sdk = await renderCreateAndSetParams();
+    await act(async () => {
+      fireEvent.press(screen.getByText('③ Initialize SDK'));
+    });
+    const registrationCb = sdk.onRegistration.mock.calls[0][0];
+    act(() => { registrationCb({ progress: 100, phase: 'DONE', state: 'REGISTERED' }); });
+    await waitFor(() => expect(screen.getAllByText('REGISTERED')[0]).toBeTruthy());
+
+    // A stale "REGISTERED" would claim a server connection that is gone.
+    act(() => { registrationCb({ progress: 0, phase: 'IDLE', state: 'UNREGISTERED' }); });
+    await waitFor(() => expect(screen.getAllByText('INITIALIZED')[0]).toBeTruthy());
+    expect(screen.queryAllByText('REGISTERED')).toHaveLength(0);
   });
 
   it('phase 0 renders Idle label', async () => {

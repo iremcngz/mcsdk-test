@@ -6,9 +6,19 @@ export function makeMetricsStyles(c: ThemePalette) {
     root:          { flex: 1, backgroundColor: c.bg },
     content:       { padding: 16, paddingBottom: 40 },
     toolbar:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-    hint:          { color: c.textMuted, fontSize: 12 },
-    fetchBtn:      { backgroundColor: c.accent, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
-    fetchBtnText:  { color: c.textOnAccent, fontWeight: '700', fontSize: 13 },
+    // The toolbar's left column: what was one small grey line is now a
+    // readable stamp with the age under it, so "how stale is this?" can be
+    // answered without doing the arithmetic from a bare clock time.
+    hintBlock:     { flex: 1, marginRight: 12 },
+    hint:          { color: c.textSecondary, fontSize: 15, fontWeight: '600', lineHeight: 20 },
+    hintAge:       { color: c.textMuted, fontSize: 13, marginTop: 2 },
+    fetchBtn:      { backgroundColor: c.accent, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 },
+    fetchBtnText:  { color: c.textOnAccent, fontWeight: '700', fontSize: 14 },
+    // Auto-refresh row, above the metric cards.
+    autoRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: c.surface, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 14 },
+    autoTextBlock: { flex: 1, marginRight: 12 },
+    autoLabel:     { color: c.textPrimary, fontSize: 15, fontWeight: '700' },
+    autoNote:      { color: c.textMuted, fontSize: 12, marginTop: 2 },
     errorBox:      { backgroundColor: c.errorBoxBg, borderRadius: 8, padding: 14, borderWidth: 1, borderColor: c.error },
     errorText:     { color: c.error, fontSize: 13 },
     empty:         { color: c.textMuted, textAlign: 'center', marginTop: 60, fontSize: 14, lineHeight: 22 },

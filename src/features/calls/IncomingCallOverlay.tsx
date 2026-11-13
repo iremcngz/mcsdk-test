@@ -9,7 +9,7 @@ import { makeIncomingCallOverlayStyles } from './styles';
 const SWIPE_THRESHOLD = 200;
 
 export function IncomingCallOverlay() {
-  const { c, theme } = useAppContext();
+  const { c, tr, theme } = useAppContext();
   const { activeCall, acceptCall, rejectCall } = useCallContext();
   const { setScreen } = useNavigation();
   const insets = useSafeAreaInsets();
@@ -90,7 +90,7 @@ export function IncomingCallOverlay() {
   return (
     <View style={s.overlay}>
       <View style={s.header}>
-        <Text style={s.incomingLabel}>Incoming Call</Text>
+        <Text style={s.incomingLabel}>{activeCall.isVideo ? `🎥 ${tr.videoCallLabel}` : 'Incoming Call'}</Text>
 
         <View style={s.avatarContainer}>
           <Animated.View style={[s.avatarRing, { transform: [{ scale: pulse }] }]}>

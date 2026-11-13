@@ -5,7 +5,7 @@
  * toMcpttUri: the URI a contact is called at, from what someone typed.
  */
 
-import { displayMcId, toMcpttUri } from '../src/features/calls/mcId';
+import { displayMcId, toMcpttUri, toMcvideoUri } from '../src/features/calls/mcId';
 
 describe('displayMcId', () => {
   it.each([
@@ -44,5 +44,27 @@ describe('toMcpttUri', () => {
 
   it('round-trips through displayMcId', () => {
     expect(displayMcId(toMcpttUri('mcuser-222'))).toBe('mcuser-222');
+  });
+});
+
+describe('toMcvideoUri', () => {
+  it.each([
+    // The contact's stored MCPTT ID → the MCVideo ID the server knows the user by.
+    ['sip:mcptt.mcuser-111@ims.mnc001.mcc001.3gppnetwork.org',
+     'sip:mcvideo.mcuser-111@ims.mnc001.mcc001.3gppnetwork.org'],
+    ['sip:mcdata.mcuser-111@ims.example.org', 'sip:mcvideo.mcuser-111@ims.example.org'],
+    ['<SIP:MCPTT.mcuser-111@ims.example.org>', '<SIP:mcvideo.mcuser-111@ims.example.org>'],
+    ['sip:mcvideo.mcuser-111@ims.example.org', 'sip:mcvideo.mcuser-111@ims.example.org'],
+    ['mcuser-111',       'sip:mcvideo.mcuser-111@ims.mnc001.mcc001.3gppnetwork.org'],
+    ['mcptt.mcuser-111', 'sip:mcvideo.mcuser-111@ims.mnc001.mcc001.3gppnetwork.org'],
+    // No service prefix: nothing says the server names users this way.
+    ['sip:bob@example.org', 'sip:bob@example.org'],
+    ['sip:mcpttx.bob@example.org', 'sip:mcpttx.bob@example.org'],
+  ])('%s → %s', (input, uri) => {
+    expect(toMcvideoUri(input)).toBe(uri);
+  });
+
+  it('is empty for empty input', () => {
+    expect(toMcvideoUri('  ')).toBe('');
   });
 });

@@ -33,6 +33,8 @@ const mockSdk = {
   onCallUpdated:    () => ({ remove: () => {} }),
   onCallTerminated: () => ({ remove: () => {} }),
   onFloorUpdated:   () => ({ remove: () => {} }),
+  onTransmissionUpdated: () => ({ remove: () => {} }),
+  onReceptionUpdated: () => ({ remove: () => {} }),
   onSdkError:       () => ({ remove: () => {} }),
 };
 

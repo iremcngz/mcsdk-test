@@ -6,7 +6,9 @@
  * stored password hash.  Wrong password shows an error inline.
  *
  * The username starts as the last one that logged in on this device, so
- * coming back takes only the password.
+ * coming back takes only the password. The password starts as the test
+ * server's own (DEFAULT_PASSWORD) — this is a demo app for one MCX test
+ * deployment where every account shares it, so logging in is one tap.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -24,11 +26,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
 import { AuthSettings } from '../../core/settings';
 
+/**
+ * What the password field starts with: the password every account on the MCX
+ * test server is created with. Typed over like any other value, and never
+ * written anywhere — the stored password is whatever is submitted.
+ */
+const DEFAULT_PASSWORD = '12345678';
+
 export default function LoginScreen() {
   const { c, tr, login } = useAppContext();
 
   const [username, setUsername] = useState(() => AuthSettings.getLastUsername() ?? '');
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState(DEFAULT_PASSWORD);
   const [error, setError]       = useState<string | null>(null);
   const [loading, setLoading]   = useState(false);
 

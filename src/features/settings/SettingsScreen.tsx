@@ -3,7 +3,16 @@ import { Alert, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-n
 import { useAppContext } from '../../contexts/AppContext';
 import { makeCommonStyles } from '../../shared/commonStyles';
 import { getLogFilePaths, deleteLogFiles } from '../../core/logger';
-import type { AppTheme, AppLanguage } from '../../core/settings';
+import {
+  VIDEO_BITRATE_OPTIONS,
+  VIDEO_FRAME_RATE_OPTIONS,
+  VIDEO_KEY_FRAME_OPTIONS,
+  VideoTuningSettings,
+  type AppTheme,
+  type AppLanguage,
+  type VideoTuning,
+} from '../../core/settings';
+import { VideoSession } from '../../core/videoSession';
 
 export function SettingsScreen() {
   const {
@@ -15,6 +24,18 @@ export function SettingsScreen() {
 
   const s = useMemo(() => makeCommonStyles(c), [c]);
   const [logPaths, setLogPaths] = useState<string[]>([]);
+  const [video, setVideo] = useState<VideoTuning>(() => VideoTuningSettings.load());
+
+  // Saved and handed to the native side at once: freezeOnLoss reaches a running
+  // receiver now; the encoder's three take effect at the next camera start.
+  const updateVideo = useCallback((patch: Partial<VideoTuning>) => {
+    setVideo(prev => {
+      const next = { ...prev, ...patch };
+      VideoTuningSettings.save(next);
+      VideoSession.applyTuning(next);
+      return next;
+    });
+  }, []);
 
   // Auto-load paths on mount so the user sees them immediately.
   useEffect(() => {
@@ -98,6 +119,67 @@ export function SettingsScreen() {
             </TouchableOpacity>
           ))}
         </View>
+      </View>
+
+      {/* Video */}
+      <Text style={s.sectionTitle}>{tr.sectionVideo}</Text>
+      <View style={s.card} testID="settings-video">
+        <Text style={s.cardTitle}>{tr.cardVideoBitrate}</Text>
+        <View style={s.segRow}>
+          {VIDEO_BITRATE_OPTIONS.map(kbps => (
+            <TouchableOpacity
+              key={kbps}
+              testID={`settings-video-bitrate-${kbps}`}
+              style={[s.seg, video.bitrateKbps === kbps && s.segActive]}
+              onPress={() => updateVideo({ bitrateKbps: kbps })}>
+              <Text style={[s.segText, video.bitrateKbps === kbps && s.segTextActive]}>
+                {`${kbps} kbps`}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={[s.cardTitle, { marginTop: 12 }]}>{tr.cardVideoFrameRate}</Text>
+        <View style={s.segRow}>
+          {VIDEO_FRAME_RATE_OPTIONS.map(fps => (
+            <TouchableOpacity
+              key={fps}
+              testID={`settings-video-fps-${fps}`}
+              style={[s.seg, video.frameRate === fps && s.segActive]}
+              onPress={() => updateVideo({ frameRate: fps })}>
+              <Text style={[s.segText, video.frameRate === fps && s.segTextActive]}>
+                {`${fps} fps`}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={[s.cardTitle, { marginTop: 12 }]}>{tr.cardVideoKeyFrame}</Text>
+        <View style={s.segRow}>
+          {VIDEO_KEY_FRAME_OPTIONS.map(sec => (
+            <TouchableOpacity
+              key={sec}
+              testID={`settings-video-keyframe-${sec}`}
+              style={[s.seg, video.keyFrameIntervalSeconds === sec && s.segActive]}
+              onPress={() => updateVideo({ keyFrameIntervalSeconds: sec })}>
+              <Text style={[s.segText, video.keyFrameIntervalSeconds === sec && s.segTextActive]}>
+                {tr.videoSecondsLabel(sec)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={s.settingsNote}>{tr.videoTuningNote}</Text>
+
+        <View style={[s.switchRow, { marginTop: 12 }]}>
+          <Text style={s.switchLabel}>{tr.videoFreezeOnLoss}</Text>
+          <Switch
+            testID="settings-video-freeze"
+            value={video.freezeOnLoss}
+            onValueChange={v => updateVideo({ freezeOnLoss: v })}
+            trackColor={{ true: c.accent }}
+          />
+        </View>
+        <Text style={s.settingsNote}>{tr.videoFreezeOnLossNote}</Text>
       </View>
 
       {/* Log rotation */}

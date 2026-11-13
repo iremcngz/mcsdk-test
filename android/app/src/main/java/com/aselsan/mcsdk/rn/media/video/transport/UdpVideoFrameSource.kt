@@ -48,21 +48,21 @@ class UdpVideoFrameSource(private val localPort: Int) : VideoFrameSource {
     private var peer: InetAddress? = null
 
     @Volatile
-    var lastError: String? = null
+    override var lastError: String? = null
         private set
 
     /** Datagrams taken off the socket, valid or not. */
-    val packetsReceived: Int get() = received.get()
+    override val packetsReceived: Int get() = received.get()
 
     /** Datagrams that were not RTP. */
     val malformedPackets: Int get() = malformed.get()
 
-    val packetsLost: Int get() = depacketizer?.packetsLost ?: 0
-    val framesDelivered: Int get() = depacketizer?.framesDelivered ?: 0
-    val framesDiscarded: Int get() = depacketizer?.framesDiscarded ?: 0
+    override val packetsLost: Int get() = depacketizer?.packetsLost ?: 0
+    override val framesDelivered: Int get() = depacketizer?.framesDelivered ?: 0
+    override val framesDiscarded: Int get() = depacketizer?.framesDiscarded ?: 0
 
     /** PLIs sent to the peer. */
-    val keyFramesRequested: Int get() = plis.get()
+    override val keyFramesRequested: Int get() = plis.get()
 
     override fun start(listener: VideoFrameSource.Listener): Boolean {
         lastError = null

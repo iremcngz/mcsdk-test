@@ -14,7 +14,7 @@ import { makeOutgoingCallStyles } from './styles';
  * active it navigates to the full-screen ActiveCallFullScreen ('callactive').
  */
 export function OutgoingCallScreen() {
-  const { c } = useAppContext();
+  const { c, tr } = useAppContext();
   const { activeCall, endCall, simulateAnswer } = useCallContext();
   const { setScreen, leaveCallScreen } = useNavigation();
   const insets = useSafeAreaInsets();
@@ -82,6 +82,7 @@ export function OutgoingCallScreen() {
         {activeCall.contactName}
       </Text>
 
+      {activeCall.isVideo && <Text style={s.statusText}>🎥 {tr.videoCallLabel}</Text>}
       <Text style={s.statusText}>{isClosing ? 'Closed' : 'Calling…'}</Text>
 
       <View style={s.spacer} />

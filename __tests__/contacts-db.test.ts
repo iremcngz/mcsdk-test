@@ -44,7 +44,7 @@
 
 // Number of contacts seedContacts() inserts into an empty table.
 // Keep in sync with SEED_CONTACTS in src/core/db.ts.
-const SEED_COUNT = 14;
+const SEED_COUNT = 10;
 
 describe('seedContacts', () => {
   it('inserts the full set of seed rows when the contacts table is empty', async () => {
@@ -87,12 +87,12 @@ describe('seedContacts', () => {
       const { initDb, insertContact, seedContacts, getAllContacts } = require('../src/core/db');
       await initDb();
       // Pre-insert a contact sharing a seed name → seedContacts skips that name.
-      await insertContact('Alice Johnson', 'sip:other@example.com', '');
+      await insertContact('mcuser-111', 'sip:other@example.com', '');
       await seedContacts();
       const rows = await getAllContacts();
       // The duplicate-named seed entry is skipped, so total = SEED_COUNT.
       expect(rows).toHaveLength(SEED_COUNT);
-      expect(rows.filter((r: any) => r.name === 'Alice Johnson')).toHaveLength(1);
+      expect(rows.filter((r: any) => r.name === 'mcuser-111')).toHaveLength(1);
     });
   });
 
@@ -118,8 +118,51 @@ describe('seedContacts', () => {
       await seedContacts();
       const rows = await getAllContacts();
       const names = rows.map((r: { name: string }) => r.name);
-      expect(names).toContain('Alice Johnson');
-      expect(names).toContain('Hasan Demir');
+      expect(names).toContain('mcuser-111');
+      expect(names).toContain('mcuser-555');
+      expect(names).toContain('user-11');
+      expect(names).toContain('user-14');
+      expect(names).toContain('user-15');
+      // The old guesses above mcuser-555, which the server does not have.
+      expect(names).not.toContain('mcuser-666');
+      expect(names).not.toContain('mcuser-1010');
+      // user-11.. carry no service prefix: the server knows them as
+      // `sip:user-11@…`, not `sip:mcptt.user-11@…`.
+      const byName = new Map(
+        rows.map((r: { name: string; sip_uri: string }) => [r.name, r.sip_uri]),
+      );
+      expect(byName.get('user-11')).toBe('sip:user-11@ims.mnc001.mcc001.3gppnetwork.org');
+      expect(byName.get('user-15')).toBe('sip:user-15@ims.mnc001.mcc001.3gppnetwork.org');
+      expect(byName.get('mcuser-111')).toBe(
+        'sip:mcptt.mcuser-111@ims.mnc001.mcc001.3gppnetwork.org',
+      );
+    });
+  });
+
+  it('corrects an already-seeded user-11 that carries the old mcptt. prefix', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, seedContacts, insertContact, getAllContacts } = require('../src/core/db');
+      await initDb();
+      // A phone that ran an older build: right name, wrong URI.
+      await insertContact('user-11', 'sip:mcptt.user-11@ims.mnc001.mcc001.3gppnetwork.org', '');
+      await seedContacts();
+      const rows = await getAllContacts();
+      const matches = rows.filter((r: { name: string }) => r.name === 'user-11');
+      expect(matches).toHaveLength(1);
+      expect(matches[0].sip_uri).toBe('sip:user-11@ims.mnc001.mcc001.3gppnetwork.org');
+    });
+  });
+
+  it('leaves a user-edited URI alone', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const { initDb, seedContacts, insertContact, getAllContacts } = require('../src/core/db');
+      await initDb();
+      await insertContact('user-12', 'sip:user-12@my.own.realm', '');
+      await seedContacts();
+      const rows = await getAllContacts();
+      const matches = rows.filter((r: { name: string }) => r.name === 'user-12');
+      expect(matches).toHaveLength(1);
+      expect(matches[0].sip_uri).toBe('sip:user-12@my.own.realm');
     });
   });
 });

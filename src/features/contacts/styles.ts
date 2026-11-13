@@ -158,6 +158,15 @@ export function makeContactsStyles(c: ThemePalette) {
     duplexFull: { borderColor: c.secondary, backgroundColor: 'transparent' },
     duplexBtnText: { color: c.textPrimary, fontWeight: '700', fontSize: 12 },
 
+    // ── Video call buttons ────────────────────────────────────────────────────
+    // Under the duplex row, whose bottom margin it takes back to the usual gap.
+    videoRow:    { flexDirection: 'row', gap: 10, marginTop: -6, marginBottom: 14 },
+    videoBtn:    { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1.5, borderColor: c.accent },
+    videoMc:     { backgroundColor: c.accent },
+    videoAc:     { backgroundColor: 'transparent' },
+    videoMcText: { color: c.textOnAccent, fontWeight: '700', fontSize: 12 },
+    videoAcText: { color: c.textPrimary, fontWeight: '700', fontSize: 12 },
+
     // ── Info sections ─────────────────────────────────────────────────────────
     infoSection: {
       backgroundColor: c.bg,

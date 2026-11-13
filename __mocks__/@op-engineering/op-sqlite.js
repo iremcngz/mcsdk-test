@@ -11,6 +11,7 @@
  *   - SELECT … FROM … WHERE … LIMIT  → linear scan with basic = matching
  *   - DELETE FROM … WHERE …          → removes matching rows
  *   - DELETE FROM …                  → clears all rows
+ *   - UPDATE … SET … [WHERE col = ?/<> ? AND …] → updates matching rows
  *
  * This is intentionally minimal — just enough for auth.ts and db.ts tests.
  * Add more SQL features here if future tests require them.
@@ -121,17 +122,69 @@ class MockDB {
       return { rows: { _array: rows }, insertId: undefined };
     }
 
-    // ── DELETE FROM <name> [WHERE col = ?]
+    // ── DELETE FROM <name> [WHERE col = ? | WHERE col IN (?, …)]
     const deleteMatch = s.match(/^DELETE FROM (\w+)/i);
     if (deleteMatch) {
       const tableName = deleteMatch[1].toLowerCase();
       const table = this._ensureTable(tableName);
       const whereMatch = s.match(/WHERE\s+(\w+)\s*=\s*\?/i);
+      const inMatch = s.match(/WHERE\s+(\w+)\s+IN\s*\(([^)]*)\)/i);
+      const hasWhere = /\bWHERE\b/i.test(s);
       if (whereMatch) {
         const col = whereMatch[1].toLowerCase();
         table.rows = table.rows.filter(r => String(r[col]) !== String(params[0]));
+      } else if (inMatch) {
+        // WHERE col IN (?, ?, …) — one placeholder per param, in order.
+        const col = inMatch[1].toLowerCase();
+        const n = (inMatch[2].match(/\?/g) || []).length;
+        const wanted = new Set(params.slice(0, n).map(String));
+        table.rows = table.rows.filter(r => !wanted.has(String(r[col])));
+      } else if (hasWhere) {
+        // A WHERE this mock cannot read must never be treated as "delete all" —
+        // that silently empties the table and makes a test pass for the wrong
+        // reason. Fail loudly instead so the clause gets implemented here.
+        throw new Error(`op-sqlite mock: unsupported DELETE WHERE clause: ${s}`);
       } else {
         table.rows = [];
+      }
+      return { rows: { _array: [] }, insertId: undefined };
+    }
+
+    // ── UPDATE <name> SET col = ?, … [WHERE col = ? [AND col <> ?] …]
+    const updateMatch = s.match(/^UPDATE\s+(\w+)\s+SET\s+(.+?)(?:\s+WHERE\s+(.+))?$/i);
+    if (updateMatch) {
+      const tableName = updateMatch[1].toLowerCase();
+      const table = this._ensureTable(tableName);
+      const setPart = updateMatch[2];
+      const wherePart = updateMatch[3];
+
+      // SET assignments, in order; each `?` consumes the next param.
+      const setCols = setPart.split(',').map(a => a.split('=')[0].trim().toLowerCase());
+      let p = 0;
+      const setValues = setCols.map(() => params[p++]);
+
+      // WHERE: a chain of `col <op> ?` joined by AND, with op one of = / <> / !=.
+      let matches = () => true;
+      if (wherePart) {
+        const conds = wherePart.split(/\s+AND\s+/i).map(c => {
+          const m = c.trim().match(/^(\w+)\s*(=|<>|!=)\s*\?$/i);
+          if (!m) {
+            // An unreadable WHERE must never become "update every row" — that
+            // corrupts the table and makes a test pass for the wrong reason.
+            throw new Error(`op-sqlite mock: unsupported UPDATE WHERE clause: ${s}`);
+          }
+          return { col: m[1].toLowerCase(), op: m[2], value: params[p++] };
+        });
+        matches = r => conds.every(c =>
+          c.op === '='
+            ? String(r[c.col]) === String(c.value)
+            : String(r[c.col]) !== String(c.value),
+        );
+      }
+
+      for (const row of table.rows) {
+        if (!matches(row)) continue;
+        setCols.forEach((col, i) => { row[col] = setValues[i]; });
       }
       return { rows: { _array: [] }, insertId: undefined };
     }

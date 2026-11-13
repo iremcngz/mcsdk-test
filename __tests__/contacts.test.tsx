@@ -13,9 +13,13 @@
  * │  3. Expand / collapse — tap to open detail panel, tap again to close    │
  * │  4. Detail panel — shows name, SIP URI, MC buttons                      │
  * │  5. Callback section — initial status, Place a Request sets 'pending'   │
+ * │  6. The list's own rules — People is the default filter, the logged-in  │
+ * │     user is left out, people and groups are sorted by name, and the     │
+ * │     groups are the SDK's rather than hardcoded placeholders.            │
  * │                                                                          │
  * │  NOTE: src/core/db is fully mocked — tests don't hit SQLite at all.    │
- * │  AppContext is mocked with a minimal dark-theme palette.                │
+ * │  AppContext is mocked with a minimal dark-theme palette. TalkContext is │
+ * │  stubbed with a group list: the group rows come from onGroupsUpdated.   │
  * └──────────────────────────────────────────────────────────────────────────┘
  */
 
@@ -65,21 +69,28 @@ const mockPalette = {
 jest.mock('../src/contexts/AppContext', () => ({
   useAppContext: () => ({
     c: mockPalette,
-    tr: {},
+    tr: { contactGroupsPending: 'No groups.' },
   }),
 }));
 
-// 5-item fixture — deterministic, avoids real DB.
+// 5-item fixture — deterministic, avoids real DB. Deliberately NOT in name
+// order, so the alphabetical sort is something the list does and not something
+// the fixture hands it.
 const FIXTURE_CONTACTS = [
-  { id: 1, name: 'Alice Johnson', sip_uri: 'sip:alice@mc.example.com', notes: 'Team Alpha', created_at: 5000 },
-  { id: 2, name: 'Bob Martinez',  sip_uri: 'sip:bob@mc.example.com',   notes: 'Team Bravo', created_at: 4000 },
   { id: 3, name: 'Carol White',   sip_uri: 'sip:carol@mc.example.com', notes: 'Dispatch',   created_at: 3000 },
-  { id: 4, name: 'David Kim',     sip_uri: 'sip:david@mc.example.com', notes: 'Team Alpha', created_at: 2000 },
+  { id: 1, name: 'Alice Johnson', sip_uri: 'sip:alice@mc.example.com', notes: 'Team Alpha', created_at: 5000 },
   { id: 5, name: 'Eve Nakamura',  sip_uri: 'sip:eve@mc.example.com',   notes: 'Command',    created_at: 1000 },
+  { id: 2, name: 'Bob Martinez',  sip_uri: 'sip:bob@mc.example.com',   notes: 'Team Bravo', created_at: 4000 },
+  { id: 4, name: 'David Kim',     sip_uri: 'sip:david@mc.example.com', notes: 'Team Alpha', created_at: 2000 },
 ];
 
-// ContactsScreen injects this many built-in groups alongside the people list.
-const GROUP_COUNT = 7;
+// The groups the stubbed TalkContext reports, also out of order.
+const FIXTURE_GROUPS = [
+  { groupId: 'sip:group-b@mc.example.com', name: 'Bravo Group',  isPtt: true,  isVideo: true,  isData: false },
+  { groupId: 'sip:group-a@mc.example.com', name: 'Alpha Group',  isPtt: true,  isVideo: false, isData: false },
+  { groupId: 'sip:group-c@mc.example.com', name: '',             isPtt: true,  isVideo: false, isData: false },
+];
+const GROUP_COUNT = FIXTURE_GROUPS.length;
 
 const mockInitDb       = jest.fn().mockResolvedValue(undefined);
 const mockSeedContacts = jest.fn().mockResolvedValue(undefined);
@@ -96,6 +107,19 @@ jest.mock('../src/core/db', () => ({
 // only exercise the contact list, not call wiring.
 jest.mock('../src/contexts/SdkContext', () => ({
   useSdkContext: () => ({ sdkRef: { current: null }, created: false }),
+}));
+
+// The group rows are the SDK's provisioned list now (onGroupsUpdated), read
+// off TalkContext, instead of seven hardcoded `group1`..`group7` names.
+let mockGroups: typeof FIXTURE_GROUPS = [];
+jest.mock('../src/contexts/TalkContext', () => ({
+  useTalkContext: () => ({ groups: mockGroups }),
+}));
+
+// Who is logged in: that person is dropped from their own contact list.
+let mockLastUsername: string | undefined;
+jest.mock('../src/core/settings', () => ({
+  AuthSettings: { getLastUsername: () => mockLastUsername },
 }));
 
 import { ContactsScreen } from '../src/features/contacts/ContactsScreen';
@@ -122,6 +146,10 @@ async function renderContacts() {
   await waitFor(() => expect(screen.getByText('Alice Johnson')).toBeTruthy());
 }
 
+/** People is the default filter, so these two reach the other views. */
+const showAll    = () => fireEvent.press(screen.getByText('All'));
+const showGroups = () => fireEvent.press(screen.getByText('Groups'));
+
 // ── Reset ─────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -129,6 +157,8 @@ beforeEach(() => {
   mockSeedContacts.mockClear();
   mockGetAll.mockClear();
   mockGetAll.mockResolvedValue(FIXTURE_CONTACTS);
+  mockGroups = FIXTURE_GROUPS;
+  mockLastUsername = undefined;
 });
 
 // =============================================================================
@@ -153,8 +183,13 @@ describe('ContactsScreen — initial render', () => {
 
   it('shows correct contact count (people + groups under the All filter)', async () => {
     await renderContacts();
-    // All filter shows the 5 fixture people plus the 7 built-in groups = 12.
+    showAll();
     expect(screen.getByText(`${FIXTURE_CONTACTS.length + GROUP_COUNT} contacts`)).toBeTruthy();
+  });
+
+  it('counts only the people under the default People filter', async () => {
+    await renderContacts();
+    expect(screen.getByText(`${FIXTURE_CONTACTS.length} contacts`)).toBeTruthy();
   });
 
   it('renders each contact name from the fixture', async () => {
@@ -234,6 +269,7 @@ describe('ContactsScreen — search filter', () => {
 
   it('restores full list when search is cleared', async () => {
     await renderContacts();
+    showAll();
     const input = screen.getByPlaceholderText('Search contacts…');
     fireEvent.changeText(input, 'alice');
     fireEvent.changeText(input, '');
@@ -351,7 +387,84 @@ describe('ContactsScreen — info sections', () => {
 });
 
 // =============================================================================
-// 6. Call actions — starting a call navigates to the right screen
+// 6. The list's own rules — default filter, self-exclusion, sort, SDK groups
+// =============================================================================
+
+describe('ContactsScreen — list rules', () => {
+  it('opens on People, not All: the groups are not in the first view', async () => {
+    await renderContacts();
+    expect(screen.queryByText('Alpha Group')).toBeNull();
+    expect(screen.getByText('Alice Johnson')).toBeTruthy();
+  });
+
+  it('lists the people in name order, whatever order the DB returned', async () => {
+    await renderContacts();
+    const names = FIXTURE_CONTACTS.map(ct => ct.name);
+    const shown = screen
+      .getAllByText(new RegExp(`^(${names.join('|')})$`))
+      .map(node => node.props.children);
+    expect(shown).toEqual([...names].sort());
+  });
+
+  it('leaves the logged-in user out, matched on the MC ID in their URI', async () => {
+    mockLastUsername = 'carol';
+    await renderContacts();
+    expect(screen.queryByText('Carol White')).toBeNull();
+    expect(screen.getByText('Alice Johnson')).toBeTruthy();
+    expect(screen.getByText(`${FIXTURE_CONTACTS.length - 1} contacts`)).toBeTruthy();
+  });
+
+  it('leaves the logged-in user out when the row is named after them', async () => {
+    mockGetAll.mockResolvedValueOnce([
+      ...FIXTURE_CONTACTS,
+      { id: 9, name: 'mcuser-111', sip_uri: 'sip:mcptt.mcuser-111@ims.example.org', notes: '', created_at: 9 },
+    ]);
+    mockLastUsername = 'mcuser-111';
+    await renderContacts();
+    expect(screen.queryByText('mcuser-111')).toBeNull();
+  });
+
+  it('keeps everyone when no one is logged in', async () => {
+    mockLastUsername = undefined;
+    await renderContacts();
+    expect(screen.getByText(`${FIXTURE_CONTACTS.length} contacts`)).toBeTruthy();
+  });
+
+  it("lists the SDK's groups, in name order, not hardcoded placeholders", async () => {
+    await renderContacts();
+    showGroups();
+    await waitFor(() => expect(screen.getByText('Alpha Group')).toBeTruthy());
+    expect(screen.getByText('Bravo Group')).toBeTruthy();
+    // No `group1`..`group7` left anywhere.
+    expect(screen.queryByText('group1')).toBeNull();
+    expect(screen.getByText(`${GROUP_COUNT} groups`)).toBeTruthy();
+  });
+
+  it('falls back to the group id when the SDK sends no name', async () => {
+    await renderContacts();
+    showGroups();
+    await waitFor(() =>
+      expect(screen.getByText('sip:group-c@mc.example.com')).toBeTruthy());
+  });
+
+  it('says the groups are still to come while the SDK has sent none', async () => {
+    mockGroups = [];
+    await renderContacts();
+    showGroups();
+    await waitFor(() => expect(screen.getByText('No groups.')).toBeTruthy());
+  });
+
+  it('dials the group id a group row was built from', async () => {
+    await renderContacts();
+    showGroups();
+    await waitFor(() => expect(screen.getByText('Alpha Group')).toBeTruthy());
+    fireEvent.press(screen.getByText('Alpha Group'));
+    expect(screen.getByText('sip:group-a@mc.example.com')).toBeTruthy();
+  });
+});
+
+// =============================================================================
+// 7. Call actions — starting a call navigates to the right screen
 // =============================================================================
 
 describe('ContactsScreen — call actions', () => {

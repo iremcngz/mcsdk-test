@@ -11,9 +11,9 @@ import kotlin.random.Random
 /**
  * UdpVideoFrameSink — sends encoded frames as RTP over UDP to a typed-in peer.
  *
- * What the SDK will do behind sendVideoFrame, for testing between two phones
- * before it can: no signalling, so the address comes from the screen, and no
- * permission to wait for.
+ * What the SDK does behind sendVideoFrame, for testing between two phones without
+ * a call: no signalling, so the address comes from the screen, and no permission
+ * to wait for.
  *
  * Packets go out inline on the encoder's thread, as UdpFrameSink's do on the
  * capture thread: send() copies into the kernel and returns in microseconds. The
@@ -53,19 +53,19 @@ class UdpVideoFrameSink(
     private var open = false
 
     @Volatile
-    var lastError: String? = null
+    override var lastError: String? = null
         private set
 
     /** Packets handed to the kernel. */
-    val packetsSent: Int get() = sent.get()
+    override val packetsSent: Int get() = sent.get()
 
     /** Packets send() refused. */
-    val sendErrors: Int get() = errors.get()
+    override val sendErrors: Int get() = errors.get()
 
     /** PLIs received from the peer. */
     val keyFramesRequested: Int get() = keyRequests.get()
 
-    val target: String get() = "$remoteHost:$remotePort"
+    override val target: String get() = "$remoteHost:$remotePort"
 
     override fun open(feedback: VideoFrameSink.Feedback) {
         lastError = null

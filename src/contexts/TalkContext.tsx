@@ -12,12 +12,20 @@ import { useSdkContext } from './SdkContext';
 import { useCallContextIfPresent } from './CallContext';
 import { useCallAudio, type CallAudioProblem } from '../features/calls/useCallAudio';
 import {
+  isGroupVideoCall,
+  useGroupVideoReceive,
+  useGroupVideoSend,
+  type VideoSendNotice,
+} from '../features/talk/useGroupVideoSend';
+import {
   CALL_AUDIO_CODEC,
   USER_FACING_AUDIO_ERRORS,
   floorFieldsAfter,
+  incomingCallGroup,
   isGroupCall,
   mapCallState,
   type FloorFields,
+  type GroupHints,
 } from '../features/calls/sdkCall';
 import type { CallState } from '../features/calls/types';
 
@@ -142,19 +150,27 @@ interface TalkContextValue {
   /** True while the full-screen transmit (BroadcastScreen) view is open. */
   isBroadcasting: boolean;
   setIsBroadcasting: (v: boolean) => void;
+  /** The transmit view's record button is on, whether or not the server has allowed it yet. */
+  videoSendRequested: boolean;
+  /** The camera is going out to the group. */
+  videoSending: boolean;
+  /** Why a transmission just ended without the user stopping it. */
+  videoSendNotice: VideoSendNotice | null;
+  startVideoSend: () => void;
+  stopVideoSend: () => void;
+  /** True while the full-screen receive (ReceiveScreen) view is open. */
+  isWatchingVideo: boolean;
+  setIsWatchingVideo: (v: boolean) => void;
+  /** The server has said the watched transmission finished; the view is about to close. */
+  videoTransmissionEnded: boolean;
+  /**
+   * A private video call has the camera and the decoder: the transmit and receive
+   * views are closed and cannot be opened until it is over.
+   */
+  privateVideoCall: boolean;
 }
 
 const TalkContext = createContext<TalkContextValue | null>(null);
-
-/**
- * The group a call is for. The SDK sets groupId on a group call both ways —
- * the target of one we place, the caller (the group) of one we receive
- * (CallMachine::OnInviteSent / OnInviteReceived) — and it is the same URI the
- * group and affiliation lists use.
- */
-function groupIdOf(e: CallInfoEvent): string {
-  return e.groupId;
-}
 
 /** The group whose call has [callId], or undefined. */
 function groupOfCall(calls: Record<string, SdkGroupCall>, callId: string): string | undefined {
@@ -176,6 +192,9 @@ function without(calls: Record<string, SdkGroupCall>, groupId: string): Record<s
  */
 export const GROUP_CALL_START_TIMEOUT_MS = 10_000;
 
+/** How long the receive view shows that the transmission ended before it closes. */
+export const RECEIVE_ENDED_NOTICE_MS = 2_500;
+
 /** SdkErrors that mean a call we just started will never be reported. */
 const CALL_START_ERRORS: ReadonlySet<McSdkError> = new Set<McSdkError>([
   'NOT_REGISTERED',
@@ -187,9 +206,16 @@ const CALL_START_ERRORS: ReadonlySet<McSdkError> = new Set<McSdkError>([
  * [calls] with the group call [e] reports, new or updated. A new call id for a
  * group replaces the old entry: that call has ended (its termination may still
  * be on its way) and its floor state must not leak into this one.
+ *
+ * A call stays under the group it was first placed in, wherever the screen has
+ * moved to since: see incomingCallGroup for how that is chosen.
  */
-function withCall(calls: Record<string, SdkGroupCall>, e: CallInfoEvent): Record<string, SdkGroupCall> {
-  const groupId = groupIdOf(e);
+function withCall(
+  calls: Record<string, SdkGroupCall>,
+  e: CallInfoEvent,
+  hints: GroupHints,
+): Record<string, SdkGroupCall> {
+  const groupId = groupOfCall(calls, e.callId) ?? incomingCallGroup(e, hints, g => !!calls[g]);
   const state = mapCallState(e.state);
   if (!groupId || !state) return calls;
   const prev = calls[groupId]?.sdkCallId === e.callId ? calls[groupId] : undefined;
@@ -226,6 +252,7 @@ export function TalkContextProvider({ children }: { children: React.ReactNode })
   const [activationOrder, setActivationOrder] = useState<string[]>([]);
   const [lastClosedAt, setLastClosedAt] = useState<Record<string, number>>({});
   const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [isWatchingVideo, setIsWatchingVideo] = useState(false);
   const [sdkGroupCalls, setSdkGroupCalls] = useState<Record<string, SdkGroupCall>>({});
 
   // Read by the commands, which must address the call as it is now.
@@ -240,6 +267,14 @@ export function TalkContextProvider({ children }: { children: React.ReactNode })
 
   const [focusedGroup, setFocusedGroup] = useState<string | null>(null);
   const [mutedGroups, setMutedGroups] = useState<Record<string, boolean>>({});
+
+  // Read when a call event arrives. The group on screen comes first; before Talk has
+  // been opened there is none, and the first affiliated group is the best guess.
+  const groupHintsRef = useRef<GroupHints>({ known: new Set(), candidates: [] });
+  groupHintsRef.current = {
+    known: new Set([...groups, ...affiliatedGroups].map(g => g.groupId)),
+    candidates: [focusedGroup, ...affiliatedGroups.map(g => g.groupId)],
+  };
 
   // The SDK pushes both lists — there is no getter. They arrive once registration
   // completes, so before that the Talk screen legitimately has no groups to show.
@@ -265,12 +300,18 @@ export function TalkContextProvider({ children }: { children: React.ReactNode })
       // ── Group calls ────────────────────────────────────────────────────────
       // CallContext gets the same events and leaves group calls to us; we
       // leave private calls to it. Floor and termination events carry no call
-      // type, so they are matched by call id against the calls held here.
+      // type, so they are matched by call id against the calls held here. A
+      // group's MCVideo call is useGroupVideoSend's: it runs alongside the MCPTT
+      // one, and taken here it would replace it, there being one call per group.
       sdk.onIncomingCall((e: CallInfoEvent) => {
-        if (isGroupCall(e)) setSdkGroupCalls(prev => withCall(prev, e));
+        if (isGroupCall(e) && !isGroupVideoCall(e)) {
+          setSdkGroupCalls(prev => withCall(prev, e, groupHintsRef.current));
+        }
       }),
       sdk.onCallUpdated((e: CallInfoEvent) => {
-        if (isGroupCall(e)) setSdkGroupCalls(prev => withCall(prev, e));
+        if (isGroupCall(e) && !isGroupVideoCall(e)) {
+          setSdkGroupCalls(prev => withCall(prev, e, groupHintsRef.current));
+        }
       }),
       sdk.onCallTerminated((e: CallTerminatedEvent) => {
         floorWantedRef.current.delete(e.callId);
@@ -393,7 +434,11 @@ export function TalkContextProvider({ children }: { children: React.ReactNode })
   // ── Group call audio ───────────────────────────────────────────────────────
   // A private call takes the pipeline whenever it has audio: it was answered
   // on purpose, while a group call comes up on its own.
-  const privateAudioCallId = useCallContextIfPresent()?.audioCallId ?? null;
+  const privateCall = useCallContextIfPresent();
+  const privateAudioCallId = privateCall?.audioCallId ?? null;
+  // One camera and one decoder: a private video call, answered or placed on
+  // purpose, takes them from the group's views.
+  const privateVideoCall = privateCall?.videoCallLive ?? false;
 
   const audioCall = useMemo(() => {
     if (privateAudioCallId) return undefined;
@@ -424,6 +469,46 @@ export function TalkContextProvider({ children }: { children: React.ReactNode })
     onProblem: noteAudioProblem,
   });
 
+  // The transmit view sends the camera to the group the Talk screen shows.
+  const {
+    calls: videoCalls,
+    requested: videoSendRequested,
+    sending: videoSending,
+    notice: videoSendNotice,
+    startSending: startVideoSend,
+    stopSending: stopVideoSend,
+  } = useGroupVideoSend({
+    sdkRef,
+    created,
+    // Released in the same commit as the private call takes it, so the group's
+    // stop always reaches the native pipeline before the private call's start.
+    groupId: isBroadcasting && !privateVideoCall ? focusedGroup : null,
+    groupHintsRef,
+  });
+
+  // The receive view shows the same group's video call.
+  const watchedCall = focusedGroup ? videoCalls[focusedGroup] : undefined;
+  const videoTransmissionEnded = useGroupVideoReceive({
+    sdkRef,
+    created,
+    watching: isWatchingVideo && !privateVideoCall,
+    callId: watchedCall?.active ? watchedCall.callId : null,
+  });
+
+  useEffect(() => {
+    if (!privateVideoCall) return;
+    setIsBroadcasting(false);
+    setIsWatchingVideo(false);
+  }, [privateVideoCall]);
+
+  // The notice stays long enough to read, then the view gives way to the Talk screen.
+  // Another transmitter starting in the meantime clears the flag and keeps it open.
+  useEffect(() => {
+    if (!videoTransmissionEnded) return;
+    const t = setTimeout(() => setIsWatchingVideo(false), RECEIVE_ENDED_NOTICE_MS);
+    return () => clearTimeout(t);
+  }, [videoTransmissionEnded]);
+
   const recordActivation = useCallback((group: string) => {
     setActivationOrder(prev => prev.includes(group) ? prev : [...prev, group]);
   }, []);
@@ -433,8 +518,8 @@ export function TalkContextProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const value = useMemo<TalkContextValue>(
-    () => ({ groups, affiliatedGroups, affiliationByGroup, applyAffiliation, groupsLoaded, identityServices, activeGroups, setActiveGroups, pendingGroup, setPendingGroup, groupCalls, setGroupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, sdkGroupCalls, startGroupCall, endGroupCall, requestGroupFloor, releaseGroupFloor, setFocusedGroup, audioGroupId: audioCall?.groupId ?? null, mutedGroups, toggleGroupMuted, isBroadcasting, setIsBroadcasting }),
-    [groups, affiliatedGroups, affiliationByGroup, applyAffiliation, groupsLoaded, identityServices, activeGroups, pendingGroup, groupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, sdkGroupCalls, startGroupCall, endGroupCall, requestGroupFloor, releaseGroupFloor, audioCall, mutedGroups, toggleGroupMuted, isBroadcasting],
+    () => ({ groups, affiliatedGroups, affiliationByGroup, applyAffiliation, groupsLoaded, identityServices, activeGroups, setActiveGroups, pendingGroup, setPendingGroup, groupCalls, setGroupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, sdkGroupCalls, startGroupCall, endGroupCall, requestGroupFloor, releaseGroupFloor, setFocusedGroup, audioGroupId: audioCall?.groupId ?? null, mutedGroups, toggleGroupMuted, isBroadcasting, setIsBroadcasting, videoSendRequested, videoSending, videoSendNotice, startVideoSend, stopVideoSend, isWatchingVideo, setIsWatchingVideo, videoTransmissionEnded, privateVideoCall }),
+    [groups, affiliatedGroups, affiliationByGroup, applyAffiliation, groupsLoaded, identityServices, activeGroups, pendingGroup, groupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, sdkGroupCalls, startGroupCall, endGroupCall, requestGroupFloor, releaseGroupFloor, audioCall, mutedGroups, toggleGroupMuted, isBroadcasting, videoSendRequested, videoSending, videoSendNotice, startVideoSend, stopVideoSend, isWatchingVideo, videoTransmissionEnded, privateVideoCall],
   );
 
   return <TalkContext.Provider value={value}>{children}</TalkContext.Provider>;

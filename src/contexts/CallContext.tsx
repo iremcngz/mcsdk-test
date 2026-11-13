@@ -25,8 +25,9 @@ import type {
 } from '../mcsdk';
 import { useSdkContext } from './SdkContext';
 import { MediaSession } from '../core/mediaSession';
-import { displayMcId } from '../features/calls/mcId';
+import { displayMcId, toMcvideoUri } from '../features/calls/mcId';
 import { useCallAudio } from '../features/calls/useCallAudio';
+import { usePrivateVideoCall, type PrivateVideoProblem } from '../features/calls/usePrivateVideoCall';
 import {
   CALL_AUDIO_CODEC,
   USER_FACING_AUDIO_ERRORS,
@@ -87,6 +88,26 @@ interface CallContextValue {
    * @param commencement `'auto'` (direct active) or `'manual'` (connecting, needs answer).
    */
   startCall: (contactName: string, sipUri: string, callType: CallType, commencement?: CommencementMode) => void;
+
+  /**
+   * Place an MCVideo private call: video only, both ways, no floor. Our camera
+   * starts on; the called party's starts off until they turn it on.
+   * @param commencement `'auto'` (answered by the far end's phone) or `'manual'` (it rings).
+   */
+  startVideoCall: (contactName: string, sipUri: string, commencement: CommencementMode) => void;
+
+  /**
+   * A private video call is connecting or up, so the camera and the decoder are
+   * its: the Talk screen's video views give way to it.
+   */
+  videoCallLive: boolean;
+  /** The user wants their camera sent on the video call. Resets with each call. */
+  videoCameraOn: boolean;
+  toggleVideoCamera: () => void;
+  /** The camera is running: the local picture can be shown. */
+  videoCameraReady: boolean;
+  /** Why part of the video call's picture is missing, or null. */
+  videoProblem: PrivateVideoProblem | null;
 
   /** Terminate the active call and add it to history. */
   endCall: () => void;
@@ -256,6 +277,29 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
 
   useCallAudio({ callId: audioCallId, transmit: transmitWanted, onProblem: noteAudioProblem });
 
+  // ── Call video ──────────────────────────────────────────────────────────────
+  // A private MCVideo call's video runs from 'connecting', so the caller sees
+  // their own picture while it rings, until the call is gone. The camera is the
+  // user's choice: on for the caller, off for the called party until they say.
+  const [videoCameraOn, setVideoCameraOn] = useState(false);
+  const toggleVideoCamera = useCallback(() => setVideoCameraOn(on => !on), []);
+
+  const videoCallLive =
+    activeCall?.isVideo === true &&
+    (activeCall.state === 'connecting' || activeCall.state === 'active');
+  const videoCallId =
+    videoCallLive && activeCall?.state === 'active' ? activeCall.sdkCallId ?? null : null;
+
+  const { cameraReady: videoCameraReady, problem: videoProblem } = usePrivateVideoCall({
+    live: videoCallLive,
+    callId: videoCallId,
+    cameraOn: videoCameraOn,
+  });
+
+  useEffect(() => {
+    if (!activeCall) setVideoCameraOn(false);
+  }, [activeCall]);
+
   // The native pipeline outlives a JS reload (as the SDK does): a call's audio
   // left running by the previous bundle has nobody to stop it but us.
   useEffect(() => {
@@ -301,6 +345,8 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
         // would raise the ringing overlay for a call the SDK has already
         // answered, and drop the private call that was up.
         if (isGroupCall(e)) return;
+        // Whoever is called decides whether they are seen.
+        setVideoCameraOn(false);
         setActiveCall(prev => {
           // A second call while one is up: the existing one is not ours to keep.
           if (prev) archive(prev);
@@ -437,6 +483,41 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     };
     setActiveCall(call);
   }, [commencementMode, archive, sdkRef]);
+
+  const startVideoCall = useCallback((
+    contactName: string,
+    contactUri: string,
+    commencement: CommencementMode,
+  ) => {
+    // Contacts hold the MCPTT ID; an MCVideo call is addressed by the MCVideo
+    // one, or the server refuses it as unauthorized (see toMcvideoUri).
+    const sipUri = toMcvideoUri(contactUri);
+    setActiveCall(prev => {
+      if (prev) archive(prev);
+      return null;
+    });
+
+    // As startCall: the SDK's onCallUpdated drives the state from here, and the
+    // first outgoing id it reports becomes this call's.
+    const sdk = sdkRef.current;
+    if (sdk) sdk.startVideoPrivateCall(sipUri, commencement === 'auto');
+
+    setVideoCameraOn(true);
+    setActiveCall({
+      id:               uuid(),
+      contactName,
+      sipUri,
+      // No floor: both sides send while the call is up (TS 24.281 §10.2.3).
+      callType:         'full_duplex',
+      isVideo:          true,
+      direction:        'outgoing',
+      commencementMode: commencement,
+      state:            sdk ? 'connecting' : (commencement === 'auto' ? 'active' : 'connecting'),
+      floorState:       'idle',
+      startedAt:        Date.now(),
+      needsManualJoin:  false,
+    });
+  }, [archive, sdkRef]);
 
   const endCall = useCallback(() => {
     setActiveCall(prev => {
@@ -600,6 +681,12 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
     commencementMode,
     setCommencementMode,
     startCall,
+    startVideoCall,
+    videoCallLive,
+    videoCameraOn,
+    toggleVideoCamera,
+    videoCameraReady,
+    videoProblem,
     endCall,
     setFloorState,
     requestFloor,
@@ -621,6 +708,7 @@ export function CallContextProvider({ children }: { children: React.ReactNode })
   }), [
     activeCall, callHistory, commencementMode,
     setCommencementMode, startCall, endCall,
+    startVideoCall, videoCallLive, videoCameraOn, toggleVideoCamera, videoCameraReady, videoProblem,
     setFloorState, requestFloor, releaseFloor,
     speakerOn, toggleSpeaker, micMuted, toggleMute, audioCallId,
     joinCall, acceptCall, rejectCall, clearHistory,

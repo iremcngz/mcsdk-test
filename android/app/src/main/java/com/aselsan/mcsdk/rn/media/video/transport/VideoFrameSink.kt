@@ -5,16 +5,15 @@ package com.aselsan.mcsdk.rn.media.video.transport
  * with it.
  *
  * The video counterpart of AudioFrameSink, and the seam for the same reason: the
- * SDK has no video frame API yet, so the pipeline is built against this and the
- * destination is swapped underneath.
+ * pipeline is built against this and the destination is swapped underneath.
  *
- *   UdpVideoFrameSink  → RTP over UDP to another phone  (today)
- *   SdkVideoFrameSink  → sdk.sendVideoFrame             (once the SDK exposes it)
+ *   UdpVideoFrameSink  → RTP over UDP to another phone, with no call
+ *   SdkVideoFrameSink  → sdk.sendVideoFrame, on a call
  *
- * [onFrame]'s parameters are the ones `Sdk::SendVideoFrame` takes, so nothing
- * upstream changes when the SDK lands. It differs from the audio seam on
- * purpose: a timestamp here is capture time in microseconds, as the SDK wants,
- * and turning that into a 90 kHz RTP clock belongs to whichever sink builds RTP.
+ * [onFrame]'s parameters are the ones `Sdk::SendVideoFrame` takes. It differs from
+ * the audio seam on purpose: a timestamp here is capture time in microseconds, as
+ * the SDK wants, and turning that into a 90 kHz RTP clock belongs to whichever sink
+ * builds RTP.
  *
  * Threading: [onFrame] runs on the encoder's thread. Returning late does not
  * lose data the way it does on the audio path, but the encoder's output buffers
@@ -27,6 +26,18 @@ interface VideoFrameSink {
 
     /** Human-readable name for the diagnostics UI. */
     val name: String
+
+    /** Where frames are going, for the diagnostics UI. */
+    val target: String
+
+    /** Packets put on the network, where the sink is the one sending them. */
+    val packetsSent: Int get() = 0
+
+    /** What could not be handed on. Must stay 0. */
+    val sendErrors: Int
+
+    /** Why the last send failed, if one has. */
+    val lastError: String?
 
     /** What the far end asks of the encoder. */
     interface Feedback {

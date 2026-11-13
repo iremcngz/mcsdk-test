@@ -3,7 +3,7 @@
  * and bottom tab bar. Screen state is owned by NavigationContext.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../contexts/AppContext';
@@ -18,35 +18,63 @@ import type { Screen } from '../shared/types';
 import { HomeScreen }     from '../features/home/HomeScreen';
 import { MetricsScreen }  from '../features/metrics/MetricsScreen';
 import { SdkLogsScreen }  from '../features/sdklogs/SdkLogsScreen';
+import { LogConsoleScreen } from '../features/logs/LogConsoleScreen';
+import { MockCallsScreen } from '../features/calls/MockCallsScreen';
 import { SettingsScreen } from '../features/settings/SettingsScreen';
 import { ContactsScreen } from '../features/contacts/ContactsScreen';
 import { CallsTab }       from '../features/calls/CallsTab';
 import { TalkScreen }     from '../features/talk/TalkScreen';
 import { AudioScreen }    from '../features/audio/AudioScreen';
 import { VideoScreen }    from '../features/video/VideoScreen';
+import { ToolsScreen }    from '../features/tools/ToolsScreen';
 import { OutgoingCallScreen } from '../features/calls/OutgoingCallScreen';
 import { ActiveCallFullScreen } from '../features/calls/ActiveCallFullScreen';
+import { VideoCallScreen } from '../features/calls/VideoCallScreen';
 import { IncomingCallOverlay } from '../features/calls/IncomingCallOverlay';
 import { CallEndBanner } from '../features/calls/CallEndBanner';
 
+/**
+ * The bottom bar. Nine tabs left each one about 11% of the width, so the
+ * diagnostics screens (Audio, Video, SDK Logs) moved behind the Tools tab —
+ * they are not part of the user's flow. Metrics stays a tab of its own.
+ */
 const TABS: { id: Screen; icon: string }[] = [
   { id: 'home',     icon: '🏠' },
   { id: 'contacts', icon: '👥' },
   { id: 'calls',    icon: '📞' },
   { id: 'talk',     icon: '🎙️' },
-  { id: 'audio',    icon: '🔊' },
-  { id: 'video',    icon: '🎥' },
   { id: 'metrics',  icon: '📊' },
-  { id: 'sdklogs',  icon: '📋' },
+  { id: 'tools',    icon: '🧰' },
   { id: 'settings', icon: '⚙️' },
 ];
 
+/**
+ * The screens reached through Tools rather than a tab. They get a back row to
+ * the menu, and Tools is the tab that shows as active while one is open — so
+ * the bar never highlights nothing.
+ */
+const TOOL_SCREENS: Screen[] = ['audio', 'video', 'sdklogs', 'logs', 'mockcalls'];
+
+/**
+ * Tabs whose point is talking to the MCX server, marked while the registration
+ * is not up. Contacts is in: its list is local SQLite and reads fine, but every
+ * call placed from it needs the server.
+ *
+ * Tools is deliberately out. Audio and Video touch no SDK at all — they are raw
+ * UDP/MediaSession tests, and testing the media path *without* a registration
+ * is exactly what they exist for. Metrics and Settings are local too.
+ */
+const SERVER_TABS: Screen[] = ['contacts', 'calls', 'talk'];
+
 export function TabNavigator() {
   const { c, tr, theme } = useAppContext();
-  const { ipInfo, created, initialized, paramsSet } = useSdkContext();
+  const { ipInfo, created, initialized, paramsSet, registered } = useSdkContext();
   const { screen, setScreen, leaveCallScreen } = useNavigation();
-  const { activeGroups, setPendingGroup, isBroadcasting, identityServices } = useTalkContext();
+  const { activeGroups, setPendingGroup, isBroadcasting, isWatchingVideo, identityServices } = useTalkContext();
   const { activeCall } = useCallContext();
+  const isVideoCallScreen = screen === 'callactive' && activeCall?.isVideo === true;
+  // The transmit and receive views take the whole screen, and so does a video call.
+  const videoFullScreen = isBroadcasting || isWatchingVideo || isVideoCallScreen;
   const insets = useSafeAreaInsets();
   const s = useMemo(() => makeCommonStyles(c), [c]);
   const [showActiveList, setShowActiveList] = useState(false);
@@ -67,37 +95,58 @@ export function TabNavigator() {
   useEffect(() => {
     if (!activeCall) leaveCallScreen();
   }, [activeCall, leaveCallScreen]);
+
+  // A video call is for watching: once one is up, its screen opens — also for a
+  // call the phone answered by itself (automatic commencement), where nothing
+  // else would. Once per call, so the user is never pulled back to it.
+  const shownVideoCallRef = useRef<string | null>(null);
+  const videoCallUpId = activeCall?.isVideo && activeCall.state === 'active' ? activeCall.id : null;
+  useEffect(() => {
+    if (!videoCallUpId || shownVideoCallRef.current === videoCallUpId) return;
+    shownVideoCallRef.current = videoCallUpId;
+    setScreen('callactive');
+  }, [videoCallUpId, setScreen]);
   const totalActive = activeGroups.length + (hasActiveCall ? 1 : 0);
 
   const tabLabels: Record<Screen, string> = {
     home:     tr.tabHome,
     metrics:  tr.tabMetrics,
     sdklogs:  tr.tabSdkLogs,
+    logs:     tr.tabLogs,
+    mockcalls: tr.tabMockCalls,
     settings: tr.tabSettings,
     contacts: tr.tabContacts,
     calls:    tr.tabCalls,
     talk:     tr.tabTalk,
+    tools:    tr.tabTools,
     audio:    tr.tabAudio,
     video:    tr.tabVideo,
     incall:   'In Call',
     callactive: 'Active Call',
   };
 
-  const statusColor = initialized
+  // Registered sits above initialized: init() only returned, while registration
+  // runs for ~35 s after it and can still fail. Both are green — the SDK is
+  // usable either way — so the word is what distinguishes them.
+  const statusColor = registered
     ? c.success
-    : paramsSet
-      ? c.warn
-      : created
-        ? c.primary
-        : c.error;
+    : initialized
+      ? c.success
+      : paramsSet
+        ? c.warn
+        : created
+          ? c.primary
+          : c.error;
 
-  const statusText = initialized
-    ? tr.statusInitialized
-    : paramsSet
-      ? tr.statusParamsSet
-      : created
-        ? tr.statusCreated
-        : tr.statusNotCreated;
+  const statusText = registered
+    ? tr.statusRegistered
+    : initialized
+      ? tr.statusInitialized
+      : paramsSet
+        ? tr.statusParamsSet
+        : created
+          ? tr.statusCreated
+          : tr.statusNotCreated;
 
   // Kullanıcı adını güvenli bir şekilde alıp baş harflerini çıkarma mantığı
   const username = AuthSettings.getLastUsername() ?? '—';
@@ -234,6 +283,67 @@ export function TabNavigator() {
     labelActive: {
       color: c.accent,
     },
+    // A marked tab's label, dimmed while the server is out of reach. Only the
+    // label: the icon keeps its colour so the ⚠️ stays legible, and the tab is
+    // still pressable — Talk and Calls work offline through the simulate
+    // helpers and the mock panel.
+    labelUnavailable: {
+      opacity: 0.45,
+    },
+    // The not-registered banner. Amber rather than red: nothing is broken, the
+    // bring-up simply has not finished — and it is the same warn colour the
+    // status badge uses at the PARAMS SET step, so the two agree.
+    notRegBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      backgroundColor: c.warn + '22',
+      borderBottomWidth: 1,
+      borderBottomColor: c.warn + '66',
+    },
+    notRegBannerText: {
+      flex: 1,
+      fontSize: 15,
+      lineHeight: 20,
+      fontWeight: '700',
+      color: c.warn,
+    },
+    notRegBannerAction: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: c.warn,
+    },
+    // The ⚠ on a tab that needs the server, over the top-right of its icon.
+    tabIconWrap: {
+      position: 'relative',
+    },
+    tabWarnDot: {
+      position: 'absolute',
+      top: -2,
+      right: -8,
+      fontSize: 9,
+    },
+
+    // The row above a screen opened from Tools. Without it the only way back to
+    // the menu would be the Tools tab, which reads as leaving the screen rather
+    // than going up one level.
+    toolBackRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+      backgroundColor: c.surface,
+    },
+    toolBackText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: c.accent,
+    },
     activeListOverlay: {
       position: 'absolute',
       top: 0, left: 0, right: 0, bottom: 0,
@@ -289,7 +399,7 @@ export function TabNavigator() {
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
 
       {/* ── Yeni Estetik Üst Başlık (Header) — transmit ekranında gizlenir ── */}
-      {!isBroadcasting && (
+      {!videoFullScreen && (
         <View style={navStyles.customHeader}>
           <View style={navStyles.profileSection}>
             <View style={navStyles.avatarWrapper}>
@@ -384,34 +494,81 @@ export function TabNavigator() {
         </View>
       )}
 
+      {/* ── Not registered yet ──────────────────────────────────────────
+          Shown on every ordinary screen until the SDK reports REGISTERED.
+          The status badge in the header says the same thing, but it is small
+          and only carries a word — this says what it means for the screen you
+          are on. Hidden on the full-screen call/video views, which must not be
+          pushed down, and on Home, where the badge and the Registration card
+          are already right there. */}
+      {!registered && !videoFullScreen && screen !== 'home'
+        && screen !== 'incall' && screen !== 'callactive' && (
+        <View style={navStyles.notRegBanner} testID="not-registered-banner">
+          <Text testID="not-registered-banner-text" style={navStyles.notRegBannerText}>
+            {initialized ? tr.notRegBannerProgress : tr.notRegBannerInit}
+          </Text>
+          <TouchableOpacity
+            testID="not-registered-go-home"
+            onPress={() => setScreen('home')}
+            activeOpacity={0.7}>
+            <Text style={navStyles.notRegBannerAction}>{tr.notRegBannerGoHome}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ── Back to the Tools menu, for the screens opened from it ────── */}
+      {TOOL_SCREENS.includes(screen) && (
+        <TouchableOpacity
+          testID="tool-back"
+          style={navStyles.toolBackRow}
+          onPress={() => setScreen('tools')}
+          activeOpacity={0.7}>
+          <Text style={navStyles.toolBackText}>{tr.toolsBack}</Text>
+        </TouchableOpacity>
+      )}
+
       {/* ── Screen Content ──────────────────────────────────────────────── */}
       <View style={{ flex: 1 }}>
         {screen === 'home'     && <HomeScreen />}
         {screen === 'metrics'  && <MetricsScreen />}
         {screen === 'sdklogs'  && <SdkLogsScreen />}
+        {screen === 'logs'     && <LogConsoleScreen />}
+        {screen === 'mockcalls' && <MockCallsScreen />}
         {screen === 'settings' && <SettingsScreen />}
         {screen === 'contacts' && <ContactsScreen />}
         {screen === 'calls'    && <CallsTab />}
         {screen === 'talk'     && <TalkScreen />}
         {screen === 'audio'    && <AudioScreen />}
         {screen === 'video'    && <VideoScreen />}
+        {screen === 'tools'    && <ToolsScreen />}
         {screen === 'incall'   && <OutgoingCallScreen />}
-        {screen === 'callactive' && <ActiveCallFullScreen />}
+        {screen === 'callactive' && (isVideoCallScreen ? <VideoCallScreen /> : <ActiveCallFullScreen />)}
       </View>
 
-      {screen !== 'incall' && screen !== 'callactive' && !isBroadcasting && (
+      {screen !== 'incall' && screen !== 'callactive' && !videoFullScreen && (
         <View style={navStyles.bottomBar}>
           {TABS.map(({ id, icon }) => {
-            const active = screen === id;
+            const active = screen === id
+              || (id === 'tools' && TOOL_SCREENS.includes(screen));
             return (
               <TouchableOpacity
                 key={id}
                 style={[navStyles.tab, active && navStyles.tabActive]}
                 onPress={() => setScreen(id)}
                 activeOpacity={0.7}>
-                <Text style={navStyles.icon}>{icon}</Text>
+                <View style={navStyles.tabIconWrap}>
+                  <Text style={navStyles.icon}>{icon}</Text>
+                  {/* This tab needs the server and it is not there yet. */}
+                  {!registered && SERVER_TABS.includes(id) && (
+                    <Text style={navStyles.tabWarnDot}>⚠️</Text>
+                  )}
+                </View>
                 <Text
-                  style={[navStyles.label, active && navStyles.labelActive]}
+                  style={[
+                    navStyles.label,
+                    active && navStyles.labelActive,
+                    !registered && SERVER_TABS.includes(id) && navStyles.labelUnavailable,
+                  ]}
                   numberOfLines={1}>
                   {tabLabels[id]}
                 </Text>

@@ -63,6 +63,24 @@ function phaseLabel(phase: number | string): string {
   return phase.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
+/**
+ * Whether a RegistrationEvent's `state` means "registered with the server".
+ *
+ * Android sends `RegistrationState.name` (UNREGISTERED / REGISTERING /
+ * REGISTERED / UNREGISTERING, verified against the AAR), plus two values the
+ * bridge writes itself: "REGISTERED" from `onRegistered()` and "FAILED" from
+ * `onRegistrationFailed()`. iOS sends the enum ordinal, where 2 is Registered.
+ *
+ * The `UN` test is what makes the string path correct: UNREGISTERED contains
+ * "REGISTERED" and UNREGISTERING contains "REGISTERI", so a plain `includes`
+ * would read both of them as success.
+ */
+function isRegisteredState(state: number | string): boolean {
+  if (typeof state === 'number') return state === 2;
+  const s = state.toUpperCase();
+  return s.includes('REGISTERED') && !s.includes('UN');
+}
+
 function stateLabel(state: number | string): string {
   if (typeof state === 'number') return STATE_LABELS[state] ?? `State ${state}`;
   return state.charAt(0) + state.slice(1).toLowerCase();
@@ -93,13 +111,21 @@ export interface SdkContextValue {
   // SDK actions
   handleCreate:    () => Promise<void>;
   handleSetParams: () => void;
-  handleInit:      () => Promise<void>;
+  handleInit:      (opts?: { skipParamsCheck?: boolean }) => Promise<void>;
   handleDestroy:   () => void;
+  /** Create → Set Parameters → Init in one press. */
+  handleStartAll:  () => Promise<void>;
 
   // Registration
   registrationProgress: number;
   registrationPhase:    string;
   registrationState:    string;
+  /**
+   * The SDK has told us it is registered with the server. Separate from
+   * `initialized`, which only means init() returned: registration runs for
+   * ~35 s after that and can still fail. Drives the status badge.
+   */
+  registered:           boolean;
 
   // SDK parameters (18 fields from SdkSettings)
   logEnabled:       boolean;  setLogEnabled:       (v: boolean) => void;
@@ -156,6 +182,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   const [registrationProgress, setRegistrationProgress] = useState(0);
   const [registrationPhase,    setRegistrationPhase]    = useState('');
   const [registrationState,    setRegistrationState]    = useState('');
+  const [registered,           setRegistered]           = useState(false);
   // The media foreground service is started once per registration, not on every
   // progress event — onRegistration fires repeatedly as the flow advances.
   const serviceStartedRef = useRef(false);
@@ -309,11 +336,16 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
       setRegistrationProgress(0);
       setRegistrationPhase('');
       setRegistrationState('');
+      setRegistered(false);
       addLog('McSdk() → nativeCreate() OK — listeners auto-bound');
 
+      // The SDK's own stream goes to the SDK Logs screen and the file, and
+      // NOT to the Log Console. It used to go to both, which put the same line
+      // in two places and — at the ~450 events a second the default params
+      // produce — buried the app's own lines and the listener events under it.
+      // The two screens each have one job now: this stream there, what the app
+      // and the listener said here.
       sdkRef.current.onLog((e: LogEvent) => {
-        const levelNames = ['VERBOSE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'];
-        addLog(`[SDK ${levelNames[e.level] ?? e.level}] ${e.log}`, 'sdk');
         SdkLogger.write(e.level, e.log);
         pendingSdkLogs.current.push({
           id: sdkLogId++, time: stamp(), level: e.level, msg: e.log,
@@ -343,6 +375,22 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         setRegistrationProgress(e.progress);
         setRegistrationPhase(phaseLabel(e.phase));
         setRegistrationState(stateLabel(e.state));
+        // A replay, not something the SDK just did: the native SDK outlived the
+        // last JS side (closing the app does not kill the process) and the
+        // bridge is telling this fresh JS side where it stands. Worth saying so
+        // in the console — otherwise a REGISTERED badge with no registration
+        // flow in the log reads as a bug.
+        if (e.replayed) {
+          addLog(
+            `registration state restored from the running SDK: ${stateLabel(e.state)}` +
+              ' (the app was closed, the SDK kept running)',
+            'warn',
+          );
+        }
+        // Latches on REGISTERED and off again on anything else, so losing the
+        // registration (UNREGISTERED, or FAILED from onRegistrationFailed)
+        // takes the badge back rather than leaving a stale "REGISTERED".
+        setRegistered(isRegisteredState(e.state));
 
         // Hold the microphone grant for as long as we are registered. Android
         // 11+ cuts background mic access and AudioRecord does not report it —
@@ -354,8 +402,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
         // background, which is exactly the situation an incoming call creates.
         // Registration happens with the app on screen, so this is the one
         // moment the start is reliably allowed.
-        const state = String(e.state).toUpperCase();
-        if (state.includes('REGISTERED') && !state.includes('UN')) {
+        if (isRegisteredState(e.state)) {
           if (!serviceStartedRef.current) {
             serviceStartedRef.current = true;
             MediaSession.startService(
@@ -481,12 +528,17 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     }
   }, [addLog, params]);
 
-  const handleInit = useCallback(async () => {
+  /**
+   * `skipParamsCheck` is for a caller that has just run setParams itself in this
+   * same tick: `paramsSet` is React state and is still false here, so the check
+   * would warn about a step that did happen. Only Start All passes it.
+   */
+  const handleInit = useCallback(async (opts?: { skipParamsCheck?: boolean }) => {
     if (!sdkRef.current) {
       addLog('SDK not created yet — call Create first', 'warn');
       return;
     }
-    if (!paramsSet) {
+    if (!paramsSet && !opts?.skipParamsCheck) {
       addLog('setParams() not called yet — call Set Parameters first', 'warn');
     }
     try {
@@ -533,6 +585,49 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     }
   }, [addLog, applyIdentity, cachedDocsMap, paramsSet]);
 
+  /**
+   * The whole bring-up in one press: Create → Set Parameters → Init.
+   *
+   * It calls the same three handlers the separate buttons do rather than
+   * repeating their bodies, so each step keeps its own logging, error handling
+   * and settings save, and a later change to one of them is picked up here.
+   *
+   * Sequencing works on refs, not on React state, which is what makes it safe
+   * to run all three in one tick: handleCreate assigns sdkRef.current
+   * synchronously, and that ref is the guard handleSetParams and handleInit
+   * actually check. The `paramsSet` state they would read is still false this
+   * tick — handleInit only warns on that and proceeds, so the chain is correct,
+   * but it does log one misleading "setParams() not called yet" line. Suppressed
+   * via skipParamsCheck so the console does not accuse the press of skipping a
+   * step it just performed.
+   *
+   * Already-created is not an error: Create is skipped and the run continues
+   * with Set Parameters, which is what re-pressing it after a partial bring-up
+   * should do. An initialised SDK is left alone — re-initialising is what
+   * Destroy is for.
+   */
+  const handleStartAll = useCallback(async () => {
+    if (initialized) {
+      addLog('SDK already initialised — Destroy first to start over', 'warn');
+      return;
+    }
+    addLog('Start: Create → Set Parameters → Init');
+    if (!sdkRef.current) {
+      await handleCreate();
+      // handleCreate swallows its own failures into the log, so the ref is the
+      // only reliable signal that it worked. Carrying on without it would add
+      // two more "SDK not created yet" lines on top of the real cause.
+      if (!sdkRef.current) {
+        addLog('Start stopped: Create failed', 'error');
+        return;
+      }
+    } else {
+      addLog('Create skipped — SDK already created');
+    }
+    handleSetParams();
+    await handleInit({ skipParamsCheck: true });
+  }, [addLog, handleCreate, handleSetParams, handleInit, initialized]);
+
   const handleDestroy = useCallback(() => {
     if (!sdkRef.current) {
       addLog('SDK not created — nothing to destroy', 'warn');
@@ -549,6 +644,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
       setCreated(false);
       setInitialized(false);
       setParamsSet(false);
+      setRegistered(false);
       addLog('destroy() called — C++ Sdk destroyed');
     } catch (err: any) {
       addLog(`destroy() failed: ${err.message}`, 'error');
@@ -564,16 +660,16 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     created, initialized, paramsSet,
     logs, listenerLogs, sdkLogs, addLog, clearLogs, clearSdkLogs,
     ipInfo,
-    registrationProgress, registrationPhase, registrationState,
-    handleCreate, handleSetParams, handleInit, handleDestroy,
+    registrationProgress, registrationPhase, registrationState, registered,
+    handleCreate, handleSetParams, handleInit, handleDestroy, handleStartAll,
     ...params,
     ...setters,
   }), [
     created, initialized, paramsSet,
     logs, listenerLogs, sdkLogs, addLog, clearLogs, clearSdkLogs,
     ipInfo,
-    registrationProgress, registrationPhase, registrationState,
-    handleCreate, handleSetParams, handleInit, handleDestroy,
+    registrationProgress, registrationPhase, registrationState, registered,
+    handleCreate, handleSetParams, handleInit, handleDestroy, handleStartAll,
     params, setters,
   ]);
 

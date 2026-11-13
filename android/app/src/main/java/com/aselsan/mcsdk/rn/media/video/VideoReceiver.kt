@@ -8,6 +8,7 @@ import android.view.Surface
 import com.aselsan.mcsdk.rn.media.video.codec.KeyFrameGate
 import com.aselsan.mcsdk.rn.media.video.codec.PlayoutClock
 import com.aselsan.mcsdk.rn.media.video.codec.VideoDecoder
+import com.aselsan.mcsdk.rn.media.video.transport.SdkVideoFrameSource
 import com.aselsan.mcsdk.rn.media.video.transport.UdpVideoFrameSource
 import com.aselsan.mcsdk.rn.media.video.transport.VideoFrameSource
 import com.aselsan.mcsdk.rn.media.video.view.RemoteVideoSurface
@@ -41,6 +42,7 @@ class VideoReceiver {
         val height: Int,
         val packetsReceived: Int,
         val packetsLost: Int,
+        val framesMissed: Int,
         val framesReceived: Int,
         val framesDiscarded: Int,
         val framesDecoded: Int,
@@ -65,7 +67,8 @@ class VideoReceiver {
         }
     }
 
-    private var source: UdpVideoFrameSource? = null
+    private var source: VideoFrameSource? = null
+    private var callSource: SdkVideoFrameSource? = null
     private var gate: KeyFrameGate? = null
 
     @Volatile
@@ -97,6 +100,7 @@ class VideoReceiver {
             height = height,
             packetsReceived = s?.packetsReceived ?: 0,
             packetsLost = s?.packetsLost ?: 0,
+            framesMissed = s?.framesMissed ?: 0,
             framesReceived = s?.framesDelivered ?: 0,
             framesDiscarded = s?.framesDiscarded ?: 0,
             framesDecoded = decodedBefore + (decoder?.framesDecoded ?: 0),
@@ -109,7 +113,7 @@ class VideoReceiver {
     }
 
     /** Kept after stop() so the screen can still show the last run's counters. */
-    private var lastSource: UdpVideoFrameSource? = null
+    private var lastSource: VideoFrameSource? = null
 
     /**
      * Starts listening on [port]. False on failure, with stats().error set.
@@ -119,14 +123,38 @@ class VideoReceiver {
      * then this one, and taking them the other way round could deadlock against a
      * view appearing on the main thread.
      */
-    fun startUdp(port: Int): Boolean {
-        if (!openSource(port)) return false
+    fun startUdp(port: Int): Boolean = start(UdpVideoFrameSource(port))
+
+    /**
+     * Starts showing a call's video as the SDK delivers it, from whichever call
+     * [setCallSource] names. False on failure, with stats().error set.
+     */
+    fun startCall(): Boolean {
+        val newSource = SdkVideoFrameSource()
+        if (!start(newSource)) return false
+        holdCallSource(newSource)
+        return true
+    }
+
+    /** The call to show from now on, or null for none. */
+    @Synchronized
+    fun setCallSource(callId: String?) {
+        callSource?.callId = callId
+    }
+
+    @Synchronized
+    private fun holdCallSource(newSource: SdkVideoFrameSource) {
+        callSource = newSource
+    }
+
+    private fun start(newSource: VideoFrameSource): Boolean {
+        if (!openSource(newSource)) return false
         RemoteVideoSurface.setListener { s -> onSurface(s) }
         return true
     }
 
     @Synchronized
-    private fun openSource(port: Int): Boolean {
+    private fun openSource(newSource: VideoFrameSource): Boolean {
         if (source != null) {
             error = "already receiving"
             return false
@@ -138,7 +166,6 @@ class VideoReceiver {
         lateBefore = 0
         secondsBefore = 0.0
 
-        val newSource = UdpVideoFrameSource(port)
         val newGate = KeyFrameGate({ ssrc -> newSource.requestKeyFrame(ssrc) })
         // A long gap in arrival with a short one in capture time means the frames were
         // held up on the way here. Rare by definition, so logging it costs nothing.
@@ -171,7 +198,7 @@ class VideoReceiver {
         monitor = VideoNetworkMonitor()
         quality = VideoNetworkMonitor.Quality.GOOD
         mainThread.postDelayed(networkCheck, NETWORK_CHECK_MS)
-        Log.d(TAG, "started on :$port")
+        Log.d(TAG, "started: ${newSource.name}")
         return true
     }
 
@@ -189,6 +216,7 @@ class VideoReceiver {
         // Source first: stop the inflow before the consumer goes away.
         s.stop()
         source = null
+        callSource = null
         gate = null
         stopDecoder()
         surface = null
@@ -205,6 +233,7 @@ class VideoReceiver {
             frames = s.framesDelivered,
             discarded = s.framesDiscarded,
             late = lateBefore + (decoder?.framesLate ?: 0),
+            missed = s.framesMissed,
         )
         if (next != quality) Log.d(TAG, "network: $quality → $next")
         quality = next

@@ -14,6 +14,7 @@ class VideoNetworkMonitorTest {
     private var frames = 0
     private var discarded = 0
     private var late = 0
+    private var missed = 0
 
     /** Plays [seconds] of a stream at 24 frames and 100 packets a second. */
     private fun run(
@@ -21,6 +22,7 @@ class VideoNetworkMonitorTest {
         lostPerSecond: Int = 0,
         latePerSecond: Int = 0,
         framesPerSecond: Int = 24,
+        missedPerSecond: Int = 0,
     ): Quality {
         var quality = Quality.GOOD
         repeat(seconds) {
@@ -29,7 +31,8 @@ class VideoNetworkMonitorTest {
             lost += lostPerSecond
             frames += framesPerSecond
             late += latePerSecond
-            quality = monitor.onSample(nowMs, packets, lost, frames, discarded, late)
+            missed += missedPerSecond
+            quality = monitor.onSample(nowMs, packets, lost, frames, discarded, late, missed)
         }
         return quality
     }
@@ -122,5 +125,19 @@ class VideoNetworkMonitorTest {
         assertEquals(Quality.LOST, run(3, framesPerSecond = 0))
         assertEquals(Quality.WEAK, run(1))
         assertEquals(Quality.GOOD, run(6))
+    }
+
+    // The SDK's frames: no packets to count, only capture times with holes in them.
+    @Test
+    fun `frames missing from the capture times turn weak`() {
+        run(5)
+        // What the congested Wi-Fi gave: 3 of 24 frames a second arriving.
+        assertEquals(Quality.WEAK, run(5, framesPerSecond = 3, missedPerSecond = 21))
+    }
+
+    @Test
+    fun `a frame missed now and then does not`() {
+        run(5)
+        assertEquals(Quality.GOOD, run(20, missedPerSecond = 1))
     }
 }

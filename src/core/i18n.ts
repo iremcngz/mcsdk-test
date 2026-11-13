@@ -9,18 +9,42 @@ export interface Translations {
   tabHome: string;
   tabMetrics: string;
   tabSdkLogs: string;
+  tabLogs: string;
+  tabMockCalls: string;
   tabSettings: string;
+  tabTools: string;
+
+  // ── Tools screen (the menu that holds the diagnostics screens)
+  toolsTitle: string;
+  toolsSubtitle: string;
+  toolsAudioDesc: string;
+  toolsVideoDesc: string;
+  toolsSdkLogsDesc: string;
+  toolsLogsDesc: string;
+  toolsMockCallsDesc: string;
+  mockCallsSubtitle: string;
+  toolsBack: string;
 
   // ── SDK lifecycle status badge
   statusNotCreated: string;
   statusCreated: string;
   statusParamsSet: string;
   statusInitialized: string;
+  statusRegistered: string;
+
+  // ── Not-registered warning banner
+  notRegBannerInit: string;
+  notRegBannerProgress: string;
+  notRegBannerGoHome: string;
 
   // ── Section headings
   sectionSdkLifecycle: string;
   sectionParameters: string;
+  paramsExpandHint: string;
+  paramsCollapseHint: string;
   sectionLogConsole: string;
+  /** Home's link from its own small console to the full one under Tools. */
+  logConsoleMoved: string;
   sectionAppearance: string;
   sectionLogRotation: string;
   sectionLogFiles: string;
@@ -35,6 +59,8 @@ export interface Translations {
   btnDestroy: string;
   btnSetParams: string;
   btnInitSdk: string;
+  /** One press for Create → Set Parameters → Init. */
+  btnStartAll: string;
   btnClear: string;
   btnLogsListener: string;
   btnLogsAll: string;
@@ -90,6 +116,13 @@ export interface Translations {
   // ── Metrics screen
   metricsHintInitial: string;
   metricsLastFetched: (t: string) => string;
+  /** How long ago the last fetch was, in words: "just now", "12 s ago", "3 min ago". */
+  metricsAgeJustNow: string;
+  metricsAgeSeconds: (n: number) => string;
+  metricsAgeMinutes: (n: number) => string;
+  metricsAutoRefresh: string;
+  metricsAutoRefreshOn: (sec: number) => string;
+  metricsAutoRefreshOff: string;
   metricsEmpty: string;
   metricsRawTitle: string;
   metricsNoSdk: string;
@@ -106,6 +139,14 @@ export interface Translations {
 
   // ── Settings notes
   settingsFileNote: string;
+  sectionVideo: string;
+  cardVideoBitrate: string;
+  cardVideoFrameRate: string;
+  cardVideoKeyFrame: string;
+  videoSecondsLabel: (n: number) => string;
+  videoFreezeOnLoss: string;
+  videoFreezeOnLossNote: string;
+  videoTuningNote: string;
   logPathsNote: string;
 
   // ── Alert (delete log files)
@@ -151,6 +192,30 @@ export interface Translations {
   talkModeReceive: string;
   talkModeTransmit: string;
   talkModeMessages: string;
+  /** The receive view, while no picture is coming. */
+  talkVideoWaiting: string;
+  /** The receive view, once the server has said the transmission finished. */
+  talkVideoEnded: string;
+  /** The transmit view: the server's time limit ended the transmission. */
+  talkVideoTimeUp: string;
+  /** The transmit view: the server refused the transmission, or its call failed. */
+  talkVideoFailed: string;
+  /** Contacts: an MCVideo private call that rings (manual commencement). */
+  contactVideoMc: string;
+  /** Contacts: an MCVideo private call the far end's phone answers (automatic commencement). */
+  contactVideoAc: string;
+  /** Under the name on the call screens of a private video call. */
+  videoCallLabel: string;
+  /** The SDK's MCVideo calls carry no audio. */
+  videoCallNoAudio: string;
+  /** The video call screen's own picture, while the user's camera is off. */
+  videoCallCameraOff: string;
+  videoCallTurnCameraOn: string;
+  videoCallTurnCameraOff: string;
+  videoCallEnd: string;
+  videoCallCameraDenied: string;
+  videoCallCameraFailed: string;
+  videoCallReceiveFailed: string;
   talkBtnStartCall: string;
   talkBtnEndCall: string;
   talkMockPanelTitle: string;
@@ -194,6 +259,8 @@ export interface Translations {
   contactCancel: string;
   contactErrRequired: string;
   contactErrDuplicate: (name: string) => string;
+  /** Groups come from the SDK, so the list is empty until registration completes. */
+  contactGroupsPending: string;
 
   // ── Network / IP monitor
   ipLabel: (ip: string | null) => string;
@@ -436,16 +503,37 @@ const tr: Translations = {
   tabHome:     'Ana Ekran',
   tabMetrics:  'Metrikler',
   tabSdkLogs:  'SDK Logları',
+  tabLogs:     'Log Konsolu',
+  tabMockCalls: 'Mock Aramalar',
   tabSettings: 'Ayarlar',
+  tabTools:    'Araçlar',
+
+  toolsTitle:        'Araçlar',
+  toolsSubtitle:     'Tanılama ve test ekranları',
+  toolsAudioDesc:    'Yakalama hattı, kodek ve sayaçlar',
+  toolsVideoDesc:    'İki telefon arası UDP video testi',
+  toolsSdkLogsDesc:  'SDK\'nın kendi log akışı',
+  toolsLogsDesc:     'Uygulama ve listener olayları, tam SIP gövdeleri',
+  toolsMockCallsDesc: 'Sunucu olmadan arama akışlarını dene',
+  mockCallsSubtitle: 'Buradaki aramalar tamamen yereldir — SDK\'ya ve sunucuya hiçbir şey gitmez. Arayüzü kayıt olmadan denemek içindir.',
+  toolsBack:         '‹ Araçlar',
 
   statusNotCreated:  'OLUŞTURULMADI',
   statusCreated:     'OLUŞTURULDU',
   statusParamsSet:   'PARAMETRE AYARLANDI',
   statusInitialized: 'BAŞLATILDI',
+  statusRegistered:  'KAYITLI',
+
+  notRegBannerInit:     'Kayıt yok — sunucu işlemleri çalışmaz',
+  notRegBannerProgress: 'Kayıt sürüyor — sunucu işlemleri henüz hazır değil',
+  notRegBannerGoHome:   'Ana Ekran ›',
 
   sectionSdkLifecycle: 'SDK Yaşam Döngüsü',
   sectionParameters:   'Parametreler',
+  paramsExpandHint:    'Göster',
+  paramsCollapseHint:  'Gizle',
   sectionLogConsole:   'Log Konsolu',
+  logConsoleMoved:     'Tam ekran Log Konsolunu aç ›',
   sectionAppearance:   'Görünüm',
   sectionLogRotation:  'Log Rotasyonu',
   sectionLogFiles:     'Log Dosyaları',
@@ -458,6 +546,7 @@ const tr: Translations = {
   btnDestroy:   'Yok Et',
   btnSetParams: '② Parametreleri Ayarla',
   btnInitSdk:   '③ SDK\'yı Başlat',
+  btnStartAll:  '⚡ Hepsini Başlat (①②③)',
   btnClear:     'Temizle',
   btnLogsListener: 'Sadece Listener',
   btnLogsAll:   'Tüm Loglar',
@@ -507,6 +596,12 @@ const tr: Translations = {
 
   metricsHintInitial:  "Aşağı çek veya 'Getir'e bas",
   metricsLastFetched:  t => `Son güncelleme: ${t}`,
+  metricsAgeJustNow:   'az önce',
+  metricsAgeSeconds:   n => `${n} sn önce`,
+  metricsAgeMinutes:   n => `${n} dk önce`,
+  metricsAutoRefresh:  'Otomatik yenile',
+  metricsAutoRefreshOn:  sec => `${sec} saniyede bir kendisi çekiyor`,
+  metricsAutoRefreshOff: "Kapalı — 'Getir' ile elle çek",
   metricsEmpty:        'Henüz metrik yok.\nAna sekmede SDK\'yı başlat, ardından Getir\'e bas.',
   metricsRawTitle:     'Ham Prometheus Çıktısı',
   metricsNoSdk:        "SDK oluşturulmamış. Ana ekrana git ve 'Oluştur'a bas.",
@@ -520,6 +615,14 @@ const tr: Translations = {
   filesCountLabel: n  => n === 0 ? 'Sınırsız' : `${n} dosya`,
 
   settingsFileNote: 'Değişiklikler bir sonraki uygulama yeniden başlatmasında geçerli olur (FileLogger başlangıçta bir kez başlatılır).',
+  sectionVideo:          'Video',
+  cardVideoBitrate:      'Bit hızı',
+  cardVideoFrameRate:    'Kare hızı',
+  cardVideoKeyFrame:     'Anahtar kare aralığı',
+  videoSecondsLabel:     n => `${n} sn`,
+  videoFreezeOnLoss:     'Kayıpta görüntüyü dondur',
+  videoFreezeOnLossNote: 'Bir kare kaybolunca bozuk kareler çizilmez: görüntü bir sonraki anahtar kareye kadar son sağlam karede bekler. Hemen geçerli olur.',
+  videoTuningNote:       'Bit hızı, kare hızı ve anahtar kare aralığı kamera bir sonraki açılışında (sonraki görüntülü aramada) geçerli olur. Zayıf Wi-Fi\'da düşük bit hızı ve kısa anahtar kare aralığı görüntüyü daha az bozar.',
   logPathsNote:     '"Yolları Göster"e basarak mevcut log dosyalarını listeleyin.',
 
   alertDeleteTitle:   'Log dosyalarını sil',
@@ -559,6 +662,21 @@ const tr: Translations = {
   talkCallStartFailed:   'Grup çağrısı kurulamadı',
   talkModeReceive:       'Receive',
   talkModeTransmit:      'Transmit',
+  talkVideoWaiting:      'Görüntü bekleniyor',
+  talkVideoEnded:        'Yayın sona erdi',
+  talkVideoTimeUp:       'Yayın süresi doldu',
+  talkVideoFailed:       'Yayın başlatılamadı',
+  contactVideoMc:        'Video MC',
+  contactVideoAc:        'Video AC',
+  videoCallLabel:        'Görüntülü çağrı',
+  videoCallNoAudio:      'Yalnızca görüntü, ses yok',
+  videoCallCameraOff:    'Kameranız kapalı',
+  videoCallTurnCameraOn: 'Kamerayı aç',
+  videoCallTurnCameraOff: 'Kamerayı kapat',
+  videoCallEnd:          'Bitir',
+  videoCallCameraDenied: 'Kamera izni verilmedi',
+  videoCallCameraFailed: 'Kamera açılamadı',
+  videoCallReceiveFailed: 'Görüntü alınamıyor',
   talkModeMessages:      'Messages',
   talkBtnStartCall:      'Start Call',
   talkBtnEndCall:        'End Call',
@@ -607,6 +725,7 @@ const tr: Translations = {
   contactCancel:           'Vazgeç',
   contactErrRequired:      'Ad ve MC ID / SIP URI gerekli',
   contactErrDuplicate:     name => `Bu adres zaten rehberde: ${name}`,
+  contactGroupsPending:    'Grup yok.\nGruplar kayıt tamamlandıktan sonra sunucudan gelir.',
 
   ipLabel:   ip => ip ? `IP: ${ip}` : 'Ağ yok',
   ipChanged: (p, c) => `[NET] IP değişti: ${p ?? '?'} → ${c ?? '?'}`,
@@ -740,7 +859,7 @@ const tr: Translations = {
   videoFramesReceived:    'Tamamlanan kare',
   videoFramesDecoded:     'Ekrana çizilen kare',
   videoFramesLate:        'Geç kalan kare',
-  videoNetworkWeak:       'Ağ zayıf: görüntü takılabilir',
+  videoNetworkWeak:       'Bağlantı zayıf: görüntü bozulabilir veya takılabilir',
   videoNetworkLost:       'Görüntü gelmiyor: bağlantıyı kontrol edin',
   videoFramesDiscarded:   'Atılan kare',
   videoKeyRequests:       'İstenen anahtar kare',
@@ -820,16 +939,37 @@ const en: Translations = {
   tabHome:     'Home',
   tabMetrics:  'Metrics',
   tabSdkLogs:  'SDK Logs',
+  tabLogs:     'Log Console',
+  tabMockCalls: 'Mock Calls',
   tabSettings: 'Settings',
+  tabTools:    'Tools',
+
+  toolsTitle:        'Tools',
+  toolsSubtitle:     'Diagnostics and test screens',
+  toolsAudioDesc:    'Capture pipeline, codec and counters',
+  toolsVideoDesc:    'Video between two phones over UDP',
+  toolsSdkLogsDesc:  "The SDK's own log stream",
+  toolsLogsDesc:     'App and listener events, full SIP bodies',
+  toolsMockCallsDesc: 'Drive the call flows with no server',
+  mockCallsSubtitle: 'The calls here are purely local — nothing reaches the SDK or the server. They are for driving the UI without a registration.',
+  toolsBack:         '‹ Tools',
 
   statusNotCreated:  'NOT CREATED',
   statusCreated:     'CREATED',
   statusParamsSet:   'PARAMS SET',
   statusInitialized: 'INITIALIZED',
+  statusRegistered:  'REGISTERED',
+
+  notRegBannerInit:     'Not registered — server features will not work',
+  notRegBannerProgress: 'Registering — server features are not ready yet',
+  notRegBannerGoHome:   'Home ›',
 
   sectionSdkLifecycle: 'SDK Lifecycle',
   sectionParameters:   'Parameters',
+  paramsExpandHint:    'Show',
+  paramsCollapseHint:  'Hide',
   sectionLogConsole:   'Log Console',
+  logConsoleMoved:     'Open the full Log Console ›',
   sectionAppearance:   'App Appearance',
   sectionLogRotation:  'Log Rotation',
   sectionLogFiles:     'Log Files',
@@ -842,6 +982,7 @@ const en: Translations = {
   btnDestroy:   'Destroy',
   btnSetParams: '② Set Parameters',
   btnInitSdk:   '③ Initialize SDK',
+  btnStartAll:  '⚡ Start All (①②③)',
   btnClear:     'Clear',
   btnLogsListener: 'Listener only',
   btnLogsAll:   'All logs',
@@ -891,6 +1032,12 @@ const en: Translations = {
 
   metricsHintInitial:  'Pull down or tap Fetch',
   metricsLastFetched:  t => `Last fetched: ${t}`,
+  metricsAgeJustNow:   'just now',
+  metricsAgeSeconds:   n => `${n} s ago`,
+  metricsAgeMinutes:   n => `${n} min ago`,
+  metricsAutoRefresh:  'Auto refresh',
+  metricsAutoRefreshOn:  sec => `Fetching by itself every ${sec} s`,
+  metricsAutoRefreshOff: 'Off — fetch by hand with Fetch',
   metricsEmpty:        'No metrics yet.\nInitialize the SDK on the Home tab, then tap Fetch.',
   metricsRawTitle:     'Raw Prometheus Output',
   metricsNoSdk:        'SDK not created. Go to Home and press Create first.',
@@ -904,6 +1051,14 @@ const en: Translations = {
   filesCountLabel: n  => n === 0 ? 'Unlimited' : `${n} files`,
 
   settingsFileNote: 'Changes take effect after next app restart (FileLogger initialises once at startup).',
+  sectionVideo:          'Video',
+  cardVideoBitrate:      'Bitrate',
+  cardVideoFrameRate:    'Frame rate',
+  cardVideoKeyFrame:     'Key frame interval',
+  videoSecondsLabel:     n => `${n} s`,
+  videoFreezeOnLoss:     'Freeze the picture on loss',
+  videoFreezeOnLossNote: 'When a frame is lost, the broken frames after it are not drawn: the picture holds on the last good frame until the next key frame. Takes effect at once.',
+  videoTuningNote:       'Bitrate, frame rate and key frame interval apply the next time the camera starts (the next video call). On weak Wi-Fi a lower bitrate and a shorter key frame interval break the picture less.',
   logPathsNote:     'Tap "Show paths" to list current log files.',
 
   alertDeleteTitle:   'Delete log files',
@@ -943,6 +1098,21 @@ const en: Translations = {
   talkCallStartFailed:   'The group call could not be set up',
   talkModeReceive:       'Receive',
   talkModeTransmit:      'Transmit',
+  talkVideoWaiting:      'Waiting for video',
+  talkVideoEnded:        'The transmission has ended',
+  talkVideoTimeUp:       'The transmission time is up',
+  talkVideoFailed:       'The transmission could not start',
+  contactVideoMc:        'Video MC',
+  contactVideoAc:        'Video AC',
+  videoCallLabel:        'Video call',
+  videoCallNoAudio:      'Video only, no audio',
+  videoCallCameraOff:    'Your camera is off',
+  videoCallTurnCameraOn: 'Turn camera on',
+  videoCallTurnCameraOff: 'Turn camera off',
+  videoCallEnd:          'End',
+  videoCallCameraDenied: 'Camera permission was not granted',
+  videoCallCameraFailed: 'The camera could not start',
+  videoCallReceiveFailed: 'The video could not be received',
   talkModeMessages:      'Messages',
   talkBtnStartCall:      'Start Call',
   talkBtnEndCall:        'End Call',
@@ -991,6 +1161,7 @@ const en: Translations = {
   contactCancel:           'Cancel',
   contactErrRequired:      'Name and MC ID / SIP URI are required',
   contactErrDuplicate:     name => `Already in contacts: ${name}`,
+  contactGroupsPending:    'No groups.\nGroups arrive from the server once registration completes.',
 
   ipLabel:   ip => ip ? `IP: ${ip}` : 'No network',
   ipChanged: (p, c) => `[NET] IP changed: ${p ?? '?'} → ${c ?? '?'}`,
@@ -1124,7 +1295,7 @@ const en: Translations = {
   videoFramesReceived:    'Frames completed',
   videoFramesDecoded:     'Frames drawn',
   videoFramesLate:        'Frames late',
-  videoNetworkWeak:       'Weak network: the picture may stutter',
+  videoNetworkWeak:       'Weak connection: the picture may break up or stutter',
   videoNetworkLost:       'No picture coming in: check the connection',
   videoFramesDiscarded:   'Frames discarded',
   videoKeyRequests:       'Key frames requested',

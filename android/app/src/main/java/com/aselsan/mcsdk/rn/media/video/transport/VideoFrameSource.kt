@@ -7,7 +7,7 @@ package com.aselsan.mcsdk.rn.media.video.transport
  * origin is swapped underneath.
  *
  *   UdpVideoFrameSource → RTP over UDP
- *   SdkVideoFrameSource → SdkListener.onVideoFrame (once the SDK exposes it)
+ *   SdkVideoFrameSource → SdkListener.onVideoFrame
  *
  * Threading: frames are delivered on the source's own thread, which for the SDK
  * is its media thread, so the listener must copy what it keeps and return.
@@ -16,6 +16,30 @@ interface VideoFrameSource {
 
     /** Human-readable name for the diagnostics UI. */
     val name: String
+
+    /** Packets taken in, where the source is the one receiving them. */
+    val packetsReceived: Int get() = 0
+
+    /** Packets that never arrived, where the source can tell. */
+    val packetsLost: Int get() = 0
+
+    /** Whole frames handed on. */
+    val framesDelivered: Int
+
+    /** Frames dropped for missing a packet, where the source is the one that knows. */
+    val framesDiscarded: Int get() = 0
+
+    /**
+     * Frames the sender captured that never arrived, told from gaps in capture time,
+     * where the source sees no packets to count (see CaptureGapCounter).
+     */
+    val framesMissed: Int get() = 0
+
+    /** Key frames asked of the sender. */
+    val keyFramesRequested: Int
+
+    /** Why the source last failed, if it has. */
+    val lastError: String?
 
     interface Listener {
         /**

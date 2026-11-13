@@ -35,6 +35,7 @@ import { GroupSelector } from './components/GroupSelector';
 import { AffiliationEditor } from './components/AffiliationEditor';
 import { MessagesScreen } from './MessagesScreen';
 import { BroadcastScreen } from './BroadcastScreen';
+import { ReceiveScreen } from './ReceiveScreen';
 
 
 // A simulated incoming call (mock panel) auto-answers after this delay. Real
@@ -67,7 +68,7 @@ function talkerNames(call: SdkGroupCall): string {
 
 export function TalkScreen() {
   const { c, tr, theme } = useAppContext();
-  const { affiliatedGroups, affiliationByGroup, applyAffiliation, groups: allGroups, groupsLoaded, setActiveGroups, pendingGroup, setPendingGroup, groupCalls, setGroupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, sdkGroupCalls, startGroupCall, endGroupCall, requestGroupFloor, releaseGroupFloor, setFocusedGroup, mutedGroups, toggleGroupMuted, isBroadcasting, setIsBroadcasting } = useTalkContext();
+  const { affiliatedGroups, affiliationByGroup, applyAffiliation, groups: allGroups, groupsLoaded, setActiveGroups, pendingGroup, setPendingGroup, groupCalls, setGroupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, sdkGroupCalls, startGroupCall, endGroupCall, requestGroupFloor, releaseGroupFloor, setFocusedGroup, mutedGroups, toggleGroupMuted, isBroadcasting, setIsBroadcasting, isWatchingVideo, setIsWatchingVideo, videoTransmissionEnded, videoSendRequested, videoSending, videoSendNotice, startVideoSend, stopVideoSend, privateVideoCall } = useTalkContext();
   const styles = useMemo(() => makeTalkStyles(c), [c]);
 
   // Only affiliated groups are selectable/listed; the rest live in the editor.
@@ -439,7 +440,20 @@ const ringColor = pushState === 'occupied'
   };
 
   if (isBroadcasting) {
-    return <BroadcastScreen group={selectedGroup} onStop={() => setIsBroadcasting(false)} />;
+    return (
+      <BroadcastScreen
+        group={selectedGroup}
+        requested={videoSendRequested}
+        isTransmitting={videoSending}
+        notice={videoSendNotice}
+        onToggleTransmit={videoSendRequested ? stopVideoSend : startVideoSend}
+        onStop={() => setIsBroadcasting(false)}
+      />
+    );
+  }
+
+  if (isWatchingVideo) {
+    return <ReceiveScreen group={selectedGroup} ended={videoTransmissionEnded} onStop={() => setIsWatchingVideo(false)} />;
   }
 
   if (messagesGroup) {
@@ -627,11 +641,13 @@ const ringColor = pushState === 'occupied'
                 : value === 'transmit' ? tr.talkModeTransmit
                 : tr.talkModeMessages;
               const isReceiveActive = value === 'receive' && isActive;
+              // A private video call has the camera and the decoder until it ends.
+              const videoTaken = privateVideoCall && value !== 'messages';
               return (
                 <TouchableOpacity
                   key={value}
                   testID={`talk-mode-${value}`}
-                  disabled={!callActive}
+                  disabled={!callActive || videoTaken}
                   onPress={() => {
                     if (value === 'transmit') {
                       setIsBroadcasting(true);
@@ -642,11 +658,13 @@ const ringColor = pushState === 'occupied'
                       return;
                     }
                     setMode(value);
+                    setIsWatchingVideo(true);
                   }}
                   activeOpacity={0.8}
                   style={[
                     styles.modePill,
                     isActive && (isReceiveActive ? styles.modePillActiveReceive : styles.modePillActive),
+                    videoTaken && styles.actionButtonDisabled,
                   ]}>
                   <View style={styles.modePillContent}>
                     <Text style={[styles.modeIcon, isActive && styles.modeTextActive]}>{icon}</Text>

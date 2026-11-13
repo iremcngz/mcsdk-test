@@ -311,6 +311,49 @@ export const LogRotationSettings = {
   },
 } as const;
 
+// ── Video tuning ───────────────────────────────────────────────────────────────
+// How the camera is encoded and what the receiver does after a loss. Device-wide
+// (globalStorage), not per user: it is about this phone's network, not its account.
+// The native side (VideoTuning.kt) clamps whatever arrives.
+
+export interface VideoTuning {
+  bitrateKbps:             number;
+  /** One the test phones' cameras hold fixed: 15, 24 or 30. */
+  frameRate:               number;
+  keyFrameIntervalSeconds: number;
+  /** Hold the last good picture until a key frame, rather than draw what a loss broke. */
+  freezeOnLoss:            boolean;
+}
+
+export const VIDEO_TUNING_DEFAULTS: VideoTuning = {
+  bitrateKbps:             500,
+  frameRate:               24,
+  keyFrameIntervalSeconds: 1,
+  freezeOnLoss:            true,
+};
+
+export const VIDEO_BITRATE_OPTIONS    = [300, 500, 800, 1200] as const;
+export const VIDEO_FRAME_RATE_OPTIONS = [15, 24, 30] as const;
+export const VIDEO_KEY_FRAME_OPTIONS  = [1, 2, 4] as const;
+
+export const VideoTuningSettings = {
+  load(): VideoTuning {
+    const d = VIDEO_TUNING_DEFAULTS;
+    return {
+      bitrateKbps:             globalStorage.getNumber('video.bitrateKbps')             ?? d.bitrateKbps,
+      frameRate:               globalStorage.getNumber('video.frameRate')               ?? d.frameRate,
+      keyFrameIntervalSeconds: globalStorage.getNumber('video.keyFrameIntervalSeconds') ?? d.keyFrameIntervalSeconds,
+      freezeOnLoss:            globalStorage.getBoolean('video.freezeOnLoss')           ?? d.freezeOnLoss,
+    };
+  },
+  save(v: VideoTuning): void {
+    globalStorage.set('video.bitrateKbps',             v.bitrateKbps);
+    globalStorage.set('video.frameRate',               v.frameRate);
+    globalStorage.set('video.keyFrameIntervalSeconds', v.keyFrameIntervalSeconds);
+    globalStorage.set('video.freezeOnLoss',            v.freezeOnLoss);
+  },
+} as const;
+
 // ── Auth settings ──────────────────────────────────────────────────────────────
 // stayLoggedIn: if true, persists the logged-in flag so the user skips the
 // login screen on the next app launch. If false (default), the session is

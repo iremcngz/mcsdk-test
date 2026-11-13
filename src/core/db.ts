@@ -23,6 +23,7 @@
 
 import { open, type DB } from '@op-engineering/op-sqlite';
 import { DocumentType, type McSdkDocument } from '../mcsdk/types';
+import { DEFAULT_MCPTT_DOMAIN } from '../features/calls/mcId';
 
 // ── Singleton ─────────────────────────────────────────────────────────────────
 
@@ -152,29 +153,78 @@ export async function getAllContacts(): Promise<Contact[]> {
   return (result.rows?._array ?? []) as Contact[];
 }
 
+/**
+ * The MCX test server's own users, as the app addresses them: an MC ID and the
+ * `sip:mcptt.<id>@<realm>` URI the server names that user by (`toMcpttUri`).
+ * `mcuser-111` is the account this app logs in as, so it is in the list too —
+ * calling yourself is a usable check that the path works at all.
+ */
 const SEED_CONTACTS = [
-  { name: 'Alice Johnson',   sipUri: 'sip:alice@mc.example.com',   notes: 'Team Alpha' },
-  { name: 'Bob Martinez',    sipUri: 'sip:bob@mc.example.com',     notes: 'Team Bravo' },
-  { name: 'Carol White',     sipUri: 'sip:carol@mc.example.com',   notes: 'Dispatch' },
-  { name: 'David Kim',       sipUri: 'sip:david@mc.example.com',   notes: 'Team Alpha' },
-  { name: 'Eve Nakamura',    sipUri: 'sip:eve@mc.example.com',     notes: 'Command' },
-  { name: 'Frank Özdemir',   sipUri: 'sip:frank@mc.example.com',   notes: 'Team Bravo' },
-  { name: 'Grace Yıldız',    sipUri: 'sip:grace@mc.example.com',   notes: 'Logistics' },
-  { name: 'Hasan Demir',     sipUri: 'sip:hasan@mc.example.com',   notes: 'Security' },
-  { name: 'Irina Petrova',   sipUri: 'sip:irina@mc.example.com',   notes: 'Dispatch' },
-  { name: 'Jean Moreau',     sipUri: 'sip:jean@mc.example.com',    notes: 'Command' },
-  { name: 'Kenji Tanaka',    sipUri: 'sip:kenji@mc.example.com',   notes: 'Team Alpha' },
-  { name: 'Li Wei',          sipUri: 'sip:liwe@mc.example.com',    notes: 'Logistics' },
-  { name: 'Maria Silva',     sipUri: 'sip:maria@mc.example.com',   notes: 'Security' },
-  { name: 'Omar Hassan',     sipUri: 'sip:omar@mc.example.com',    notes: 'Team Bravo' },
+  { name: 'mcuser-111', sipUri: 'sip:mcptt.mcuser-111@ims.mnc001.mcc001.3gppnetwork.org' },
+  { name: 'mcuser-222', sipUri: 'sip:mcptt.mcuser-222@ims.mnc001.mcc001.3gppnetwork.org' },
+  { name: 'mcuser-333', sipUri: 'sip:mcptt.mcuser-333@ims.mnc001.mcc001.3gppnetwork.org' },
+  { name: 'mcuser-444', sipUri: 'sip:mcptt.mcuser-444@ims.mnc001.mcc001.3gppnetwork.org' },
+  { name: 'mcuser-555', sipUri: 'sip:mcptt.mcuser-555@ims.mnc001.mcc001.3gppnetwork.org' },
+  // The server's naming changes after mcuser-555: the rest are `user-11`
+  // upwards, not `mcuser-666`. These also carry **no service prefix** on the
+  // user part — the server knows them as plain `sip:user-11@<realm>`, not
+  // `sip:mcptt.user-11@…`. Do not "normalise" them to the mcuser- form.
+  { name: 'user-11', sipUri: 'sip:user-11@ims.mnc001.mcc001.3gppnetwork.org' },
+  { name: 'user-12', sipUri: 'sip:user-12@ims.mnc001.mcc001.3gppnetwork.org' },
+  { name: 'user-13', sipUri: 'sip:user-13@ims.mnc001.mcc001.3gppnetwork.org' },
+  { name: 'user-14', sipUri: 'sip:user-14@ims.mnc001.mcc001.3gppnetwork.org' },
+  { name: 'user-15', sipUri: 'sip:user-15@ims.mnc001.mcc001.3gppnetwork.org' },
 ];
 
+/**
+ * The placeholder people the contacts list used to be seeded with (Alice
+ * Johnson and the rest). They are gone from SEED_CONTACTS, but a phone that
+ * already ran the app still holds those rows, and seedContacts only ever adds —
+ * so they are deleted by name once, on the next seed. A row the user typed
+ * themselves is untouched: only these exact names go.
+ */
+const LEGACY_SEED_NAMES = [
+  'Alice Johnson', 'Bob Martinez', 'Carol White', 'David Kim',
+  'Eve Nakamura', 'Frank Özdemir', 'Grace Yıldız', 'Hasan Demir',
+  'Irina Petrova', 'Jean Moreau', 'Kenji Tanaka', 'Li Wei',
+  'Maria Silva', 'Omar Hassan',
+  // The `mcuser-666`..`mcuser-1010` guesses, which the server does not know:
+  // above mcuser-555 its users are `user-11` upwards.
+  'mcuser-666', 'mcuser-777', 'mcuser-888', 'mcuser-999', 'mcuser-1010',
+];
+
+/** Drops the old placeholder contacts from an installation that predates the MC-ID seed set. */
+export async function removeLegacySeedContacts(): Promise<void> {
+  const db = getDb();
+  const marks = LEGACY_SEED_NAMES.map(() => '?').join(', ');
+  await db.execute(`DELETE FROM contacts WHERE name IN (${marks})`, LEGACY_SEED_NAMES);
+}
+
+/**
+ * The `user-11`..`user-15` contacts were first seeded as `sip:mcptt.user-1x@…`,
+ * which the server does not know — it names them without a service prefix. A
+ * phone that already ran the app holds those wrong rows, and seedContacts only
+ * ever adds, so the URI is corrected in place here. Keyed on name and on the
+ * exact wrong URI, so a row the user edited themselves is left alone.
+ */
+async function fixSeedContactUris(): Promise<void> {
+  const db = getDb();
+  for (const ct of SEED_CONTACTS) {
+    await db.execute(
+      'UPDATE contacts SET sip_uri = ? WHERE name = ? AND sip_uri <> ? AND sip_uri = ?',
+      [ct.sipUri, ct.name, ct.sipUri, `sip:mcptt.${ct.name}@${DEFAULT_MCPTT_DOMAIN}`],
+    );
+  }
+}
+
 export async function seedContacts(): Promise<void> {
+  await removeLegacySeedContacts();
+  await fixSeedContactUris();
   const existing = await getAllContacts();
   const existingNames = new Set(existing.map(c => c.name));
   for (const ct of SEED_CONTACTS) {
     if (!existingNames.has(ct.name)) {
-      await insertContact(ct.name, ct.sipUri, ct.notes);
+      await insertContact(ct.name, ct.sipUri, '');
     }
   }
 }

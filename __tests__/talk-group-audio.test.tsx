@@ -25,6 +25,8 @@ const mockSdk = {
   onCallUpdated: sub(listeners.updated),
   onCallTerminated: sub(listeners.terminated),
   onFloorUpdated: sub(listeners.floor),
+  onTransmissionUpdated: sub(new Set()),
+  onReceptionUpdated: sub(new Set()),
   onSdkError: sub(listeners.error),
   startGroupCall: jest.fn(),
   terminateCall: jest.fn(),
@@ -37,7 +39,7 @@ jest.mock('../src/contexts/SdkContext', () => ({
 }));
 
 // Only what TalkContext reads from it: whether a private call has the audio.
-const mockPrivate = { audioCallId: null as string | null };
+const mockPrivate = { audioCallId: null as string | null, videoCallLive: false };
 jest.mock('../src/contexts/CallContext', () => ({
   useCallContextIfPresent: () => mockPrivate,
 }));
@@ -57,6 +59,7 @@ jest.mock('../src/core/mediaSession', () => ({
 let mockMicPermission = 'granted';
 jest.mock('../src/core/permissions', () => ({
   ensureMicPermission: jest.fn(async () => mockMicPermission),
+  ensureCameraPermission: jest.fn(async () => 'granted'),
 }));
 
 import { TalkContextProvider, useTalkContext } from '../src/contexts/TalkContext';
@@ -95,6 +98,7 @@ beforeEach(() => {
   Object.values(listeners).forEach(s => s.clear());
   jest.clearAllMocks();
   mockPrivate.audioCallId = null;
+  mockPrivate.videoCallLive = false;
   mockMicPermission = 'granted';
   view = render(tree());
 });
@@ -271,5 +275,21 @@ describe('group call audio', () => {
     await settle();
     fire(listeners.error, { error: 'AUDIO_CODEC_UNSUPPORTED' });
     expect(ctx.sdkGroupCalls[G1].floorNotice).toBe('AUDIO:AUDIO_CODEC_UNSUPPORTED');
+  });
+});
+
+describe('a private video call', () => {
+  it('closes the group\'s transmit and receive views: it takes the camera and the decoder', () => {
+    act(() => {
+      ctx.setIsBroadcasting(true);
+      ctx.setIsWatchingVideo(true);
+    });
+    expect(ctx.privateVideoCall).toBe(false);
+
+    mockPrivate.videoCallLive = true;
+    view.rerender(tree());
+    expect(ctx.privateVideoCall).toBe(true);
+    expect(ctx.isBroadcasting).toBe(false);
+    expect(ctx.isWatchingVideo).toBe(false);
   });
 });

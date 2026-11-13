@@ -7,15 +7,15 @@ import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
 
 /**
- * Where the view and the decoder meet. They live in different worlds: React Native
- * creates and destroys the view as screens come and go, on its own schedule, and the
- * receiver may start before or after. Process-wide, like CallAudioRouter, so a JS
- * reload's new module finds the same one.
+ * Where a view and the video code drawing into it meet. They live in different
+ * worlds: React Native creates and destroys the view as screens come and go, on its
+ * own schedule, and the video may start before or after. Process-wide, like
+ * CallAudioRouter, so a JS reload's new module finds the same one.
  *
- * Everything runs on the main thread except the receiver's calls in and out, hence
+ * Everything runs on the main thread except the video code's calls in and out, hence
  * the lock.
  */
-object RemoteVideoSurface {
+open class VideoSurfaceSlot {
 
     private var current: Surface? = null
     private var listener: ((Surface?) -> Unit)? = null
@@ -45,29 +45,52 @@ object RemoteVideoSurface {
     }
 }
 
+/** The decoder's view of the far end. */
+object RemoteVideoSurface : VideoSurfaceSlot()
+
+/** The camera's own picture, as the sender draws it. */
+object LocalVideoSurface : VideoSurfaceSlot()
+
 /**
- * The view the decoder draws into. A SurfaceView because the decoded frames then
- * reach the screen through the compositor, without passing through the app's own
- * drawing at all.
+ * A SurfaceView because the frames then reach the screen through the compositor,
+ * without passing through the app's own drawing at all.
  */
+private fun surfaceViewFor(context: ThemedReactContext, slot: VideoSurfaceSlot): SurfaceView =
+    SurfaceView(context).apply {
+        holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                slot.onCreated(holder.surface)
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+
+            // The Surface is gone when this returns, so whatever draws into it has to
+            // have let go of it by then; the listener does that synchronously.
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                slot.onDestroyed(holder.surface)
+            }
+        })
+    }
+
+/** The view the decoder draws into. */
 class RemoteVideoViewManager : SimpleViewManager<SurfaceView>() {
 
     override fun getName() = "McSdkVideoView"
 
     override fun createViewInstance(context: ThemedReactContext): SurfaceView =
-        SurfaceView(context).apply {
-            holder.addCallback(object : SurfaceHolder.Callback {
-                override fun surfaceCreated(holder: SurfaceHolder) {
-                    RemoteVideoSurface.onCreated(holder.surface)
-                }
+        surfaceViewFor(context, RemoteVideoSurface)
+}
 
-                override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+/** The view the sender shows the camera in. */
+class LocalVideoViewManager : SimpleViewManager<SurfaceView>() {
 
-                // The Surface is gone when this returns, so the decoder has to have
-                // let go of it by then; the listener stops it synchronously.
-                override fun surfaceDestroyed(holder: SurfaceHolder) {
-                    RemoteVideoSurface.onDestroyed(holder.surface)
-                }
-            })
-        }
+    override fun getName() = "McSdkLocalVideoView"
+
+    /**
+     * Over the remote view: on a video call this one is the small picture in the
+     * corner, and two SurfaceViews otherwise stack in no particular order. A media
+     * overlay is still under the window, so React Native's own views draw over it.
+     */
+    override fun createViewInstance(context: ThemedReactContext): SurfaceView =
+        surfaceViewFor(context, LocalVideoSurface).apply { setZOrderMediaOverlay(true) }
 }

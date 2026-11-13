@@ -19,7 +19,6 @@ import { useCallContext } from '../../contexts/CallContext';
 import { useNavigation } from '../../contexts/NavigationContext';
 import type { CallRecord } from './types';
 import { makeCallStyles } from './styles';
-import { MockCallsPanel } from './MockCallsPanel';
 import { callEndDetail } from './callEndText';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -128,9 +127,6 @@ export function CallHistoryScreen() {
           renderItem={renderItem}
         />
       )}
-
-      {/* Mock control panel — always visible at bottom */}
-      <MockCallsPanel />
     </View>
   );
 }
