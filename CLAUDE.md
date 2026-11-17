@@ -280,12 +280,26 @@ Do not assume a screen is wired just because it renders convincingly.
   menu's mute silences that group's received audio (`setPlaybackMuted`) without leaving the
   call. A stop always names its call (`stopCallAudio(callId)`), so a late stop from a call
   that lost the pipeline cannot end the audio of the one that took it.
-- `TalkScreen` group calls are the SDK's (`TalkContext.sdkGroupCalls`): Start/PTT place
-  the call, PTT requests and releases the floor, End leaves, and the screen follows the
-  callbacks. The mock panel (⚙️) only drives a simulated call on a
-  group with no SDK call — an SDK call always takes precedence over it.
-- **Sending a group's video is wired, not yet verified on a call.** Talk's Transmit opens
-  `BroadcastScreen` with only the camera on; nothing reaches the server until its 🔴 button.
+- `TalkScreen` group calls are the SDK's (`TalkContext.sdkGroupCalls`): the first press of
+  PTT places the call, PTT requests and releases the floor, End leaves, and the screen
+  follows the callbacks. There is no Start Call button any more — MCPTT group calls ask for
+  no floor on setup, so the first press only places the call and talking takes another.
+  The mock panel (⚙️) only drives a simulated call on a group with no SDK call — an SDK
+  call always takes precedence over it.
+
+  **End is never a setup failure.** End removes the call at once, but the SDK follows the
+  BYE with a `TERMINATING` update that puts it back as `ending` until `onCallTerminated`
+  takes it out. The "group call could not be set up" notice used to fire on anything not
+  `active`, so it fired after a plain End; it now needs a call still `connecting`, and never
+  one the user ended (`endedByUserRef`).
+- **Sending a group's video is wired; the sending side is verified on a call** (granted,
+  frames out, ✕ sends the BYE), its arrival on another phone is not — see Receive. Talk's
+  **Video** button (`talk-video-start`, under the group's name at the left; it was the
+  Transmit mode pill) opens `BroadcastScreen` with only the camera on; nothing reaches the
+  server until its 🔴 button. It needs no MCPTT call and is enabled without one: video is
+  an MCVideo call of its own (below), so sending never goes through the PTT floor. 🔴 again
+  ends the *transmission* (TCM `Transmission End Request`, no SIP) and the call stays up;
+  only ✕ ends the *call* (`terminateCall` → BYE).
   That places an MCVideo call beside the group's MCPTT one (the SDK's calls carry one media
   plane each), then `requestTransmission`, and frames go out once it is `GRANTED`: capture →
   H.264 → `SdkVideoFrameSink` → `sendVideoFrame`. REC and its timer show `GRANTED`, not the
@@ -295,6 +309,14 @@ Do not assume a screen is wired just because it renders convincingly.
   one call per group. The view's picture is drawn by `VideoRotator`, since an app can open a
   camera only once; so `BroadcastScreen` no longer uses VisionCamera. Still mock on that
   screen: its PTT button only — the camera flip (↺) is real.
+
+  **The server does not answer `Transmission End Request`.** Seen on every release, with or
+  without a revoke before it: the SDK sends it, retries on T101 twice, and after 4.5 s gives
+  up with `status: END_TIMEOUT` instead of `ENDED`. After a `REVOKED` the server also
+  repeats the revoke every ~3 s, ignored by the SDK once it is ending. The user sees nothing
+  (STANDBY is immediate, the next request works), but it is a server/SDK interop issue to
+  raise — and the SDK does not log the TCM messages it *sends*, so proving the request left
+  the phone takes a capture on the server side.
 
   **The flip is a camera restart, not a setting.** A `CameraDevice` is one physical camera,
   so `VideoPipeline.flipCamera()` tears the pipeline down and brings it back on the other
@@ -322,11 +344,51 @@ Do not assume a screen is wired just because it renders convincingly.
 - **Receiving a group's video is wired, not yet verified on a call.** Talk's Receive opens
   `ReceiveScreen`; `useGroupVideoReceive` runs `VideoReceiver` on `SdkVideoFrameSource` for the
   group's MCVideo call while it is open, and when the server says the last transmitter finished
-  (`TRANSMISSION_ENDED`) shows that briefly and goes back to Talk. One transmitter at a time (one decoder). Every phone
+  (`TRANSMISSION_ENDED`) shows that briefly and goes back to Talk.
+
+  **Receive answers for who is actually sending.** `useGroupVideoReceive` returns
+  `{ ended, transmitters }`: the list is built from `onReceptionUpdated`, one row per remote
+  transmitter (`transmitterId` + `functionalAlias`), and it is kept whether the view is open
+  or not, because the buttons *outside* the view are disabled from it — with nobody sending
+  there is no stream for the SDK to show. Two buttons open it: the **Receive** button beside
+  Video, at the right under the ▼ menu (`talk-video-receive`, with a count once more than one
+  is sending), and the Receive mode pill. Both read just "Receive" and both always open the
+  picker sheet (`talk-watch-picker`, rows `talk-watch-<id>`), one sender included, so who is
+  watched is chosen by name rather than assumed; the choice lands in
+  `TalkContext.watchedTransmitter`. The alias can arrive on a later event than the id, so a
+  row already listed is updated rather than skipped, and a row whose sender stops is dropped
+  — a chosen transmitter that goes clears the choice rather than naming someone who has
+  gone. The list is per call and empties with it. The ref that drives `ended` is still a
+  `Set`, kept beside the state: the event handler reads it synchronously.
+
+  A row is named by the alias, else by the MC ID out of the URI (`displayMcId`). The alias is
+  an optional field of the transmission-control message (TS 24.581 §9.2.3.21) and this server
+  does not send it, so falling back to "Unknown transmitter" named nobody.
+
+  **Not yet seen working: no `ReceptionUpdated` reaches the other phone.** In the two-phone
+  test the watching phone was in the call through the sender's transmissions and got no
+  reception event and no TCM message at all, so its Receive never enabled. Not explained yet;
+  a server-side capture of the transmission-control port is the next step.
+
+  One transmitter at a time (one decoder). Every phone
   asks for a transmitter as soon as it is AVAILABLE, whether watching or not, so frames arrive
   regardless (`McSdkBridge` `video received:`). The SDK has no video RTCP and reports no loss:
   `requestKeyFrame` does nothing, and after a loss the picture is damaged until the next
   periodic key frame.
+- **The Talk screen is sized from the window, not in fixed dp.** The PTT button used to be a
+  flat 230 dp (ring 266): 65% of the A20's 411 dp width but 74% of the S25's 360, where it
+  overlapped the buttons below. `pttSizes(width, height)` in `talk/styles.ts` takes the
+  smaller of 56% of the width and 25% of the height (the S25 is also short, 780 dp against
+  891), clamped to 150–230 dp. Height matters because `centerBody` is `flex: 1` and centres
+  its content: growing the wrapper only splits the room above and below, so the ring itself
+  has to fit. The wrapper still reserves the ring at the peak of its pulse
+  (`PTT_RING_PEAK_SCALE` = 1.05 × 1.03 — a transform does not grow the layout) plus its
+  20 dp glow. The floor notice is drawn **inside** the button, in place of the status label
+  for `FLOOR_NOTICE_MS`: it used to sit absolute below the button, in a gap that is zero on a
+  short screen. Every text inside a fixed-size box carries `TALK_MAX_FONT_SCALE` (1.2), and
+  the button's labels are two lines at most and shrink rather than spill — Samsung's "Huge"
+  system font is ~1.3x and the Talk root does not scroll. `talk-ptt-size.test.ts` checks
+  this against both handsets' real px/dpi.
 - **Private video calls are wired, not yet verified on a call.** Contacts' **Video MC** /
   **Video AC** place an MCVideo private call (`startVideoPrivateCall`, MC rings, AC is
   answered by the far phone). It is **video only**: the SDK's MCVideo calls carry no audio.
@@ -375,6 +437,14 @@ wait ~35 s for registration → Talk. Groups only arrive once registration compl
 `adb logcat` carries the bridge's own lines (`McSdkBridge`) and SDK lines (`SDK`), but PJSIP
 message bodies are truncated there. **The full SIP bodies appear in the app's own Log
 Console (Home tab) and SDK Logs tab** — go there when diagnosing a malformed request.
+
+Two traps when comparing two phones' logs:
+- **The app's file log is in UTC** (`[2026-11-16 13:08:50]` for 16:08:50 local), logcat is in
+  local time.
+- **The handsets' clocks can differ by tens of seconds** (`auto_time=0` left the A20 38 s
+  slow, 45.7 s behind the S25). It looked exactly like the server inviting group members
+  45 s late; it was not. Align on a shared event (the INVITE, the BYE) or check
+  `adb shell date +%s` on both before reading anything into the timing.
 
 Useful filters:
 

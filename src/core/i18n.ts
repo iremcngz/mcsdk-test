@@ -192,6 +192,19 @@ export interface Translations {
   talkModeReceive: string;
   talkModeTransmit: string;
   talkModeMessages: string;
+  /** The Talk screen's video button, which opens the transmit view. Kept short: it
+   * sits beside the mode pills. */
+  talkBtnVideoStart: string;
+  /** Title of the picker listing who is transmitting video to this group. */
+  talkReceivePickTitle: string;
+  /** The picker's note, above the list of transmitters. */
+  talkReceivePickHint: string;
+  /** The picker, when nobody is transmitting to the group. */
+  talkReceiveNobody: string;
+  /** A transmitter with no functional alias of its own. */
+  talkReceiveUnnamed: string;
+  /** The picker's row for a transmitter already being watched. */
+  talkReceiveWatching: string;
   /** The receive view, while no picture is coming. */
   talkVideoWaiting: string;
   /** The receive view, once the server has said the transmission finished. */
@@ -662,6 +675,12 @@ const tr: Translations = {
   talkCallStartFailed:   'Grup çağrısı kurulamadı',
   talkModeReceive:       'Receive',
   talkModeTransmit:      'Transmit',
+  talkBtnVideoStart:     'Video',
+  talkReceivePickTitle:  'Kimi izlemek istiyorsunuz?',
+  talkReceivePickHint:   'Bu gruba şu an görüntü gönderenler:',
+  talkReceiveNobody:     'Yayın yapan yok',
+  talkReceiveUnnamed:    'Bilinmeyen gönderen',
+  talkReceiveWatching:   'izleniyor',
   talkVideoWaiting:      'Görüntü bekleniyor',
   talkVideoEnded:        'Yayın sona erdi',
   talkVideoTimeUp:       'Yayın süresi doldu',
@@ -1098,6 +1117,12 @@ const en: Translations = {
   talkCallStartFailed:   'The group call could not be set up',
   talkModeReceive:       'Receive',
   talkModeTransmit:      'Transmit',
+  talkBtnVideoStart:     'Video',
+  talkReceivePickTitle:  'Who do you want to watch?',
+  talkReceivePickHint:   'Transmitting video to this group now:',
+  talkReceiveNobody:     'Nobody is transmitting',
+  talkReceiveUnnamed:    'Unknown transmitter',
+  talkReceiveWatching:   'watching',
   talkVideoWaiting:      'Waiting for video',
   talkVideoEnded:        'The transmission has ended',
   talkVideoTimeUp:       'The transmission time is up',

@@ -1,7 +1,100 @@
-import { StyleSheet } from 'react-native';
+import { Dimensions, StyleSheet } from 'react-native';
 import type { ThemePalette } from '../../core/theme';
 
-export function makeTalkStyles(c: ThemePalette) {
+/**
+ * The PTT button's size, from the window's width.
+ *
+ * It used to be a flat 230 dp with a 266 dp ring around it, which is a different
+ * share of the screen on every phone: 411 dp wide (Galaxy A20) gave it 66% of the
+ * width, while 360 dp (Galaxy S25) gave it 75% and the ring overlapped the buttons
+ * under it. Taking a share of the width instead makes it the same size relative to
+ * the screen everywhere.
+ *
+ * The share is the A20's, so that phone looks as it did; the clamp keeps it sensible
+ * on a small phone and from filling a tablet.
+ */
+const PTT_WIDTH_SHARE = 0.56;
+const PTT_MIN = 150;
+const PTT_MAX = 230;
+
+/** The ring sits outside the button; the wrapper has to hold the ring. */
+const RING_RATIO = 266 / 230;
+
+/**
+ * The most the ring is ever scaled to while a call is up.
+ *
+ * TalkScreen animates it by `pulseAnim * 1.05`, and pulseAnim peaks at 1.03 (1.025
+ * idle, 1.03 while talking), so the drawn ring is up to 8.2% wider than its own box.
+ * A transform does not grow the layout, so the wrapper has to leave room for it or
+ * the ring is painted over whatever sits below — which is what overlapped the
+ * buttons under the PTT on the narrow phone once the call went active.
+ */
+export const PTT_RING_PEAK_SCALE = 1.05 * 1.03;
+
+/**
+ * The ring's glow, which is drawn outside its border and outside its layout box.
+ *
+ * TalkScreen gives the active and talking rings `shadowRadius: 20` with a zero
+ * offset, so the glow reaches about that far past the border on every side. It is
+ * faint at the edge but plainly visible against the dark card, and it is what still
+ * crossed the Receive button after the wrapper had been sized for the pulse.
+ */
+const RING_GLOW = 20;
+
+/**
+ * The card's vertical room for the PTT block, as a share of the window's height.
+ *
+ * Width alone is not enough. Measured on the S25 (360 x 780 dp) the card leaves about
+ * 235 dp between the Video row and the Receive button once the group name, the mode
+ * buttons and End Call have taken theirs — but 56% of its width came to a 234 dp ring
+ * that reaches 253 dp at the peak of the pulse, so the ring crossed the Receive button
+ * however much the wrapper was grown. The wrapper could not fix it: centerBody is
+ * `flex: 1` and centres its content, so every dp added to the wrapper is split evenly
+ * above and below and the ring keeps reaching down.
+ *
+ * 25% of the height leaves the ring clear of the Receive button with room to spare on
+ * both handsets. 30% was the measured budget exactly, which still read as too big on
+ * the S25 — the budget is what fits, not what looks right, and the glow needs air
+ * around it. Below about 23% the narrow phone hits the PTT_MIN floor instead, which
+ * would make the button small without making it any tidier.
+ */
+const PTT_HEIGHT_SHARE = 0.25;
+
+/**
+ * How far the system font-size setting may grow the text inside a fixed-size box.
+ *
+ * The PTT circle, the mode pills and the action buttons are sized from the screen,
+ * not from their text, and the Talk root is a plain View that does not scroll — so
+ * text that outgrows its box is painted over whatever is next to it. Samsung's
+ * "Huge" setting is about 1.3x; 1.2x still fits the longest status label on the
+ * smallest button (PTT_MIN) in two lines, which is as far as these labels may wrap.
+ */
+export const TALK_MAX_FONT_SCALE = 1.2;
+
+export function pttSizes(width: number, height = width * 2) {
+  // The ring, not the button, is what has to fit: it is what overlapped.
+  const fromWidth = width * PTT_WIDTH_SHARE;
+  const fromHeight = (height * PTT_HEIGHT_SHARE) / (RING_RATIO * PTT_RING_PEAK_SCALE);
+  const button = Math.round(
+    Math.min(PTT_MAX, Math.max(PTT_MIN, Math.min(fromWidth, fromHeight))),
+  );
+  const ring = Math.round(button * RING_RATIO);
+  return {
+    button,
+    ring,
+    // Room for the ring at the peak of the pulse AND for its glow beyond that. Sized
+    // from the ring rather than the button: the old 270/230 left 4 dp around a 266 dp
+    // ring, which the pulse alone overran by ~18 dp.
+    wrapper: Math.ceil(ring * PTT_RING_PEAK_SCALE) + RING_GLOW * 2,
+  };
+}
+
+export function makeTalkStyles(
+  c: ThemePalette,
+  windowWidth = Dimensions.get('window').width,
+  windowHeight = Dimensions.get('window').height,
+) {
+  const ptt = pttSizes(windowWidth, windowHeight);
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -193,28 +286,33 @@ export function makeTalkStyles(c: ThemePalette) {
       fontWeight: '600',
     },
     pushButtonWrapper: {
-      width: 270,
-      height: 270,
+      width: ptt.wrapper,
+      height: ptt.wrapper,
       alignSelf: 'center',
       justifyContent: 'center',
       alignItems: 'center',
-      marginBottom: 14,
+      // The wrapper now holds the pulse and the glow, and its slack is split above and
+      // below because the ring is centred: that is the clearance. This is only the
+      // gap between the two, so it stays small — the narrow phone is 780 dp tall
+      // against the other's 891 and still needs End Call and the tab bar below.
+      marginBottom: 6,
     },
     // Dış yükleme ve durum halkası
     pushButtonRing: {
       position: 'absolute',
-      width: 266,
-      height: 266,
-      borderRadius: 133,
-      borderWidth: 6.5,
+      width: ptt.ring,
+      height: ptt.ring,
+      borderRadius: ptt.ring / 2,
+      // Scaled too: a flat 6.5 reads as a heavier ring on a narrower phone.
+      borderWidth: Math.max(4, Math.round(ptt.ring * 6.5 / 266)),
       borderColor: c.accent,
       opacity: 0.8,
     },
     pushButton: {
-      width: 230,
-      height: 230,
+      width: ptt.button,
+      height: ptt.button,
       alignSelf: 'center',
-      borderRadius: 115,
+      borderRadius: ptt.button / 2,
       justifyContent: 'center',
       alignItems: 'center',
       borderWidth: 1,
@@ -258,15 +356,23 @@ export function makeTalkStyles(c: ThemePalette) {
       marginRight: 'auto',
     },
     // Under the PTT button, out of the layout so it never moves the button.
+    // The floor notice ("Denied: someone else is talking", "Talk time limit
+    // reached", a failed call setup — floorNoticeText), shown INSIDE the PTT button
+    // in place of its status label for as long as it lasts (FLOOR_NOTICE_MS).
+    //
+    // It used to be absolute at top:'100%' of the wrapper, i.e. in the gap below the
+    // button. That gap is whatever centerBody has left over, halved — and on a short
+    // screen it is nothing, so the text was painted over the mode buttons. The
+    // button is the one box pttSizes guarantees to fit every screen, so a notice
+    // drawn inside it can overlap nothing, on any device, and nothing outside the
+    // button moves when it appears or goes.
     floorNotice: {
-      position: 'absolute',
-      top: '100%',
-      left: 0,
-      right: 0,
       color: c.warn,
       fontSize: 13,
-      fontWeight: '600',
+      fontWeight: '700',
       textAlign: 'center',
+      // Keeps the two lines inside the circle's chord at the label's height.
+      paddingHorizontal: Math.round(ptt.button * 0.1),
     },
     pushButtonStatus: {
       fontSize: 22,
@@ -538,6 +644,106 @@ export function makeTalkStyles(c: ThemePalette) {
       color: c.textMuted,
       fontSize: 12,
       fontWeight: '600',
+    },
+
+    // Under the group's name: opens the transmit view. alignSelf keeps the button at
+    // its own width, since a stretched row would make it as wide as the card.
+    videoStartRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      // Video at the left under the group's name, Receive at the right under the menu.
+      justifyContent: 'space-between',
+      marginTop: 2,
+      marginBottom: 10,
+    },
+    videoStartButton: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: c.primary + '55',
+      backgroundColor: c.primary + '14',
+    },
+    videoStartIcon: {
+      fontSize: 12,
+    },
+    videoStartText: {
+      color: c.primary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    // The receive side of that row: same size, the accent colour instead, so sending
+    // and watching do not read as the same action.
+    videoReceiveButton: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: c.accent + '55',
+      backgroundColor: c.accent + '14',
+    },
+    videoReceiveText: {
+      color: c.accent,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    videoReceiveCount: {
+      color: c.textOnAccent,
+      backgroundColor: c.accent,
+      fontSize: 10,
+      fontWeight: '800',
+      minWidth: 16,
+      textAlign: 'center',
+      borderRadius: 8,
+      paddingHorizontal: 4,
+      paddingVertical: 1,
+      overflow: 'hidden',
+    },
+
+    // The Receive picker's rows, in the shared bottom sheet above.
+    watchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      marginTop: 8,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    watchRowName: {
+      flex: 1,
+      color: c.textPrimary,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    watchRowId: {
+      color: c.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    watchEmpty: {
+      color: c.textMuted,
+      fontSize: 13,
+      fontWeight: '600',
+      textAlign: 'center',
+      paddingVertical: 24,
+    },
+    watchRowBadge: {
+      color: c.primary,
+      fontSize: 11,
+      fontWeight: '700',
     },
 
     // Bottom-sheet overlay, matching the mock panel's overlay geometry.

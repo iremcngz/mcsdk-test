@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react-native';
 
 jest.useFakeTimers();
 
@@ -160,6 +160,7 @@ const callListeners = {
   terminated: new Set<Handler>(),
   floor:      new Set<Handler>(),
   error:      new Set<Handler>(),
+  reception:  new Set<Handler>(),
 };
 const sub = (set: Set<Handler>) => (h: Handler) => {
   set.add(h);
@@ -191,8 +192,9 @@ const mockSdk = {
   onCallTerminated: sub(callListeners.terminated),
   onFloorUpdated:   sub(callListeners.floor),
   startVideoGroupCall: jest.fn(),
+  receiveMedia:   jest.fn(),
   onTransmissionUpdated: sub(new Set()),
-  onReceptionUpdated: sub(new Set()),
+  onReceptionUpdated: sub(callListeners.reception),
   onSdkError:       sub(callListeners.error),
 };
 
@@ -236,11 +238,36 @@ function floorUpdate(group: string, status: string, over: Partial<any> = {}) {
   });
 }
 
-/** Start, as the user presses it, and the SDK bringing the call up. */
+/**
+ * Start, as the user presses it, and the SDK bringing the call up.
+ *
+ * The Talk screen has no Start button any more: the first press of PTT places the
+ * call, which is what this presses.
+ */
 function startCall(group = 'group1') {
-  fireEvent.press(screen.getByTestId('talk-start-button'));
+  fireEvent(screen.getByTestId('talk-push-button'), 'pressIn');
+  fireEvent(screen.getByTestId('talk-push-button'), 'pressOut');
   callUpdate(group, 'CALLING');
   callUpdate(group, 'ACTIVE');
+}
+
+/**
+ * Somebody starts sending video to [group]'s MCVideo call.
+ *
+ * Receive is disabled until this: the SDK only has a stream to show while a remote
+ * phone is transmitting one, so the button has nothing to open without it.
+ */
+function videoTransmitter(id: string, group = 'group1', alias = '') {
+  fire(callListeners.updated, {
+    callId: `video-${group}`, type: 'GROUP', state: 'ACTIVE', outgoing: false,
+    isVideo: true, isEmergency: false, isImminentPeril: false,
+    callerId: '', calleeId: '', groupId: group,
+  });
+  fire(callListeners.reception, {
+    callId: `video-${group}`, transmitterId: id, functionalAlias: alias,
+    audioSsrc: 0, videoSsrc: 0, status: 'AVAILABLE', automatic: true,
+    overridingId: '', rejectReason: '',
+  });
 }
 
 /** A simulated call from the mock panel, which has no SDK behind it. */
@@ -251,6 +278,8 @@ function mockStart() {
 }
 
 import { TalkScreen } from '../src/features/talk/TalkScreen';
+import { TALK_MAX_FONT_SCALE } from '../src/features/talk/styles';
+import { FLOOR_NOTICE_MS } from '../src/features/calls/floorText';
 import { TalkContextProvider } from '../src/contexts/TalkContext';
 
 /**
@@ -349,9 +378,9 @@ describe('TalkScreen — visual state and actions', () => {
     // Start call first
     startCall();
 
-    // Transmit now switches to the full-screen BroadcastScreen, so the
-    // TalkScreen (and its push button) unmounts.
-    fireEvent.press(screen.getByTestId('talk-mode-transmit'));
+    // Transmit is the Video Start button at the top left now; it switches to the
+    // full-screen BroadcastScreen, so TalkScreen (and its push button) unmounts.
+    fireEvent.press(screen.getByTestId('talk-video-start'));
     expect(screen.queryByTestId('talk-push-button')).toBeNull();
     // Nothing goes out until the record button on that screen: see group-video-send.test.
     expect(screen.getByTestId('talk-broadcast-record')).toBeTruthy();
@@ -362,7 +391,12 @@ describe('TalkScreen — visual state and actions', () => {
     renderWithTalkCtx(<TalkScreen />);
     startCall();
 
+    // Receive always goes through the picker, so who is being watched is named
+    // rather than assumed — even with a single transmitter.
+    videoTransmitter('sip:mcvideo.user-222@example.com');
     fireEvent.press(screen.getByTestId('talk-mode-receive'));
+    expect(screen.getByTestId('talk-watch-picker')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('talk-watch-sip:mcvideo.user-222@example.com'));
     expect(screen.getByTestId('talk-receive-screen')).toBeTruthy();
     expect(screen.queryByTestId('talk-push-button')).toBeNull();
 
@@ -563,7 +597,222 @@ describe('TalkScreen — visual state and actions', () => {
       { groupId: 'group1', name: 'group1', isPtt: true, isVideo: false, isData: false },
     ]);
     expect(screen.queryByTestId('talk-mode-receive')).toBeNull();
-    expect(screen.queryByTestId('talk-mode-transmit')).toBeNull();
+    expect(screen.queryByTestId('talk-video-start')).toBeNull();
+  });
+
+  // Receive used to carry "Nobody is transmitting" on its own label; it says Receive
+  // whatever the state, and the empty case is the picker's to explain.
+  it('keeps the Receive label the same whether anybody is sending or not', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    const label = () => screen.getByTestId('talk-mode-receive');
+    expect(label()).toHaveTextContent(/Receive/);
+    expect(label()).toBeDisabled();
+
+    videoTransmitter('sip:mcvideo.user-222@example.com');
+    expect(label()).toHaveTextContent(/Receive/);
+    expect(label()).not.toBeDisabled();
+  });
+
+  // A single sender is still chosen by name rather than assumed.
+  it('asks who to watch even with one transmitter', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    videoTransmitter('alice', 'group1', 'Alice');
+    fireEvent.press(screen.getByTestId('talk-mode-receive'));
+
+    expect(screen.getByTestId('talk-watch-picker')).toBeTruthy();
+    expect(screen.getByText('Alice')).toBeTruthy();
+    expect(screen.queryByTestId('talk-receive-screen')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('talk-watch-alice'));
+    expect(screen.getByTestId('talk-receive-screen')).toBeTruthy();
+  });
+
+  /**
+   * The video button needs no MCPTT call.
+   *
+   * The SDK's calls carry one media plane each, so useGroupVideoSend places an
+   * MCVideo call of its own and sending video never goes through the floor. The
+   * button used to be disabled until the group's PTT call was up, which made the
+   * user start a call they did not need.
+   */
+  it('opens the transmit view with no call up', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    const button = screen.getByTestId('talk-video-start');
+    expect(button).not.toBeDisabled();
+
+    fireEvent.press(button);
+    expect(screen.getByTestId('talk-broadcast-record')).toBeTruthy();
+    // No PTT call was placed on the way there.
+    expect(mockSdk.startGroupCall).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The Receive button beside Video, under the ▼ menu.
+   *
+   * It watches somebody else's video on the group. There is a stream to show only
+   * while a video call is up with someone transmitting, so that is what enables it.
+   */
+  describe('the Receive button beside Video', () => {
+    const receive = () => screen.getByTestId('talk-video-receive');
+
+    it('is disabled until somebody is transmitting', () => {
+      renderWithTalkCtx(<TalkScreen />);
+      expect(receive()).toBeDisabled();
+
+      videoTransmitter('alice', 'group1', 'Alice');
+      expect(receive()).not.toBeDisabled();
+    });
+
+    it('opens the picker and watches the one chosen', () => {
+      renderWithTalkCtx(<TalkScreen />);
+      videoTransmitter('alice', 'group1', 'Alice');
+      fireEvent.press(receive());
+
+      expect(screen.getByTestId('talk-watch-picker')).toBeTruthy();
+      expect(screen.getByText('Alice')).toBeTruthy();
+
+      fireEvent.press(screen.getByTestId('talk-watch-alice'));
+      expect(screen.getByTestId('talk-receive-screen')).toBeTruthy();
+    });
+
+    it('says how many are sending once there is more than one', () => {
+      renderWithTalkCtx(<TalkScreen />);
+      videoTransmitter('alice', 'group1', 'Alice');
+      expect(screen.queryByText('1')).toBeNull();
+
+      videoTransmitter('bob', 'group1', 'Bob');
+      expect(screen.getByText('2')).toBeTruthy();
+    });
+
+    // It needs no MCPTT call, for the same reason Video does not.
+    it('works with no PTT call up', () => {
+      renderWithTalkCtx(<TalkScreen />);
+      videoTransmitter('alice', 'group1', 'Alice');
+      fireEvent.press(receive());
+      fireEvent.press(screen.getByTestId('talk-watch-alice'));
+
+      expect(screen.getByTestId('talk-receive-screen')).toBeTruthy();
+      expect(mockSdk.startGroupCall).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The picker used to say "Unknown transmitter" for everyone.
+   *
+   * functionalAlias is an optional field of the SDK's transmission-control message
+   * (TS 24.581 §9.2.3.21) and this server does not send one, so the alias is always
+   * empty and the fallback named nobody. The MC ID out of the URI always arrives.
+   */
+  it('names a transmitter by MC ID when the server sends no alias', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    videoTransmitter('sip:mcvideo.mcuser-222@ims.mnc001.mcc001.3gppnetwork.org');
+    fireEvent.press(screen.getByTestId('talk-video-receive'));
+
+    expect(screen.getByText('mcuser-222')).toBeTruthy();
+    expect(screen.queryByText('Unknown transmitter')).toBeNull();
+  });
+
+  it('prefers the alias when the server does send one', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    videoTransmitter('sip:mcvideo.mcuser-222@example.org', 'group1', 'Patrol 7');
+    fireEvent.press(screen.getByTestId('talk-video-receive'));
+
+    expect(screen.getByText('Patrol 7')).toBeTruthy();
+    expect(screen.queryByText('mcuser-222')).toBeNull();
+  });
+
+  /**
+   * The floor notice lives inside the PTT button.
+   *
+   * It used to be absolute at top:'100%' of the wrapper — in the gap under the
+   * button, which is whatever centerBody has left over, halved, and on a short
+   * screen is nothing: the text was painted over the mode buttons. The button is the
+   * one box pttSizes guarantees to fit every screen, so the notice now takes the
+   * status label's place inside it for as long as it lasts, and nothing outside the
+   * button moves when it comes or goes.
+   */
+  describe('the floor notice', () => {
+    const ptt = () => screen.getByTestId('talk-push-button');
+    const deny = () => {
+      fireEvent(ptt(), 'pressIn');
+      floorUpdate('group1', 'DENIED', { denyReason: 'ANOTHER_CLIENT_HAS_PERMISSION' });
+    };
+
+    it('is drawn inside the button, not under it', () => {
+      renderWithTalkCtx(<TalkScreen />);
+      startCall();
+      deny();
+      const notice = within(ptt()).getByTestId('talk-floor-notice');
+      expect(notice).toHaveTextContent('Someone else has the floor');
+    });
+
+    it('takes the status label\'s place while it lasts, then gives it back', () => {
+      jest.useFakeTimers();
+      try {
+        renderWithTalkCtx(<TalkScreen />);
+        startCall();
+        expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Call active');
+
+        deny();
+        expect(screen.queryByTestId('talk-status-text')).toBeNull();
+        expect(screen.getByTestId('talk-floor-notice')).toBeTruthy();
+
+        act(() => { jest.advanceTimersByTime(FLOOR_NOTICE_MS); });
+        expect(screen.queryByTestId('talk-floor-notice')).toBeNull();
+        expect(screen.getByTestId('talk-status-text')).toHaveTextContent('Call active');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    // Bounded, and shrinking rather than spilling: the circle does not grow for a
+    // long translation or a large system font setting.
+    it('cannot grow out of the circle', () => {
+      renderWithTalkCtx(<TalkScreen />);
+      startCall();
+      deny();
+      const notice = screen.getByTestId('talk-floor-notice');
+      expect(notice.props.numberOfLines).toBe(2);
+      expect(notice.props.adjustsFontSizeToFit).toBe(true);
+      expect(notice.props.maxFontSizeMultiplier).toBe(TALK_MAX_FONT_SCALE);
+    });
+  });
+
+  /**
+   * The system font-size setting (Samsung "Huge" is ~1.3x) grows every label; the
+   * boxes they sit in are sized from the screen and do not. Each text inside such
+   * a box carries the same cap, so none can be pushed out of it.
+   */
+  describe('text inside fixed-size boxes', () => {
+    it('caps the status label and bounds it to two lines', () => {
+      renderWithTalkCtx(<TalkScreen />);
+      startCall();
+      const status = screen.getByTestId('talk-status-text');
+      expect(status.props.maxFontSizeMultiplier).toBe(TALK_MAX_FONT_SCALE);
+      expect(status.props.numberOfLines).toBe(2);
+      expect(status.props.adjustsFontSizeToFit).toBe(true);
+    });
+
+    it('caps the talker\'s name and keeps it to one line', () => {
+      renderWithTalkCtx(<TalkScreen />);
+      startCall();
+      floorUpdate('group1', 'TAKEN', { ownerId: 'sip:mcptt.mcuser-222@x' });
+      const name = screen.getByTestId('talk-speaker-name');
+      expect(name.props.numberOfLines).toBe(1);
+      expect(name.props.maxFontSizeMultiplier).toBe(TALK_MAX_FONT_SCALE);
+    });
+
+    it('caps the mode pills and the action button', () => {
+      renderWithTalkCtx(<TalkScreen />);
+      startCall();
+      for (const id of ['talk-mode-receive', 'talk-end-button', 'talk-video-start']) {
+        const texts = within(screen.getByTestId(id)).getAllByText(/./);
+        expect(texts.length).toBeGreaterThan(0);
+        for (const t of texts) expect(t.props.maxFontSizeMultiplier).toBe(TALK_MAX_FONT_SCALE);
+      }
+    });
   });
 
   it('shows receive/transmit when the affiliation covers MCVideo', () => {
@@ -571,7 +820,7 @@ describe('TalkScreen — visual state and actions', () => {
       { groupId: 'group1', name: 'group1', isPtt: true, isVideo: true, isData: false },
     ]);
     expect(screen.getByTestId('talk-mode-receive')).toBeTruthy();
-    expect(screen.getByTestId('talk-mode-transmit')).toBeTruthy();
+    expect(screen.getByTestId('talk-video-start')).toBeTruthy();
     // Video without data still means no messages.
     expect(screen.queryByTestId('talk-mode-messages')).toBeNull();
   });
@@ -582,7 +831,7 @@ describe('TalkScreen — visual state and actions', () => {
     ]);
     expect(screen.getByTestId('talk-mode-messages')).toBeTruthy();
     expect(screen.queryByTestId('talk-mode-receive')).toBeNull();
-    expect(screen.queryByTestId('talk-mode-transmit')).toBeNull();
+    expect(screen.queryByTestId('talk-video-start')).toBeNull();
   });
 
   it('follows the selected group when service coverage differs', () => {
@@ -591,10 +840,10 @@ describe('TalkScreen — visual state and actions', () => {
       { groupId: 'group1', name: 'group1', isPtt: true, isVideo: true, isData: false },
       { groupId: 'group2', name: 'group2', isPtt: true, isVideo: false, isData: false },
     ]);
-    expect(screen.getByTestId('talk-mode-transmit')).toBeTruthy();
+    expect(screen.getByTestId('talk-video-start')).toBeTruthy();
 
     fireEvent.press(screen.getByTestId('talk-group-group2'));
-    expect(screen.queryByTestId('talk-mode-transmit')).toBeNull();
+    expect(screen.queryByTestId('talk-video-start')).toBeNull();
   });
 
   it('disables mode buttons when no call is active', () => {
@@ -603,12 +852,10 @@ describe('TalkScreen — visual state and actions', () => {
     fireEvent.press(screen.getByTestId('talk-group-group3'));
 
     const receiveBtn = screen.getByTestId('talk-mode-receive');
-    const transmitBtn = screen.getByTestId('talk-mode-transmit');
     const messagesBtn = screen.getByTestId('talk-mode-messages');
 
     // TouchableOpacity surfaces `disabled` via accessibilityState.
     expect(receiveBtn.props.accessibilityState?.disabled).toBe(true);
-    expect(transmitBtn.props.accessibilityState?.disabled).toBe(true);
     expect(messagesBtn.props.accessibilityState?.disabled).toBe(true);
   });
 });
@@ -620,7 +867,8 @@ describe('TalkScreen — SDK group calls', () => {
 
   it('places the call on Start and shows it active once the SDK says so', () => {
     renderWithTalkCtx(<TalkScreen />);
-    fireEvent.press(screen.getByTestId('talk-start-button'));
+    fireEvent(screen.getByTestId('talk-push-button'), 'pressIn');
+    fireEvent(screen.getByTestId('talk-push-button'), 'pressOut');
     expect(mockSdk.startGroupCall).toHaveBeenCalledWith('group1', 'AMR_WB_OCTET_ALIGNED');
     callUpdate('group1', 'CALLING');
     expect(status()).toHaveTextContent('');
@@ -700,7 +948,7 @@ describe('TalkScreen — SDK group calls', () => {
     startCall();
     fireEvent.press(screen.getByTestId('talk-end-button'));
     expect(mockSdk.terminateCall).toHaveBeenCalledWith('call-group1');
-    expect(screen.getByTestId('talk-start-button')).toBeTruthy();
+    expect(screen.getByTestId('talk-end-button')).toBeDisabled();
   });
 
   it('goes back to inactive when the server ends the call', () => {
@@ -710,12 +958,34 @@ describe('TalkScreen — SDK group calls', () => {
       callId: 'call-group1', mode: 'CLOSED_REMOTELY', reason: 'NORMAL', sipCode: 0, sipReason: '',
     });
     expect(status()).toHaveTextContent('');
-    expect(screen.getByTestId('talk-start-button')).toBeTruthy();
+    expect(screen.getByTestId('talk-end-button')).toBeDisabled();
+  });
+
+  /**
+   * End is the user's own doing, never a failure.
+   *
+   * End removes the call at once, but the SDK follows the BYE with a TERMINATING
+   * update (seen on the device right after "Tx BYE") that put the call back as
+   * 'ending', and the setup-failed check read anything not 'active' as "never came
+   * up": the PTT button said "The group call could not be set up" after a normal End.
+   */
+  it('says nothing about setup when the user ends a call that was up', () => {
+    renderWithTalkCtx(<TalkScreen />);
+    startCall();
+    fireEvent.press(screen.getByTestId('talk-end-button'));
+    // What the SDK sends after the BYE, then the termination itself.
+    callUpdate('group1', 'TERMINATING');
+    fire(callListeners.terminated, {
+      callId: 'call-group1', mode: 'CLOSED_LOCALLY', reason: 'NORMAL', sipCode: 200, sipReason: 'Normal call clearing',
+    });
+    expect(screen.queryByTestId('talk-floor-notice')).toBeNull();
+    expect(screen.queryByText('The group call could not be set up')).toBeNull();
   });
 
   it('says so when a call we started is refused before it comes up', () => {
     renderWithTalkCtx(<TalkScreen />);
-    fireEvent.press(screen.getByTestId('talk-start-button'));
+    fireEvent(screen.getByTestId('talk-push-button'), 'pressIn');
+    fireEvent(screen.getByTestId('talk-push-button'), 'pressOut');
     callUpdate('group1', 'CALLING');
     fire(callListeners.terminated, {
       callId: 'call-group1', mode: 'REJECTED_REMOTELY', reason: 'FORBIDDEN', sipCode: 403, sipReason: '',
@@ -1002,6 +1272,6 @@ describe('TalkScreen — group affiliation', () => {
 
     expect(screen.getByTestId('talk-mode-messages')).toBeTruthy();
     expect(screen.getByTestId('talk-mode-receive')).toBeTruthy();
-    expect(screen.getByTestId('talk-mode-transmit')).toBeTruthy();
+    expect(screen.getByTestId('talk-video-start')).toBeTruthy();
   });
 });

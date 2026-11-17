@@ -437,13 +437,17 @@ describe('useGroupVideoSend', () => {
 
 describe('useGroupVideoReceive', () => {
   let ended = false;
+  // Who the hook says is sending, which is what the Receive picker lists.
+  let transmitters: readonly { id: string; alias: string }[] = [];
   function Watcher({ watching, callId }: { watching: boolean; callId: string | null }) {
-    ended = useGroupVideoReceive({ sdkRef: { current: mockSdk as any }, created: true, watching, callId });
+    const r = useGroupVideoReceive({ sdkRef: { current: mockSdk as any }, created: true, watching, callId });
+    ended = r.ended;
+    transmitters = r.transmitters;
     return null;
   }
 
-  const reception = (status: string, transmitterId = 'alice', callId = 'v1') =>
-    fire('reception', { callId, transmitterId, status, automatic: false });
+  const reception = (status: string, transmitterId = 'alice', callId = 'v1', alias = '') =>
+    fire('reception', { callId, transmitterId, status, automatic: false, functionalAlias: alias });
 
   it('does nothing while the view is closed', () => {
     render(<Watcher watching={false} callId="v1" />);
@@ -515,6 +519,58 @@ describe('useGroupVideoReceive', () => {
     await act(async () => {});
     reception('TRANSMISSION_ENDED', 'alice', 'other');
     expect(ended).toBe(false);
+  });
+
+  // The Receive button is disabled off this list, so it has to be right with the
+  // view closed as well as open.
+  it('lists who is transmitting, named by their alias', async () => {
+    render(<Watcher watching callId="v1" />);
+    await act(async () => {});
+    expect(transmitters).toEqual([]);
+    reception('RECEIVING', 'alice', 'v1', 'Alice');
+    expect(transmitters).toEqual([{ id: 'alice', alias: 'Alice' }]);
+    reception('RECEIVING', 'bob', 'v1', 'Bob');
+    expect(transmitters).toEqual([
+      { id: 'alice', alias: 'Alice' },
+      { id: 'bob', alias: 'Bob' },
+    ]);
+  });
+
+  it('takes a transmitter off the list when they stop', async () => {
+    render(<Watcher watching callId="v1" />);
+    await act(async () => {});
+    reception('RECEIVING', 'alice', 'v1', 'Alice');
+    reception('RECEIVING', 'bob', 'v1', 'Bob');
+    reception('TRANSMISSION_ENDED', 'alice');
+    expect(transmitters).toEqual([{ id: 'bob', alias: 'Bob' }]);
+  });
+
+  // The alias can come on a later event than the one that first named the id.
+  it('fills in an alias that arrives after the transmitter did', async () => {
+    render(<Watcher watching callId="v1" />);
+    await act(async () => {});
+    reception('AVAILABLE', 'alice');
+    expect(transmitters).toEqual([{ id: 'alice', alias: '' }]);
+    reception('RECEIVING', 'alice', 'v1', 'Alice');
+    expect(transmitters).toEqual([{ id: 'alice', alias: 'Alice' }]);
+  });
+
+  it('lists only the watched call\'s transmitters', async () => {
+    render(<Watcher watching callId="v1" />);
+    await act(async () => {});
+    reception('RECEIVING', 'alice', 'v1', 'Alice');
+    reception('RECEIVING', 'carol', 'other', 'Carol');
+    expect(transmitters).toEqual([{ id: 'alice', alias: 'Alice' }]);
+  });
+
+  // Receive is disabled with no call up, so the list must empty with it.
+  it('offers nobody once the call has gone', async () => {
+    const view = render(<Watcher watching callId="v1" />);
+    await act(async () => {});
+    reception('RECEIVING', 'alice', 'v1', 'Alice');
+    expect(transmitters).toHaveLength(1);
+    view.rerender(<Watcher watching callId={null} />);
+    expect(transmitters).toEqual([]);
   });
 
   it('ignores an end with the view closed, and forgets one when it closes', async () => {

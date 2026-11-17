@@ -16,9 +16,11 @@ import {
   Animated,
   Easing,
   Pressable,
+  ScrollView,
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import SoundLevel from 'react-native-sound-level';
 import { ensureMicPermission } from '../../core/permissions';
@@ -28,7 +30,7 @@ import { useTalkContext, PushState, type GroupCallState, type SdkGroupCall } fro
 import { displayMcId } from '../calls/mcId';
 import { floorNoticeText, useTransientText } from '../calls/floorText';
 import { mapSoundLevel, useVoiceBars, VoiceMeterBars } from '../../shared/VoiceMeter';
-import { makeTalkStyles } from './styles';
+import { makeTalkStyles, TALK_MAX_FONT_SCALE } from './styles';
 import { GroupActionMenu } from './components/GroupActionMenu';
 import { TalkMockPanel } from './components/TalkMockPanel';
 import { GroupSelector } from './components/GroupSelector';
@@ -68,8 +70,15 @@ function talkerNames(call: SdkGroupCall): string {
 
 export function TalkScreen() {
   const { c, tr, theme } = useAppContext();
-  const { affiliatedGroups, affiliationByGroup, applyAffiliation, groups: allGroups, groupsLoaded, setActiveGroups, pendingGroup, setPendingGroup, groupCalls, setGroupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, sdkGroupCalls, startGroupCall, endGroupCall, requestGroupFloor, releaseGroupFloor, setFocusedGroup, mutedGroups, toggleGroupMuted, isBroadcasting, setIsBroadcasting, isWatchingVideo, setIsWatchingVideo, videoTransmissionEnded, videoSendRequested, videoSending, videoSendNotice, startVideoSend, stopVideoSend, privateVideoCall } = useTalkContext();
-  const styles = useMemo(() => makeTalkStyles(c), [c]);
+  const { affiliatedGroups, affiliationByGroup, applyAffiliation, groups: allGroups, groupsLoaded, setActiveGroups, pendingGroup, setPendingGroup, groupCalls, setGroupCalls, activationOrder, lastClosedAt, recordActivation, recordClose, sdkGroupCalls, startGroupCall, endGroupCall, requestGroupFloor, releaseGroupFloor, setFocusedGroup, mutedGroups, toggleGroupMuted, isBroadcasting, setIsBroadcasting, isWatchingVideo, setIsWatchingVideo, videoTransmissionEnded, videoTransmitters, watchedTransmitter, setWatchedTransmitter, videoSendRequested, videoSending, videoSendNotice, startVideoSend, stopVideoSend, privateVideoCall } = useTalkContext();
+  // The PTT button is a share of the width, so the styles follow the window: a fixed
+  // size was a different share of the screen on every phone, and on a narrow one the
+  // ring overlapped the buttons under it.
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const styles = useMemo(
+    () => makeTalkStyles(c, windowWidth, windowHeight),
+    [c, windowWidth, windowHeight],
+  );
 
   // Only affiliated groups are selectable/listed; the rest live in the editor.
   const GROUPS = useMemo(() => affiliatedGroups.map(g => g.groupId), [affiliatedGroups]);
@@ -109,6 +118,8 @@ export function TalkScreen() {
   const [showMockPanel, setShowMockPanel] = useState(false);
   const [showGroupMenu, setShowGroupMenu] = useState(false);
   const [showAffEditor, setShowAffEditor] = useState(false);
+  // Open only with more than one transmitter: one needs no choosing.
+  const [showWatchPicker, setShowWatchPicker] = useState(false);
   const isFirstRender = useRef(true);
   const [messagesGroup, setMessagesGroup] = useState<string | null>(null);
   const [incomingCalls, setIncomingCalls] = useState<Set<string>>(new Set());
@@ -235,12 +246,20 @@ const ringColor = pushState === 'occupied'
 
   // A call we started that went away before it came up was refused — by the
   // SDK, or by the server. Said once; the next Start clears it.
+  //
+  // Only a call still 'connecting' counts. End removes the call at once, but the
+  // SDK follows the BYE with a TERMINATING update that puts it back as 'ending'
+  // until onCallTerminated takes it out; reading "not active" as "never came up"
+  // said "the group call could not be set up" for a call the user had just ended.
+  // A call the user ended is never a failure, whatever state it was in.
   const prevSdkCallRef = useRef(sdkCall);
+  const endedByUserRef = useRef<string | null>(null);
   useEffect(() => {
     const prev = prevSdkCallRef.current;
     prevSdkCallRef.current = sdkCall;
     if (prev && !sdkCall && prev.groupId === selectedGroup
-        && prev.startedBy === 'me' && prev.state !== 'active') {
+        && prev.startedBy === 'me' && prev.state === 'connecting'
+        && prev.sdkCallId !== endedByUserRef.current) {
       setStartFailedText(tr.talkCallStartFailed);
     }
   }, [sdkCall, selectedGroup, tr]);
@@ -514,6 +533,53 @@ const ringColor = pushState === 'occupied'
           </View>
         </View>
 
+        {/* Under the group's name, at the left: opens the transmit view, which arms
+            the camera but sends nothing until its own record button. In a row of its
+            own so it keeps its size instead of being stretched by the name beside it.
+            It does NOT need the group's MCPTT call: the SDK's calls carry one media
+            plane each, so useGroupVideoSend places an MCVideo call of its own
+            (startVideoGroupCall) and sending video never goes through the floor. All
+            it needs is the group's MCVideo service — and the camera, which a private
+            video call holds until it ends. */}
+        {videoGroups.has(selectedGroup) && (
+          <View style={styles.videoStartRow}>
+            <TouchableOpacity
+              testID="talk-video-start"
+              disabled={privateVideoCall}
+              onPress={() => setIsBroadcasting(true)}
+              activeOpacity={0.8}
+              style={[styles.videoStartButton, privateVideoCall && styles.actionButtonDisabled]}>
+              <Text style={styles.videoStartIcon} maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}>📹</Text>
+              <Text style={styles.videoStartText} numberOfLines={1} maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}>{tr.talkBtnVideoStart}</Text>
+            </TouchableOpacity>
+
+            {/* At the right, under the ▼ menu: watches somebody else's video on this
+                group. Enabled only while a video call is up with someone transmitting
+                — the SDK has a stream to show only then — and it opens the same
+                picker as the Receive mode pill, so the transmitter is chosen by name
+                rather than assumed. */}
+            <TouchableOpacity
+              testID="talk-video-receive"
+              disabled={privateVideoCall || videoTransmitters.length === 0}
+              onPress={() => {
+                setMode('receive');
+                setShowWatchPicker(true);
+              }}
+              activeOpacity={0.8}
+              style={[
+                styles.videoReceiveButton,
+                (privateVideoCall || videoTransmitters.length === 0) && styles.actionButtonDisabled,
+              ]}>
+              <Text style={styles.videoStartIcon} maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}>📺</Text>
+              <Text style={styles.videoReceiveText} numberOfLines={1} maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}>{tr.talkModeReceive}</Text>
+              {/* How many are sending, when it is worth saying: the picker lists them. */}
+              {videoTransmitters.length > 1 && (
+                <Text style={styles.videoReceiveCount}>{videoTransmitters.length}</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
         {showGroupMenu && (
           <GroupActionMenu
             styles={styles}
@@ -600,7 +666,15 @@ const ringColor = pushState === 'occupied'
                   { backgroundColor: pushButtonColor },
                   buttonDisabled && styles.pushButtonDisabled,
                 ]}>
-                {pushState === 'occupied' && !!occupiedName && <Text style={styles.buttonSpeakerName} testID="talk-speaker-name">{occupiedName}</Text>}
+                {pushState === 'occupied' && !!occupiedName && (
+                  <Text
+                    style={styles.buttonSpeakerName}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}
+                    testID="talk-speaker-name">
+                    {occupiedName}
+                  </Text>
+                )}
                 <View style={styles.voiceMeterContainer}>
                   <VoiceMeterBars
                     barAnims={barAnims}
@@ -610,15 +684,34 @@ const ringColor = pushState === 'occupied'
                     inactiveOpacity={0.25}
                   />
                 </View>
-                <Text testID="talk-status-text" style={[styles.pushButtonStatus, { color: c.textOnAccent }]}>{buttonStatusLabel}</Text>
+                {/* The notice takes the status label's place while it lasts: the
+                    button is the one box sized to fit every screen, so this is the
+                    one place it can overlap nothing. Both are bounded to two lines
+                    and shrink rather than spill, so a long translation or a large
+                    system font setting cannot push them out of the circle. */}
+                {floorNotice ? (
+                  <Text
+                    testID="talk-floor-notice"
+                    style={styles.floorNotice}
+                    numberOfLines={2}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.8}
+                    maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}>
+                    {floorNotice}
+                  </Text>
+                ) : (
+                  <Text
+                    testID="talk-status-text"
+                    style={[styles.pushButtonStatus, { color: c.textOnAccent }]}
+                    numberOfLines={2}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.8}
+                    maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}>
+                    {buttonStatusLabel}
+                  </Text>
+                )}
               </Pressable>
             </Animated.View>
-            {/* Absolute, under the button, so a notice never moves the button. */}
-            {!!floorNotice && (
-              <Text style={styles.floorNotice} numberOfLines={2} testID="talk-floor-notice">
-                {floorNotice}
-              </Text>
-            )}
           </View>
 
         </View>
@@ -628,50 +721,48 @@ const ringColor = pushState === 'occupied'
           <View style={[styles.modeRow, !callActive && styles.modeRowHidden]}>
             {/* Each mode needs the matching MC service: video for the
                 receive/transmit pair, data for messages. */}
-            {(['receive', 'transmit', 'messages'] as TalkMode[]).filter(
+            {(['receive', 'messages'] as TalkMode[]).filter(
               v => v === 'messages'
                 ? dataGroups.has(selectedGroup)
                 : videoGroups.has(selectedGroup)
             ).map(value => {
               const isActive = mode === value;
-              const icon = value === 'transmit' ? '📹'
-                : value === 'receive' ? '📺'
-                : '💬';
-              const label = value === 'receive' ? tr.talkModeReceive
-                : value === 'transmit' ? tr.talkModeTransmit
-                : tr.talkModeMessages;
+              const icon = value === 'receive' ? '📺' : '💬';
+              const label = value === 'messages' ? tr.talkModeMessages : tr.talkModeReceive;
               const isReceiveActive = value === 'receive' && isActive;
               // A private video call has the camera and the decoder until it ends.
               const videoTaken = privateVideoCall && value !== 'messages';
+              // Nothing to watch: the SDK only sends a stream somebody is sending.
+              const nobodySending = value === 'receive' && videoTransmitters.length === 0;
               return (
                 <TouchableOpacity
                   key={value}
                   testID={`talk-mode-${value}`}
-                  disabled={!callActive || videoTaken}
+                  disabled={!callActive || videoTaken || nobodySending}
                   onPress={() => {
-                    if (value === 'transmit') {
-                      setIsBroadcasting(true);
-                      return;
-                    }
                     if (value === 'messages') {
                       setMessagesGroup(selectedGroup);
                       return;
                     }
+                    // Always chosen from the picker, even with a single sender: who is
+                    // being watched is then named rather than assumed.
                     setMode(value);
-                    setIsWatchingVideo(true);
+                    setShowWatchPicker(true);
                   }}
                   activeOpacity={0.8}
                   style={[
                     styles.modePill,
                     isActive && (isReceiveActive ? styles.modePillActiveReceive : styles.modePillActive),
-                    videoTaken && styles.actionButtonDisabled,
+                    (videoTaken || nobodySending) && styles.actionButtonDisabled,
                   ]}>
                   <View style={styles.modePillContent}>
-                    <Text style={[styles.modeIcon, isActive && styles.modeTextActive]}>{icon}</Text>
-                    <Text style={[
-                      styles.modeText,
-                      isActive && styles.modeTextActive,
-                    ]}>{label}</Text>
+                    <Text style={[styles.modeIcon, isActive && styles.modeTextActive]} maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}>{icon}</Text>
+                    <Text
+                      style={[styles.modeText, isActive && styles.modeTextActive]}
+                      numberOfLines={1}
+                      maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}>
+                      {label}
+                    </Text>
                   </View>
                 </TouchableOpacity>
               );
@@ -679,36 +770,86 @@ const ringColor = pushState === 'occupied'
           </View>
 
           <View style={styles.actionRow}>
-            {!callActive && (
-              <TouchableOpacity
-                testID="talk-start-button"
-                onPress={startCall}
-                disabled={isLoading}
-                activeOpacity={0.8}
-                style={[styles.actionButton, styles.startButton]}>
-                <Text style={styles.actionButtonIcon}>📞</Text>
-                <Text style={styles.actionButtonText}>{tr.talkBtnStartCall}</Text>
-              </TouchableOpacity>
-            )}
             <TouchableOpacity
               testID="talk-end-button"
               disabled={!callActive}
               onPress={() => {
-                if (sdkCall) endGroupCall(selectedGroup);
+                if (sdkCall) {
+                  endedByUserRef.current = sdkCall.sdkCallId;
+                  endGroupCall(selectedGroup);
+                }
                 setCallActive(false);
                 setPushState('idle');
                 setIsHolding(false);
               }}
               activeOpacity={0.8}
               style={[styles.actionButton, styles.endButton, !callActive && styles.actionButtonDisabled]}>
-              <Text style={styles.actionButtonIcon}>📵</Text>
-              <Text style={[styles.actionButtonText, !callActive && styles.actionButtonTextDisabled]}>{tr.talkBtnEndCall}</Text>
+              <Text style={styles.actionButtonIcon} maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}>📵</Text>
+              <Text style={[styles.actionButtonText, !callActive && styles.actionButtonTextDisabled]} maxFontSizeMultiplier={TALK_MAX_FONT_SCALE}>{tr.talkBtnEndCall}</Text>
             </TouchableOpacity>
           </View>
           </View>
         </Animated.View>
 
         </View>
+
+        {showWatchPicker && (
+          <View style={styles.affOverlay}>
+            <Pressable
+              style={styles.affBackdrop}
+              onPress={() => setShowWatchPicker(false)}
+              testID="talk-watch-picker-backdrop"
+            />
+            <View style={styles.affSheet} testID="talk-watch-picker">
+              <View style={styles.affGrabber} />
+              <View style={styles.affHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.affTitle}>{tr.talkReceivePickTitle}</Text>
+                  <Text style={styles.affSubtitle}>{tr.talkReceivePickHint}</Text>
+                </View>
+              </View>
+              <ScrollView>
+                {/* Opened with nobody sending: the sheet says so rather than being
+                    an empty list, since Receive no longer carries that on its own
+                    label. */}
+                {videoTransmitters.length === 0 && (
+                  <Text style={styles.watchEmpty} testID="talk-watch-picker-empty">
+                    {tr.talkReceiveNobody}
+                  </Text>
+                )}
+                {videoTransmitters.map(t => (
+                  <TouchableOpacity
+                    key={t.id}
+                    testID={`talk-watch-${t.id}`}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setWatchedTransmitter(t.id);
+                      setShowWatchPicker(false);
+                      setIsWatchingVideo(true);
+                    }}
+                    style={styles.watchRow}>
+                    <View style={{ flex: 1 }}>
+                      {/* The functional alias is an optional field in the SDK's
+                          transmission-control message (TS 24.581 §9.2.3.21) and this
+                          server does not send one, so the name falls back to the MC ID
+                          out of the transmitter's URI — which always arrives — rather
+                          than to "unknown", which named nobody. */}
+                      <Text style={styles.watchRowName} numberOfLines={1}>
+                        {t.alias || displayMcId(t.id) || tr.talkReceiveUnnamed}
+                      </Text>
+                      {/* The full URI below it, to tell apart two senders whose MC IDs
+                          read alike, and because it is what the SDK was given. */}
+                      <Text style={styles.watchRowId} numberOfLines={1}>{t.id}</Text>
+                    </View>
+                    {watchedTransmitter === t.id && (
+                      <Text style={styles.watchRowBadge}>{tr.talkReceiveWatching}</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        )}
 
         {showAffEditor && (
           <AffiliationEditor

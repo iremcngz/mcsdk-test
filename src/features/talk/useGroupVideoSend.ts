@@ -49,6 +49,18 @@ export interface GroupVideoSendOptions {
 /** Why a transmission we wanted is over: the server's limit, its decision, or never begun. */
 export type VideoSendNotice = 'TIME_UP' | 'ENDED' | 'FAILED';
 
+/**
+ * One remote phone sending video to a group, as the Receive picker lists it.
+ *
+ * `id` is the SDK's transmitterId, which is what receiveMedia takes; `alias` is the
+ * functional alias the server sent with it, which may be empty — the picker falls
+ * back to the id then, since an unnamed row is still one the user can choose.
+ */
+export interface VideoTransmitter {
+  id:    string;
+  alias: string;
+}
+
 export interface GroupVideoSend {
   calls: Record<string, GroupVideoCall>;
   /** The user has asked to send, whether or not the server has allowed it yet. */
@@ -300,6 +312,19 @@ export function useGroupVideoSend({
   };
 }
 
+/**
+ * A stable empty list: a new [] each render would make every consumer's memo and
+ * effect see a changed value on every render of the provider.
+ */
+const EMPTY_TRANSMITTERS: readonly VideoTransmitter[] = [];
+
+export interface GroupVideoReceive {
+  /** The server has said the last transmitter finished while the view was open. */
+  ended: boolean;
+  /** Who is sending video to the watched call now. */
+  transmitters: readonly VideoTransmitter[];
+}
+
 export interface GroupVideoReceiveOptions {
   sdkRef: { current: McSdk | null };
   created: boolean;
@@ -314,17 +339,23 @@ export interface GroupVideoReceiveOptions {
  * the SDK answers an incoming group call by itself, so one appears as soon as somebody
  * transmits, and until then the view waits.
  *
- * Returns true once the server has said the last transmitter of that call finished
- * while the view was open, and false again if another one starts.
+ * `ended` goes true once the server has said the last transmitter of that call
+ * finished while the view was open, and false again if another one starts.
+ *
+ * `transmitters` is who is sending to the call now, for the Receive picker and for
+ * disabling Receive while the list is empty. It is kept whether the view is open or
+ * not, because the button outside the view is what the list has to answer for.
  */
 export function useGroupVideoReceive({
   sdkRef,
   created,
   watching,
   callId,
-}: GroupVideoReceiveOptions): boolean {
+}: GroupVideoReceiveOptions): GroupVideoReceive {
   const [ready, setReady] = useState(false);
   const [ended, setEnded] = useState(false);
+  // Per call, so the picker shows the watched call's senders and nobody else's.
+  const [byCall, setByCall] = useState<Record<string, VideoTransmitter[]>>({});
 
   // Read when an event arrives. Who is transmitting is followed with the view closed
   // too: a transmitter that started before it opened ends like any other.
@@ -342,10 +373,26 @@ export function useGroupVideoReceive({
 
       if (RECEPTION_LIVE.has(e.status)) {
         transmitters.add(e.transmitterId);
+        // The alias can arrive on a later event than the one that added the id, so
+        // a row already listed is updated rather than skipped.
+        setByCall(prev => {
+          const list = prev[e.callId] ?? [];
+          const at = list.findIndex(t => t.id === e.transmitterId);
+          if (at >= 0 && list[at].alias === e.functionalAlias) return prev;
+          const next = at >= 0
+            ? list.map((t, i) => (i === at ? { ...t, alias: e.functionalAlias } : t))
+            : [...list, { id: e.transmitterId, alias: e.functionalAlias }];
+          return { ...prev, [e.callId]: next };
+        });
         if (isWatched) setEnded(false);
         return;
       }
       transmitters.delete(e.transmitterId);
+      setByCall(prev => {
+        const list = prev[e.callId];
+        if (!list?.some(t => t.id === e.transmitterId)) return prev;
+        return { ...prev, [e.callId]: list.filter(t => t.id !== e.transmitterId) };
+      });
       if (e.status === 'TRANSMISSION_ENDED' && transmitters.size === 0 && isWatched) setEnded(true);
     });
     return () => sub.remove();
@@ -379,5 +426,8 @@ export function useGroupVideoReceive({
     if (ready) VideoSession.setCallReceiveSource(callId);
   }, [ready, callId]);
 
-  return ended;
+  // A call that has gone leaves no senders behind to offer.
+  const transmitters = callId ? byCall[callId] ?? EMPTY_TRANSMITTERS : EMPTY_TRANSMITTERS;
+
+  return { ended, transmitters };
 }
