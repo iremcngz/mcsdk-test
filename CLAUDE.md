@@ -219,6 +219,25 @@ ms apart on the SDK worker thread. The bridge emits each one once (`McSdkBridge`
 so the pair in the Log Console is the SDK being faithful, not the app double-logging. Check
 the `HttpClient::Fetch … -> no response` lines before suspecting the event pump.
 
+**Emergency is the USER's state, not a call's.** `setEmergency(boolean)` /
+`setImminentPeril(boolean)` take no `callId` — they took one until the SDK made the state
+per-user (TS 24.379 Annex G.1). Setting it re-INVITEs every active call as an emergency call
+and makes every later call one; clearing it cancels the emergency only on the calls this user
+raised. Another user's emergency on a call stays, as does one the network refused to cancel,
+so `CallInfo.isEmergency` is what answers "is *this* call an emergency". There is no per-call
+setter any more. `onEmergencyStateChanged` reports the state, `onCallUpdated` each call, and
+`isEmergencyState()` reads it back from the SDK (which survives a JS reload, as the app's own
+state does not).
+
+**`SdkListener` has 19 abstract callbacks the app does not use.** MCData's SDS (`onSds*`, 7)
+and FD (`onFd*`, 11), plus `onLocationConfigurationUpdated`. They are declared without default
+bodies, so `SdkListener` cannot be implemented without them — any AAR rebuild forces this.
+`McSdkModule` stubs them with a `Log.d` and deliberately does **not** `emit()` them: bridging
+an event no JS subscriber reads would build a `WritableMap` on the SDK worker thread for
+nothing, which is the thread the event pump exists to keep free. To wire one up later, give it
+an `EVENT_*` name, `emit()` it, and add it to `McSdkEvents` — `onAnyEvent` and the Log Console
+pick it up from there with no further work.
+
 **`Sdk::Affiliate` is state-replacing, not a delta.** Pass the complete desired set on every
 call; omitting an already-affiliated group de-affiliates it. Empty set → use `deaffiliate()`.
 

@@ -50,10 +50,13 @@ export interface Spec extends TurboModule {
     rejectCall(callId: string): void;
     terminateCall(callId: string): void;
 
-    // Call priority. Re-INVITEs the call at the provisioned emergency floor
-    // priority; later floor requests inherit it.
-    setEmergency(callId: string, emergency: boolean): void;
-    setImminentPeril(callId: string, imminentPeril: boolean): void;
+    // The USER's emergency / imminent-peril state, not one call's: every active
+    // call is re-INVITEd to follow it and later calls start in it. These took a
+    // callId until the SDK made the state per-user.
+    setEmergency(emergency: boolean): void;
+    setImminentPeril(imminentPeril: boolean): void;
+    isEmergencyState(): boolean;
+    isImminentPerilState(): boolean;
 
     // Affiliation (Android only until the iOS xcframework is rebuilt).
     // requestsJson is a JSON-encoded McSdkAffiliateRequest[] (same pattern as

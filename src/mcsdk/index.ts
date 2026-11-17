@@ -310,16 +310,29 @@ export class McSdk {
     rejectCall(callId: string): void       { NativeMcSdk.rejectCall(callId); }
     terminateCall(callId: string): void    { NativeMcSdk.terminateCall(callId); }
 
-    // ── Call priority ──────────────────────────────────────────────────────────
-    // Re-INVITEs the call at the provisioned emergency floor priority; floor
-    // requests made afterwards inherit it, so there is no priority argument on
-    // requestFloor(). No-op unless the call is active and actually changing.
+    // ── Emergency / imminent peril ─────────────────────────────────────────────
+    // The USER's state (TS 24.379 Annex G.1), not one call's. Setting it
+    // re-INVITEs every active call as an emergency call and makes every later
+    // call one; clearing it cancels the emergency on the calls this user
+    // raised. Another user's emergency on a call stays, as does one the network
+    // refused to cancel — CallInfo.isEmergency is what says so per call. Floor
+    // requests inherit the priority, so requestFloor() takes no priority.
+    //
+    // These took a callId until the SDK made the state per-user: there is no
+    // per-call setter any more.
 
-    setEmergency(callId: string, emergency: boolean): void {
-        NativeMcSdk.setEmergency(callId, emergency);
+    setEmergency(emergency: boolean): void {
+        NativeMcSdk.setEmergency(emergency);
     }
-    setImminentPeril(callId: string, imminentPeril: boolean): void {
-        NativeMcSdk.setImminentPeril(callId, imminentPeril);
+    setImminentPeril(imminentPeril: boolean): void {
+        NativeMcSdk.setImminentPeril(imminentPeril);
+    }
+    /** The state as the SDK holds it — survives a JS reload, which the app's does not. */
+    isEmergencyState(): boolean {
+        return NativeMcSdk.isEmergencyState();
+    }
+    isImminentPerilState(): boolean {
+        return NativeMcSdk.isImminentPerilState();
     }
 
     // ── Floor control ──────────────────────────────────────────────────────────

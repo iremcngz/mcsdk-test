@@ -5,6 +5,11 @@ import com.aselsan.mcsdk.AlarmListener
 import com.aselsan.mcsdk.AlarmSeverity
 import com.aselsan.mcsdk.AudioCodec
 import com.aselsan.mcsdk.AudioFrame
+import com.aselsan.mcsdk.FdInfo
+import com.aselsan.mcsdk.FdNotificationInfo
+import com.aselsan.mcsdk.LocationConfigurationInfo
+import com.aselsan.mcsdk.SdsInfo
+import com.aselsan.mcsdk.SdsNotificationInfo
 import com.aselsan.mcsdk.AudioInfo
 import com.aselsan.mcsdk.CallInfo
 import com.aselsan.mcsdk.Document
@@ -825,24 +830,36 @@ class McSdkModule(
     // ── Call priority ─────────────────────────────────────────────────────────
 
     /**
-     * Upgrades or downgrades an active call to/from emergency (TS 24.379
-     * §10.1.1.2.1.3 / §11.1.1.2.1.5). The SDK re-INVITEs with the provisioned
-     * emergency floor priority and <emergency-ind>, and subsequent floor
-     * requests inherit that priority — there is no separate priority argument
-     * on requestFloor().
+     * Sets or clears the USER's emergency state (TS 24.379 Annex G.1), not one
+     * call's — the calls follow it. Setting it re-INVITEs every active call as
+     * an emergency call and makes every later call one; clearing it cancels the
+     * emergency on the calls this user raised. Another user's emergency on a
+     * call stays, as does one the network refused to cancel — `CallInfo.isEmergency`
+     * is what says so per call.
      *
-     * No-op unless the call is Active and not already in the requested state.
+     * This took a `callId` until the SDK made it a per-user state. There is no
+     * per-call setter any more, so a caller that wants one call in emergency
+     * cannot have it: the state is the user's.
+     *
+     * `onEmergencyStateChanged` reports the state, `onCallUpdated` each call.
      */
-    @ReactMethod fun setEmergency(callId: String, emergency: Boolean) {
-        sdk?.setEmergency(callId, emergency)
+    @ReactMethod fun setEmergency(emergency: Boolean) {
+        sdk?.setEmergency(emergency)
     }
 
     /** Same as setEmergency but raises <imminentperil-ind>. Imminent peril
      *  shares the provisioned emergency priority — the SDK has no separate
-     *  field for it. */
-    @ReactMethod fun setImminentPeril(callId: String, imminentPeril: Boolean) {
-        sdk?.setImminentPeril(callId, imminentPeril)
+     *  field for it. Also the user's state, not a call's. */
+    @ReactMethod fun setImminentPeril(imminentPeril: Boolean) {
+        sdk?.setImminentPeril(imminentPeril)
     }
+
+    /** The user's current emergency / imminent-peril state, as the SDK holds it. */
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    fun isEmergencyState(): Boolean = sdk?.isEmergencyState ?: false
+
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    fun isImminentPerilState(): Boolean = sdk?.isImminentPerilState ?: false
 
     // ── Affiliation ───────────────────────────────────────────────────────────
 
@@ -1292,6 +1309,105 @@ class McSdkModule(
                 }
             })
         })
+    }
+
+    // ── MCData: SDS (short data) and FD (file distribution) ───────────────────
+    //
+    // The SDK gained these callbacks and declared them abstract — no default
+    // bodies — so SdkListener cannot be implemented without them. The app has
+    // no MCData feature yet: nothing sends an SDS message or a file, and no
+    // screen would show one arriving.
+    //
+    // So they are stubs, and deliberately not wired to emit(). Bridging an
+    // event to JS that no JS subscriber reads would put a WritableMap build on
+    // the SDK worker thread for nothing — the thread the event pump exists to
+    // keep free. They log instead, at debug, so a message that does arrive is
+    // visible in logcat rather than silently dropped.
+    //
+    // When MCData is built: give each one an EVENT_* name, emit() it, and add
+    // it to McSdkEvents on the JS side — onAnyEvent picks it up from there and
+    // the Log Console shows it with no further work.
+
+    override fun onSdsSent(sds: SdsInfo) {
+        Log.d("McSdkBridge", "onSdsSent (MCData not implemented) id=${sds.messageId}")
+    }
+
+    override fun onSdsSendFailed(sds: SdsInfo) {
+        Log.d("McSdkBridge", "onSdsSendFailed (MCData not implemented) id=${sds.messageId}")
+    }
+
+    override fun onSdsDelivered(info: SdsNotificationInfo) {
+        Log.d("McSdkBridge", "onSdsDelivered (MCData not implemented) id=${info.messageId}")
+    }
+
+    override fun onSdsRead(info: SdsNotificationInfo) {
+        Log.d("McSdkBridge", "onSdsRead (MCData not implemented) id=${info.messageId}")
+    }
+
+    override fun onSdsReceived(sds: SdsInfo) {
+        Log.d("McSdkBridge", "onSdsReceived (MCData not implemented) id=${sds.messageId}")
+    }
+
+    override fun onSdsNotificationSent(info: SdsNotificationInfo) {
+        Log.d("McSdkBridge", "onSdsNotificationSent (MCData not implemented) id=${info.messageId}")
+    }
+
+    override fun onSdsNotificationSendFailed(info: SdsNotificationInfo) {
+        Log.d("McSdkBridge", "onSdsNotificationSendFailed (MCData not implemented) id=${info.messageId}")
+    }
+
+    override fun onFdSent(fd: FdInfo) {
+        Log.d("McSdkBridge", "onFdSent (MCData not implemented) id=${fd.messageId}")
+    }
+
+    override fun onFdSendFailed(fd: FdInfo) {
+        Log.d("McSdkBridge", "onFdSendFailed (MCData not implemented) id=${fd.messageId}")
+    }
+
+    override fun onFdAccepted(info: FdNotificationInfo) {
+        Log.d("McSdkBridge", "onFdAccepted (MCData not implemented) id=${info.messageId}")
+    }
+
+    override fun onFdRejected(info: FdNotificationInfo) {
+        Log.d("McSdkBridge", "onFdRejected (MCData not implemented) id=${info.messageId}")
+    }
+
+    override fun onFdCompleted(info: FdNotificationInfo) {
+        Log.d("McSdkBridge", "onFdCompleted (MCData not implemented) id=${info.messageId}")
+    }
+
+    override fun onFdReceived(fd: FdInfo) {
+        Log.d("McSdkBridge", "onFdReceived (MCData not implemented) id=${fd.messageId}")
+    }
+
+    override fun onFdDownloaded(fd: FdInfo) {
+        Log.d("McSdkBridge", "onFdDownloaded (MCData not implemented) id=${fd.messageId}")
+    }
+
+    override fun onFdDownloadFailed(fd: FdInfo) {
+        Log.d("McSdkBridge", "onFdDownloadFailed (MCData not implemented) id=${fd.messageId}")
+    }
+
+    override fun onFdNotificationSent(info: FdNotificationInfo) {
+        Log.d("McSdkBridge", "onFdNotificationSent (MCData not implemented) id=${info.messageId}")
+    }
+
+    override fun onFdNotificationSendFailed(info: FdNotificationInfo) {
+        Log.d("McSdkBridge", "onFdNotificationSendFailed (MCData not implemented) id=${info.messageId}")
+    }
+
+    override fun onFdUnavailable(info: FdNotificationInfo) {
+        Log.d("McSdkBridge", "onFdUnavailable (MCData not implemented) id=${info.messageId}")
+    }
+
+    /**
+     * The server telling us how it wants location reported. A stub for the same
+     * reason as the MCData ones: the app reports no location, so there is
+     * nothing to reconfigure. Logged so the arrival of a configuration is
+     * visible if location work starts.
+     */
+    override fun onLocationConfigurationUpdated(info: LocationConfigurationInfo) {
+        Log.d("McSdkBridge", "onLocationConfigurationUpdated (location not implemented)")
     }
 
     /**
