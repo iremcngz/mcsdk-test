@@ -33,6 +33,28 @@ import { VideoCallScreen } from '../features/calls/VideoCallScreen';
 import { IncomingCallOverlay } from '../features/calls/IncomingCallOverlay';
 import { CallEndBanner } from '../features/calls/CallEndBanner';
 
+// The screens take no props, so a memoised wrapper re-renders one only when
+// its own context subscriptions change — not every time this shell does. The
+// shell re-renders on navigation, on every Talk and Call context change
+// (floor updates, active groups, a call's state) and on the SDK flags; without
+// the wrappers each of those re-rendered the screen on show as well, whether or
+// not it read any of it.
+const Home            = React.memo(HomeScreen);
+const Metrics         = React.memo(MetricsScreen);
+const SdkLogs         = React.memo(SdkLogsScreen);
+const LogConsole      = React.memo(LogConsoleScreen);
+const MockCalls       = React.memo(MockCallsScreen);
+const Settings        = React.memo(SettingsScreen);
+const Contacts        = React.memo(ContactsScreen);
+const Calls           = React.memo(CallsTab);
+const Talk            = React.memo(TalkScreen);
+const Audio           = React.memo(AudioScreen);
+const Video           = React.memo(VideoScreen);
+const Tools           = React.memo(ToolsScreen);
+const OutgoingCall    = React.memo(OutgoingCallScreen);
+const ActiveCallFull  = React.memo(ActiveCallFullScreen);
+const VideoCall       = React.memo(VideoCallScreen);
+
 /**
  * The bottom bar. Nine tabs left each one about 11% of the width, so the
  * diagnostics screens (Audio, Video, SDK Logs) moved behind the Tools tab —
@@ -529,20 +551,20 @@ export function TabNavigator() {
 
       {/* ── Screen Content ──────────────────────────────────────────────── */}
       <View style={{ flex: 1 }}>
-        {screen === 'home'     && <HomeScreen />}
-        {screen === 'metrics'  && <MetricsScreen />}
-        {screen === 'sdklogs'  && <SdkLogsScreen />}
-        {screen === 'logs'     && <LogConsoleScreen />}
-        {screen === 'mockcalls' && <MockCallsScreen />}
-        {screen === 'settings' && <SettingsScreen />}
-        {screen === 'contacts' && <ContactsScreen />}
-        {screen === 'calls'    && <CallsTab />}
-        {screen === 'talk'     && <TalkScreen />}
-        {screen === 'audio'    && <AudioScreen />}
-        {screen === 'video'    && <VideoScreen />}
-        {screen === 'tools'    && <ToolsScreen />}
-        {screen === 'incall'   && <OutgoingCallScreen />}
-        {screen === 'callactive' && (isVideoCallScreen ? <VideoCallScreen /> : <ActiveCallFullScreen />)}
+        {screen === 'home'     && <Home />}
+        {screen === 'metrics'  && <Metrics />}
+        {screen === 'sdklogs'  && <SdkLogs />}
+        {screen === 'logs'     && <LogConsole />}
+        {screen === 'mockcalls' && <MockCalls />}
+        {screen === 'settings' && <Settings />}
+        {screen === 'contacts' && <Contacts />}
+        {screen === 'calls'    && <Calls />}
+        {screen === 'talk'     && <Talk />}
+        {screen === 'audio'    && <Audio />}
+        {screen === 'video'    && <Video />}
+        {screen === 'tools'    && <Tools />}
+        {screen === 'incall'   && <OutgoingCall />}
+        {screen === 'callactive' && (isVideoCallScreen ? <VideoCall /> : <ActiveCallFull />)}
       </View>
 
       {screen !== 'incall' && screen !== 'callactive' && !videoFullScreen && (

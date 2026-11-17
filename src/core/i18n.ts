@@ -112,6 +112,15 @@ export interface Translations {
   logPlaceholder: string;
   logSdkPlaceholder: string;
   sdkLogHint: (n: number) => string;
+  /** The SDK Logs screen's level filter: show lines at this level or above. */
+  sdkLogLevelAll: string;
+  sdkLogLevelDebug: string;
+  sdkLogLevelInfo: string;
+  sdkLogLevelWarn: string;
+  /** Lines the reader missed because the native ring moved on before they were fetched. */
+  sdkLogGap: (n: number) => string;
+  /** Before Create: the ring is read through the SDK instance, so there is nothing to read from yet. */
+  sdkLogNoSdk: string;
 
   // ── Metrics screen
   metricsHintInitial: string;
@@ -606,6 +615,12 @@ const tr: Translations = {
   logPlaceholder:    'Loglar burada görünecek…',
   logSdkPlaceholder: 'SDK log olayları burada görünür\nOluştur → Başlat adımlarından sonra.',
   sdkLogHint: n => `${n} kayıt (dosyaya da kaydedildi)`,
+  sdkLogLevelAll:   'Hepsi',
+  sdkLogLevelDebug: 'DEBUG+',
+  sdkLogLevelInfo:  'INFO+',
+  sdkLogLevelWarn:  'WARN+',
+  sdkLogGap: n => `— ${n} satır bu görünümden düştü (dosyada duruyor) —`,
+  sdkLogNoSdk: 'SDK henüz oluşturulmadı. Önce Home → Oluştur.',
 
   metricsHintInitial:  "Aşağı çek veya 'Getir'e bas",
   metricsLastFetched:  t => `Son güncelleme: ${t}`,
@@ -1048,6 +1063,12 @@ const en: Translations = {
   logPlaceholder:    'Logs will appear here…',
   logSdkPlaceholder: 'SDK log events appear here\nafter Create → Initialize.',
   sdkLogHint: n => `${n} entries (also saved to file)`,
+  sdkLogLevelAll:   'All',
+  sdkLogLevelDebug: 'DEBUG+',
+  sdkLogLevelInfo:  'INFO+',
+  sdkLogLevelWarn:  'WARN+',
+  sdkLogGap: n => `— ${n} lines left this view (still in the file) —`,
+  sdkLogNoSdk: 'The SDK has not been created yet. Home → Create first.',
 
   metricsHintInitial:  'Pull down or tap Fetch',
   metricsLastFetched:  t => `Last fetched: ${t}`,

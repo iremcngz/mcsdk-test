@@ -113,6 +113,11 @@ const MockGetUserByUsername = getUserByUsername as jest.MockedFunction<typeof ge
 /** Typed reference to the mocked McSdk constructor. */
 const MockMcSdk = McSdk as jest.MockedClass<typeof McSdk>;
 
+/** What getSdkLogs resolves while the native ring is empty. */
+const EMPTY_SDK_LOG_BATCH = {
+  entries: [], latestSeq: -1, total: 0, skipped: 0, evicted: 0, fileDropped: 0,
+};
+
 /**
  * Factory that creates a fresh, isolated mock instance of McSdk.
  * Each method is an independent jest.fn() so tests can assert on them
@@ -122,9 +127,15 @@ const makeSdkInstance = () => ({
   setParams:      jest.fn(),
   init:           jest.fn().mockResolvedValue(true),
   destroy:        jest.fn(),
-  listMetrics:    jest.fn().mockReturnValue(''),
-  listAlarms:     jest.fn().mockReturnValue(''),
-  onLog:          jest.fn(),
+  // Promise-based, as the bridge methods are: a synchronous one would run on
+  // the JS thread.
+  listMetrics:    jest.fn().mockResolvedValue(''),
+  listAlarms:     jest.fn().mockResolvedValue(''),
+  // The SDK's log stream is pulled from the native ring by the SDK Logs screen,
+  // never pushed as events — so there is no onLog to subscribe to.
+  getSdkLogs:     jest.fn().mockResolvedValue(EMPTY_SDK_LOG_BATCH),
+  clearSdkLogs:   jest.fn(),
+  getSdkLogCount: jest.fn().mockResolvedValue(0),
   onAlarm:        jest.fn(),
   // SdkContext logs every listener event through this.
   onAnyEvent:     jest.fn().mockReturnValue({ remove: jest.fn() }),
@@ -312,32 +323,22 @@ describe('handleCreate', () => {
     await expectLog(/McSdk\(\) → nativeCreate\(\) OK/);
   });
 
-  it('registers the SDK log event listener', async () => {
-    // App subscribes to SDK LOG events so they appear in the console
+  // The SDK's own stream — ~450 lines a second with the default params — is
+  // not delivered to JS line by line any more: the Android bridge keeps it in
+  // a native ring and the SDK Logs screen pulls it while open. So nothing here
+  // subscribes to it, and the Log Console never sees it.
+  it('does not pull the SDK stream until the SDK Logs screen is opened', async () => {
     const sdk = await renderAndCreate();
-    expect(sdk.onLog).toHaveBeenCalledTimes(1);
-  });
-
-  // The SDK's own stream used to be written into the Log Console as well as
-  // the SDK Logs screen. That put every line in two places, and at the ~450
-  // events a second the default params produce it buried the app's own lines
-  // and the listener events underneath it. Each screen has one job now.
-  it('keeps the SDK stream out of the Log Console', async () => {
-    const sdk = await renderAndCreate();
-    const emitSdkLog = sdk.onLog.mock.calls[0][0];
-    await act(async () => {
-      emitSdkLog({ level: 2, log: 'PjsipModule::OnRxRequest cseq=1' });
-    });
     openLogConsole();
     await waitFor(() => expect(screen.getByText(/nativeCreate\(\) OK/)).toBeTruthy());
-    expect(screen.queryByText(/PjsipModule::OnRxRequest/)).toBeNull();
+    expect(sdk.getSdkLogs).not.toHaveBeenCalled();
   });
 
-  it('still shows the SDK stream on the SDK Logs screen', async () => {
+  it('shows the SDK stream on the SDK Logs screen, pulled from the native ring', async () => {
     const sdk = await renderAndCreate();
-    const emitSdkLog = sdk.onLog.mock.calls[0][0];
-    await act(async () => {
-      emitSdkLog({ level: 2, log: 'PjsipModule::OnRxRequest cseq=1' });
+    sdk.getSdkLogs.mockResolvedValue({
+      entries: [{ seq: 0, time: '12:00:00.000', level: 2, msg: 'PjsipModule::OnRxRequest cseq=1' }],
+      latestSeq: 0, total: 1, skipped: 0, evicted: 0, fileDropped: 0,
     });
     fireEvent.press(screen.getByText('Tools'));
     fireEvent.press(screen.getByTestId('tool-sdklogs'));
@@ -991,7 +992,7 @@ describe('MetricsScreen', () => {
 
   it('displays parsed metric family names', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
     fireEvent.press(screen.getByText('Metrics'));
     await act(async () => {
       fireEvent.press(screen.getByText('Fetch'));
@@ -1005,7 +1006,7 @@ describe('MetricsScreen', () => {
 
   it('displays COUNTER and GAUGE type badges', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
     fireEvent.press(screen.getByText('Metrics'));
     await act(async () => {
       fireEvent.press(screen.getByText('Fetch'));
@@ -1016,7 +1017,7 @@ describe('MetricsScreen', () => {
 
   it('displays help docstrings for each metric family', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
     fireEvent.press(screen.getByText('Metrics'));
     await act(async () => {
       fireEvent.press(screen.getByText('Fetch'));
@@ -1027,7 +1028,7 @@ describe('MetricsScreen', () => {
 
   it('displays sample values', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
     fireEvent.press(screen.getByText('Metrics'));
     await act(async () => {
       fireEvent.press(screen.getByText('Fetch'));
@@ -1038,7 +1039,7 @@ describe('MetricsScreen', () => {
 
   it('shows "Last fetched: HH:MM:SS" timestamp after successful fetch', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
     fireEvent.press(screen.getByText('Metrics'));
     await act(async () => {
       fireEvent.press(screen.getByText('Fetch'));
@@ -1054,7 +1055,7 @@ describe('MetricsScreen', () => {
 
   it('says how long ago the fetch was, next to the timestamp', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
     fireEvent.press(screen.getByText('Metrics'));
     await act(async () => {
       fireEvent.press(screen.getByText('Fetch'));
@@ -1067,7 +1068,7 @@ describe('MetricsScreen', () => {
     jest.useFakeTimers();
     try {
       const sdk = await renderAndCreate();
-      sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+      sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
       fireEvent.press(screen.getByText('Metrics'));
       await act(async () => {
         fireEvent.press(screen.getByText('Fetch'));
@@ -1090,7 +1091,7 @@ describe('MetricsScreen', () => {
 
   it('auto refresh is off to begin with, and fetches nothing by itself', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
     jest.useFakeTimers();
     try {
       fireEvent.press(screen.getByText('Metrics'));
@@ -1104,7 +1105,7 @@ describe('MetricsScreen', () => {
 
   it('auto refresh fetches at once when switched on, then on its interval', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
     jest.useFakeTimers();
     try {
       fireEvent.press(screen.getByText('Metrics'));
@@ -1124,7 +1125,7 @@ describe('MetricsScreen', () => {
 
   it('auto refresh stops fetching once switched back off', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
     jest.useFakeTimers();
     try {
       fireEvent.press(screen.getByText('Metrics'));
@@ -1145,7 +1146,7 @@ describe('MetricsScreen', () => {
 
   it('Fetch still works while auto refresh is on', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValue(PROMETHEUS_FIXTURE);
     jest.useFakeTimers();
     try {
       fireEvent.press(screen.getByText('Metrics'));
@@ -1162,7 +1163,7 @@ describe('MetricsScreen', () => {
 
   it('shows error message when sdk.listMetrics throws', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockImplementation(() => { throw new Error('metrics unavailable'); });
+    sdk.listMetrics.mockRejectedValue(new Error('metrics unavailable'));
     fireEvent.press(screen.getByText('Metrics'));
     await act(async () => {
       fireEvent.press(screen.getByText('Fetch'));
@@ -1172,12 +1173,12 @@ describe('MetricsScreen', () => {
 
   it('clears a previous error on a successful subsequent fetch', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockImplementationOnce(() => { throw new Error('first error'); });
+    sdk.listMetrics.mockRejectedValueOnce(new Error('first error'));
     fireEvent.press(screen.getByText('Metrics'));
     await act(async () => { fireEvent.press(screen.getByText('Fetch')); });
     expect(screen.getByText('first error')).toBeTruthy();
 
-    sdk.listMetrics.mockReturnValueOnce(PROMETHEUS_FIXTURE);
+    sdk.listMetrics.mockResolvedValueOnce(PROMETHEUS_FIXTURE);
     await act(async () => { fireEvent.press(screen.getByText('Fetch')); });
     expect(screen.queryByText('first error')).toBeNull();
     expect(screen.getAllByText('sip_rx_packets_total').length).toBeGreaterThanOrEqual(1);
@@ -1185,7 +1186,7 @@ describe('MetricsScreen', () => {
 
   it('shows "No metrics yet" when fetch returns an empty string', async () => {
     const sdk = await renderAndCreate();
-    sdk.listMetrics.mockReturnValue('');
+    sdk.listMetrics.mockResolvedValue('');
     fireEvent.press(screen.getByText('Metrics'));
     await act(async () => {
       fireEvent.press(screen.getByText('Fetch'));

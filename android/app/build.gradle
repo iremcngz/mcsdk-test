@@ -142,6 +142,15 @@ dependencies {
     // react-native-image-picker (camera / gallery)
     implementation project(':react-native-image-picker')
 
+    // SdkLogStore writes the SDK's log lines into the file react-native-file-
+    // logger keeps, through the logback root logger that library configures.
+    // Both artifacts are already in the APK as that library's dependencies; they
+    // are declared here only so the app's own Kotlin can see them at compile
+    // time (a library's `implementation` deps are not on the consumer's compile
+    // classpath). Same versions as react-native-file-logger's android/build.gradle.
+    implementation("org.slf4j:slf4j-api:1.7.33")
+    implementation("com.github.tony19:logback-android:2.0.0")
+
     // JVM unit tests for the pure-Kotlin media code (no device needed):
     //   cd android && ./gradlew :app:testReleaseUnitTest
     testImplementation("junit:junit:4.13.2")

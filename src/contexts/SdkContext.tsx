@@ -1,9 +1,12 @@
 /**
- * contexts/SdkContext.tsx — SDK lifecycle state, parameter state, log
- * buffers, IP monitoring, and all SDK action handlers.
+ * contexts/SdkContext.tsx — SDK lifecycle state, parameter state, IP
+ * monitoring, and all SDK action handlers.
  *
- * Must be rendered inside <AppContextProvider> because handleIpChange
- * reads `tr` from AppContext to produce the translated log message.
+ * Must be rendered inside <AppContextProvider> (handleIpChange reads `tr` for
+ * the translated log message) and inside <LogContextProvider>, which holds
+ * the console buffers this used to own. They moved out so that a log flush no
+ * longer re-renders every consumer of this context — TabNavigator and the
+ * screen under it among them.
  *
  * Consumed via: useSdkContext()
  */
@@ -15,31 +18,16 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { McSdk, type McSdkParams, type LogEvent, type RegistrationEvent, type StoreDocumentsEvent } from '../mcsdk';
+import { McSdk, type McSdkParams, type RegistrationEvent, type StoreDocumentsEvent } from '../mcsdk';
 import { formatListenerEvent } from '../mcsdk/listenerLog';
 import { DeviceIdentity, SdkSettings, type SdkSettingsSchema } from '../core/settings';
-import { AppLogger, SdkLogger } from '../core/logger';
 import { MediaSession } from '../core/mediaSession';
 import { useIpMonitor, type IpInfo } from '../core/netMonitor';
 import { useAppContext } from './AppContext';
+import { useLogContext } from './LogContext';
 import { getCredentials } from '../core/auth';
 import { AuthSettings } from '../core/settings';
 import { saveDocuments } from '../core/db';
-import type { LogEntry, SdkLogEntry } from '../shared/types';
-
-// ── Module-level counters (reset across hot-reloads intentionally) ─────────────
-
-let nextId    = 0;
-let sdkLogId  = 0;
-
-function stamp(): string {
-  const d = new Date();
-  return (
-    d.getHours().toString().padStart(2, '0') + ':' +
-    d.getMinutes().toString().padStart(2, '0') + ':' +
-    d.getSeconds().toString().padStart(2, '0')
-  );
-}
 
 const PHASE_LABELS: Record<number, string> = {
   0: 'Idle',
@@ -96,14 +84,9 @@ export interface SdkContextValue {
   initialized: boolean;
   paramsSet:   boolean;
 
-  // Log buffers
-  logs:    LogEntry[];
-  /** Listener events only; also in `logs`, where SDK lines soon push them out. */
-  listenerLogs: LogEntry[];
-  sdkLogs: SdkLogEntry[];
-  addLog:  (msg: string, level?: LogEntry['level']) => void;
-  clearLogs:    () => void;
-  clearSdkLogs: () => void;
+  // The console buffers are LogContext's (useLogContext), not here: see the
+  // header. The SDK's own log stream is in neither — it never reaches JS line
+  // by line (McSdk.getSdkLogs).
 
   // Network
   ipInfo: IpInfo;
@@ -229,94 +212,14 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     setGmsUrl:           (v: string)  => updateParam('gmsUrl', v),
   }), [updateParam]);
 
-  // ── Log buffers ────────────────────────────────────────────────────────────
-  const [logs,    setLogs]    = useState<LogEntry[]>([]);
-  const [listenerLogs, setListenerLogs] = useState<LogEntry[]>([]);
-  const [sdkLogs, setSdkLogs] = useState<SdkLogEntry[]>([]);
-
-  // Both buffers are batched rather than written per event. With the default
-  // params the SDK emits ~450 log events a second, and a setState per event
-  // copied the whole array each time — cost growing with length, so O(n²) over
-  // a session — and re-rendered the console every time. Measured on device:
-  // Choreographer skipping 57 frames and Davey! duration=1735ms, repeatedly.
-  //
-  // Entries accumulate in a ref (writing a ref does not render) and move into
-  // state once per FLUSH_MS, turning ~900 state updates a second into 8.
-  // Nothing is dropped; the console just trails real time by at most FLUSH_MS,
-  // which is imperceptible for a log view.
-  //
-  // File logging stays per-event on purpose: cache/logs is where the full,
-  // untruncated SIP bodies are read from, and anything still queued would be
-  // lost if the process died.
-  const FLUSH_MS    = 250;
-  const MAX_ENTRIES = 5000;
-
-  const pendingLogs    = useRef<LogEntry[]>([]);
-  const pendingListenerLogs = useRef<LogEntry[]>([]);
-  const pendingSdkLogs = useRef<SdkLogEntry[]>([]);
-  const flushTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ── Logging ────────────────────────────────────────────────────────────────
+  // Both writers are stable callbacks, so depending on them below costs nothing.
+  const { addLog, addListenerLog } = useLogContext();
   const listenerLogSub = useRef<{ remove: () => void } | null>(null);
 
-  const flushLogs = useCallback(() => {
-    flushTimer.current = null;
-    // Capped: unbounded arrays made every copy more expensive than the last, so
-    // a long session degraded steadily. The file log stays uncapped.
-    if (pendingLogs.current.length) {
-      const batch = pendingLogs.current;
-      pendingLogs.current = [];
-      setLogs(prev => [...prev, ...batch].slice(-MAX_ENTRIES));
-    }
-    if (pendingListenerLogs.current.length) {
-      const batch = pendingListenerLogs.current;
-      pendingListenerLogs.current = [];
-      setListenerLogs(prev => [...prev, ...batch].slice(-MAX_ENTRIES));
-    }
-    if (pendingSdkLogs.current.length) {
-      const batch = pendingSdkLogs.current;
-      pendingSdkLogs.current = [];
-      setSdkLogs(prev => [...prev, ...batch].slice(-MAX_ENTRIES));
-    }
-  }, []);
-
-  const scheduleFlush = useCallback(() => {
-    if (flushTimer.current === null) {
-      flushTimer.current = setTimeout(flushLogs, FLUSH_MS);
-    }
-  }, [flushLogs]);
-
-  // Flush on the way out instead of just clearing the timer: a batch queued in
-  // the last FLUSH_MS would otherwise never reach the console. React drops the
-  // setState if the provider is really going away — there is no console left to
-  // show it — but when this teardown is a re-mount rather than a shutdown it is
-  // the difference between keeping those lines and silently losing them.
   useEffect(() => () => {
     listenerLogSub.current?.remove();
     listenerLogSub.current = null;
-    if (flushTimer.current !== null) {
-      clearTimeout(flushTimer.current);
-      flushLogs();
-    }
-  }, [flushLogs]);
-
-  const addLog = useCallback((msg: string, level: LogEntry['level'] = 'info') => {
-    pendingLogs.current.push({ id: nextId++, time: stamp(), msg, level });
-    scheduleFlush();
-    if (level === 'error')     { AppLogger.error(msg); }
-    else if (level === 'warn') { AppLogger.warn(msg); }
-    else                       { AppLogger.info(msg); }
-  }, [scheduleFlush]);
-
-  // Clearing drops what is queued too, or the next flush would refill the
-  // console with entries from before the clear.
-  const clearLogs = useCallback(() => {
-    pendingLogs.current = [];
-    pendingListenerLogs.current = [];
-    setLogs([]);
-    setListenerLogs([]);
-  }, []);
-  const clearSdkLogs = useCallback(() => {
-    pendingSdkLogs.current = [];
-    setSdkLogs([]);
   }, []);
 
   // ── Network / IP monitor ───────────────────────────────────────────────────
@@ -339,19 +242,13 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
       setRegistered(false);
       addLog('McSdk() → nativeCreate() OK — listeners auto-bound');
 
-      // The SDK's own stream goes to the SDK Logs screen and the file, and
-      // NOT to the Log Console. It used to go to both, which put the same line
-      // in two places and — at the ~450 events a second the default params
-      // produce — buried the app's own lines and the listener events under it.
-      // The two screens each have one job now: this stream there, what the app
-      // and the listener said here.
-      sdkRef.current.onLog((e: LogEvent) => {
-        SdkLogger.write(e.level, e.log);
-        pendingSdkLogs.current.push({
-          id: sdkLogId++, time: stamp(), level: e.level, msg: e.log,
-        });
-        scheduleFlush();
-      });
+      // The SDK's own log stream is deliberately not subscribed to here. It is
+      // ~450 lines a second with the default params, and as events every one of
+      // them ran on the JS thread whether or not anybody was reading them. The
+      // Android bridge keeps it in a process-level ring and writes the file
+      // itself; the SDK Logs screen pulls from the ring while open
+      // (McSdk.getSdkLogs). Nothing SDK-related is lost: the stream is complete
+      // there and in the file, it just never passes through this context.
 
       // Everything the listener reports, contents included: call and floor
       // state, SdkErrors, registration, groups. The handlers elsewhere each read
@@ -364,11 +261,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
       listenerLogSub.current?.remove();
       listenerLogSub.current = sdkRef.current.onAnyEvent((event, payload) => {
         const line = formatListenerEvent(event, payload);
-        addLog(line.msg, line.level);
-        pendingListenerLogs.current.push({
-          id: nextId++, time: stamp(), msg: line.msg, level: line.level,
-        });
-        if (line.fileDetail) { AppLogger.info(line.fileDetail); }
+        addListenerLog(line.msg, line.level, line.fileDetail);
       });
 
       sdkRef.current.onRegistration((e: RegistrationEvent) => {
@@ -442,7 +335,7 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     }
     // tr is read for the foreground-service notification strings; depending on
     // the whole bundle keeps handleCreate correct when the language changes.
-  }, [addLog, scheduleFlush, updateCachedDocs, tr]);
+  }, [addLog, addListenerLog, updateCachedDocs, tr]);
 
   /**
    * Sends the stored credentials to the SDK. Must run after init(): everything
@@ -658,7 +551,6 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
   const value: SdkContextValue = useMemo(() => ({
     sdkRef,
     created, initialized, paramsSet,
-    logs, listenerLogs, sdkLogs, addLog, clearLogs, clearSdkLogs,
     ipInfo,
     registrationProgress, registrationPhase, registrationState, registered,
     handleCreate, handleSetParams, handleInit, handleDestroy, handleStartAll,
@@ -666,7 +558,6 @@ export function SdkContextProvider({ children }: { children: React.ReactNode }) 
     ...setters,
   }), [
     created, initialized, paramsSet,
-    logs, listenerLogs, sdkLogs, addLog, clearLogs, clearSdkLogs,
     ipInfo,
     registrationProgress, registrationPhase, registrationState, registered,
     handleCreate, handleSetParams, handleInit, handleDestroy, handleStartAll,

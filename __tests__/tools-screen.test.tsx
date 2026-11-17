@@ -9,13 +9,19 @@
  */
 
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { ToolsScreen } from '../src/features/tools/ToolsScreen';
 import { getTranslation } from '../src/core/i18n';
 
 const en = getTranslation('en');
 const mockSetScreen = jest.fn();
-let mockSdkLogs: { id: number }[] = [];
+// The SDK's log lines live in the native ring; the menu asks the SDK instance
+// how many there are.
+let mockSdkLogCount = 0;
+const mockSdk = { getSdkLogCount: jest.fn(() => Promise.resolve(mockSdkLogCount)) };
+// One object, as the real context's useRef is: a fresh `{ current }` per render
+// would re-run the count effect on every render.
+const mockSdkRef = { current: mockSdk };
 let mockLogs: { id: number }[] = [];
 
 jest.mock('react-native-safe-area-context', () => ({
@@ -25,7 +31,12 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 jest.mock('../src/contexts/SdkContext', () => ({
-  useSdkContext: () => ({ sdkLogs: mockSdkLogs, logs: mockLogs }),
+  useSdkContext: () => ({ sdkRef: mockSdkRef, created: true }),
+}));
+
+// The console buffers are LogContext's, not SdkContext's.
+jest.mock('../src/contexts/LogContext', () => ({
+  useLogContext: () => ({ logs: mockLogs }),
 }));
 
 jest.mock('../src/contexts/NavigationContext', () => ({
@@ -40,7 +51,8 @@ jest.mock('../src/contexts/AppContext', () => {
 
 beforeEach(() => {
   mockSetScreen.mockClear();
-  mockSdkLogs = [];
+  mockSdk.getSdkLogCount.mockClear();
+  mockSdkLogCount = 0;
   mockLogs = [];
 });
 
@@ -66,10 +78,12 @@ describe('ToolsScreen', () => {
     expect(mockSetScreen).toHaveBeenCalledWith(target);
   });
 
-  it('shows the SDK log count on its row once there are entries', () => {
-    mockSdkLogs = [{ id: 1 }, { id: 2 }, { id: 3 }];
+  it('shows the SDK log count on its row once there are entries', async () => {
+    mockSdkLogCount = 3;
     render(<ToolsScreen />);
-    expect(screen.getByText('3')).toBeTruthy();
+    expect(await screen.findByText('3')).toBeTruthy();
+    // Asked once, on open: the count is a glance, not a live feed.
+    expect(mockSdk.getSdkLogCount).toHaveBeenCalledTimes(1);
   });
 
   it('shows the app log count on the Log Console row', () => {
@@ -78,8 +92,9 @@ describe('ToolsScreen', () => {
     expect(screen.getByText('2')).toBeTruthy();
   });
 
-  it('shows no count badge while both logs are empty', () => {
+  it('shows no count badge while both logs are empty', async () => {
     render(<ToolsScreen />);
+    await waitFor(() => expect(mockSdk.getSdkLogCount).toHaveBeenCalled());
     expect(screen.queryByText('0')).toBeNull();
   });
 });

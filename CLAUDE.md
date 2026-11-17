@@ -128,28 +128,73 @@ to run on the main thread — the side effect is that the SDK thread was never b
 GCD's queue is unbounded, though, so a stalled JS side grows memory with no counter and no way
 to notice. Worth mirroring the bound when the iOS media layer is written.
 
-**The log pipeline loaded the UI thread — now batched, one part still open.**
-Separate problem from the event pump above: the pump freed the *SDK* thread, this was the
-*JS* thread. With the default params (`logLevel 0`, `pjLogLevel 0`, `rxTxEnabled true`) the
-SDK emits ~450 events per second, and each one used to run two `setState` calls in
-`SdkContext` (`logs` and `sdkLogs`), each copying the whole array — cost growing with length,
-so O(n²) over a session — with no cap on either array. Measured on device:
-`Choreographer: Skipped 57 frames` and `Davey! duration=1735ms`, repeatedly.
+**The SDK's log stream never reaches JS line by line.** Separate problem from the event pump
+above: the pump freed the *SDK* thread, this was the *JS* thread. With the default params
+(`logLevel 0`, `pjLogLevel 0`, `rxTxEnabled true`) the SDK writes ~450 lines a second, and each
+one used to be a `McSdkLog` event: a bridge crossing in, a handler on the JS thread (two `Date`
+objects, a string, a push into a buffer, a 250 ms flush that re-rendered every consumer of
+`SdkContext`), and a second crossing back out to `FileLogger`. ~900 crossings a second whether
+or not anyone was reading the logs — and the JS thread is where every tap is handled, so taps
+queued behind that work and the app read as frozen on screen changes. Counted on an SM-A205F:
+98% of all events reaching JS were VERBOSE and DEBUG log lines.
 
-Entries now accumulate in a ref and move into state once per 250 ms (~900 state updates a
-second become 8), and both arrays are capped at 5000 entries. Nothing is dropped: the console
-trails real time by at most the flush interval. Teardown flushes before clearing the timer so
-a batch queued in the last interval is not lost, and `clearLogs`/`clearSdkLogs` drop the
-queue too — otherwise the next flush would refill a console that was just cleared.
+Now `onLog` in `McSdkModule` only calls `SdkLogStore.append()` — a process-level ring of 5000
+lines plus a bounded queue to a writer thread — and emits nothing. The **SDK Logs** screen
+*pulls*: `McSdk.getSdkLogs(sinceSeq, max, minLevel)` returns a batch (Promise-based on purpose;
+a synchronous method would run on the JS thread), polled every 500 ms while the screen is open
+and not at all once it is left. Every line is still kept and shown, VERBOSE included; the level
+filter runs inside the ring, so a narrowed view never has the hidden lines cross the bridge.
+The ring outlives a JS reload (an `object`, like the registration state in the companion), so
+the history is there afterwards. `evicted`/`skipped` in the batch say when the reader fell
+behind, and the screen draws a gap marker there rather than showing two lines as consecutive.
 
-**The file log is deliberately still per-event and uncapped.** `cache/logs/app-latest.log` is
-where the full, untruncated SIP bodies are read from, and anything sitting in a batch would
-be lost if the process died.
+The screen is an **inverted `FlatList`** (index 0 = newest, at scroll offset 0): no
+`scrollToEnd`, memoised rows with fixed per-level style objects, and
+`maintainVisibleContentPosition` so a reader who scrolled back keeps their place. It renders
+its placeholder *instead of* the list — an inverted list draws `ListEmptyComponent` upside
+down. Mounting it used to mean 5000 mapped `<Text>` nodes on the UI thread, which was the
+single worst "freeze on switching screens".
 
-That remaining `FlatList` work is done. The full console is its own screen under
-**Tools → Log Console** (`src/features/logs/`), with the **Listener only** filter beside an
-**All logs** one; its `FlatList` follows the tail on `onContentSizeChange` rather than on
-`sdk.logs`, which is a new array reference every flush.
+**The file is written natively, into the same file as before.** `SdkLogStore`'s writer thread
+logs each line through an ordinary slf4j logger with the prefix the JS path produced
+(`[time] [LEVEL] [APP] [SDK/NAME] msg`, UTC). It lands in react-native-file-logger's
+`app-latest.log` because that library attaches its `RollingFileAppender` to the *root* logger
+of the process-wide logback context (the app resolves `slf4j-api 1.7.x`, so `LoggerFactory`
+hands out that context) — so the size limit and rotation configured from JS apply, the app and
+SDK lines stay interleaved in one timeline, and Settings' file list is unchanged. `slf4j-api`
+and `logback-android` are declared in `app/build.gradle` only so the app's Kotlin can see them
+at compile time; both were already in the APK. Lines produced before `FileLogger.configure()`
+has attached the appender are held (up to 2000) and written once it has. The writer `offer()`s,
+never `put()`s — a full queue must not block the SDK — and counts drops as `fileDropped`.
+
+**The console buffers live in `LogContext`, not `SdkContext`.** `logs` and `listenerLogs` (the
+app's own lines and the listener events) still accumulate in a ref and move into state once per
+250 ms, capped at 5000 — but in their own context (`src/contexts/LogContext.tsx`), read only by
+Home's console box, the Log Console and the Tools badge. While they were in `SdkContext`, every
+flush re-rendered every consumer of it: `TabNavigator` and, under it, whichever screen was
+showing. `SdkContext` now writes through `useLogContext()` (`addLog`, `addListenerLog`), so
+`LogContextProvider` has to sit *outside* `SdkContextProvider` (App.tsx, and any test wrapper
+that mounts `SdkContextProvider`). The screens are wrapped in `React.memo` in `TabNavigator`:
+they take no props, so each re-renders only on its own context subscriptions, not whenever the
+shell does (navigation, every Talk/Call context change). The file write stays per-entry:
+`cache/logs/app-latest.log` is where the full, untruncated SIP bodies are read from, and
+anything sitting in a batch would be lost if the process died.
+
+**The bridge's readers are Promise-based, never `isBlockingSynchronousMethod`.** `listMetrics`,
+`listAlarms`, `getData`, `exportData`, `isEmergencyState`, `isImminentPerilState` and the SDK
+log store's methods all resolve a Promise. A synchronous native method runs *on the JS thread*,
+where every touch is handled too, so the SDK's Prometheus serialisation held up the UI for as
+long as it took — every 5 s with Metrics' auto-refresh on. The iOS module was converted with it
+(`RCT_EXPORT_METHOD` with resolve/reject); the spec in `NativeMcSdk.ts` is shared, so a new
+method on one platform needs at least a stub on the other.
+
+The full console is its own screen under **Tools → Log Console** (`src/features/logs/`), with
+the **Listener only** filter beside an **All logs** one. Like SDK Logs it is an **inverted
+`FlatList`** over the buffer reversed (newest at index 0, at scroll offset 0): the tail is
+followed with no `scrollToEnd`, which used to run on every content change and pulled a reader
+back to the bottom at each flush, and `maintainVisibleContentPosition` keeps a reader who
+scrolled up on their line. Rows are memoised; the placeholder is rendered instead of the list,
+not as `ListEmptyComponent` (inverted, it would be upside down).
 
 **Home carries a small console of its own again**, under the registration progress bar, with
 a **Clear**, the same **All logs** / **Listener only** filter as the Tools screen, and a row
@@ -158,7 +203,7 @@ linking to that screen. It shows the last 40 entries only (`HOME_LOG_TAIL` in
 mounting a `<Text>` per entry over the whole 5000-entry buffer is what drove the console off
 Home in the first place. The tail is taken *after* the filter, so **Listener only** yields 40
 events rather than however few survive in the last 40 entries of the mixed stream. Both
-screens read the one `sdk.logs` buffer, so Home's **Clear** empties the Tools screen too.
+screens read the one `LogContext` buffer, so Home's **Clear** empties the Tools screen too.
 Home answers "is anything happening" next to the progress bar; read a SIP body on the Tools
 screen.
 
@@ -170,12 +215,14 @@ tail is also conditional — `logAtBottom`, a ref, is set from `onScroll` and ga
 `scrollToEnd` in `onContentSizeChange`. Unconditional following and reading back through the
 history are exclusive: at ~450 lines/s a scroll up is undone within the next flush.
 
-**The two log screens hold different streams, and no longer overlap.** The SDK's own `onLog`
-stream goes to **SDK Logs** (`sdkLogs`, with its VERBOSE..FATAL levels) and to the file; the
-Log Console holds what the *app* and the *listener* said (`logs`). `onLog` used to write into
-both, which put each line in two places and — at ~450 events/s — buried the app's own lines
-and the listener events under the SDK stream. `onAnyEvent` already excludes `McSdkEvents.Log`,
-so the listener view was never affected.
+**The two log screens hold different streams, and no longer overlap.** The SDK's own stream
+goes to **SDK Logs** (pulled from `SdkLogStore`, with its VERBOSE..FATAL levels) and to the
+file; the Log Console holds what the *app* and the *listener* said (`logs`). The SDK stream
+used to be written into both, which put each line in two places and — at ~450 lines/s — buried
+the app's own lines and the listener events under it. `onAnyEvent` excludes `McSdkEvents.Log`
+(Android no longer emits it at all; iOS still does), so the listener view was never affected.
+iOS has no `SdkLogStore` yet: its `McSdkModule.mm` answers `getSdkLogs` with an empty batch, so
+its SDK Logs screen stays empty until the store is written there too.
 
 While diagnosing the audio path, note that UI jank is still NOT evidence that the capture
 threads are blocking — use the `droppedFrames` counter on the Audio tab, which measures the
@@ -248,6 +295,50 @@ as a registration failure at ~75%. Handled by `DeviceIdentity.getMcClientId()`.
 **`GroupInfo` flags mean two different things.** In `onGroupsUpdated` they mean "this service
 supports the group"; in `onAffiliationsUpdated` they mean "the affiliation covers this
 service". Same type, opposite reading — do not blur them.
+
+## The screen-switch freezes, and what fixed them
+
+The app froze on screen changes, worst during registration. The constraint is that it has to
+run **at the SDK's most verbose log level** — lowering `logLevel`/`pjLogLevel` is not a fix,
+and every line must stay visible in the app and in the file. The cause was one thing seen from
+four sides: the JS thread, where every tap is handled, was busy with log lines that nobody had
+asked for. The details are in the paragraphs above; this is the map.
+
+1. **The SDK log stream never reaches JS line by line** (`SdkLogStore.kt`). Each line used to
+   be a `McSdkLog` event: a bridge crossing in, a handler on the JS thread, a crossing back out
+   to the file logger. Now `onLog` only appends to a native ring and the SDK Logs screen pulls
+   batches (`McSdk.getSdkLogs`) while it is open; the file is written natively, same file, same
+   format. Counted on the SM-A205F: 98% of the events reaching JS had been these lines.
+2. **SDK Logs is an inverted `FlatList`**, memoised rows, no `scrollToEnd`. It had been 5000
+   mapped `<Text>` nodes re-rendered every 250 ms — the single worst "freeze on switching".
+3. **The console buffers are `LogContext`'s, not `SdkContext`'s**, and the screens are
+   `React.memo`-wrapped in `TabNavigator`. A log flush used to re-render `TabNavigator` and
+   whichever screen was showing, log on it or not. Log Console got the same inverted list.
+4. **The bridge's readers are Promise-based** (`listMetrics` and the rest, both platforms).
+   `isBlockingSynchronousMethod` runs on the JS thread and held the UI for the SDK's
+   serialisation, every 5 s with Metrics' auto-refresh on.
+
+Measured on the SM-A205F (a weak phone on purpose) with a uiautomator-driven run — Start All,
+then a tab every 3 s for 36 s, then Tools → SDK Logs — before and after step 1:
+
+| | before | after |
+|---|---|---|
+| SDK log lines pushed to JS | 667 | 0 |
+| frames skipped opening SDK Logs | 41 | 0 |
+| `Davey!` (>700 ms frames) | 0 | 0 |
+
+That run had the SDK at ~19 lines/s; the ~450/s cited above is heavier traffic, where the
+per-line cost that is now gone mattered more. To measure again: clear logcat, drive the tabs
+during a registration, then count `Skipped [0-9]+ frames`, `Davey!`, `event queue full` and
+`McSdkBridge.*onLog:` (must stay 0) in `adb logcat -d`. UI jank is still not evidence about the
+audio threads — see the `droppedFrames` note above.
+
+**Deliberately not done: keeping the main tabs mounted** (`display: none` instead of
+unmount/mount). It was costed and declined: hidden screens would keep polling and animating
+(Metrics' timers, Talk's loops, SDK Logs' poll), screen state would persist across visits,
+Settings' file list would go stale, and every test asserting a screen's text is absent would
+need `toBeVisible`. If mount cost ever shows up in a measurement, start with the cheap half:
+run the contacts DB seed once at startup rather than on every Contacts mount.
 
 ## Tests
 

@@ -18,18 +18,30 @@ export interface Spec extends TurboModule {
     // Alarm
     raiseAlarm(name: string, info: string, severity: number): void;
     resolveAlarm(name: string): void;
-    listAlarms(): string;
+    // The readers below are Promise-based, never synchronous: a synchronous
+    // native method runs on the JS thread, where every touch is handled too, so
+    // the SDK's serialisation would hold up the UI for as long as it takes.
+    listAlarms(): Promise<string>;
 
     // Metrics
-    listMetrics(): string;
+    listMetrics(): Promise<string>;
+
+    // The SDK's own log stream (Android). It never reaches JS line by line: the
+    // bridge keeps it in a process-level ring and the SDK Logs screen pulls it in
+    // batches while open. sinceSeq is exclusive (-1 for the tail); minLevel is
+    // 0 VERBOSE .. 5 FATAL. Resolves an SdkLogBatch (src/mcsdk/types.ts).
+    // Promise-based on purpose — a synchronous method would run on the JS thread.
+    getSdkLogs(sinceSeq: number, max: number, minLevel: number): Promise<Object>;
+    clearSdkLogs(): void;
+    getSdkLogCount(): Promise<number>;
 
     // DAO
     createData(key: string, value: string): void;
     updateData(key: string, value: string): void;
     deleteData(key: string): void;
-    getData(key: string): string;
+    getData(key: string): Promise<string>;
     importData(data: string): void;
-    exportData(): string;
+    exportData(): Promise<string>;
 
     // Messaging
     // fetchDocument was dropped from the Android SDK in 072fad0 (the engine now
@@ -55,8 +67,8 @@ export interface Spec extends TurboModule {
     // callId until the SDK made the state per-user.
     setEmergency(emergency: boolean): void;
     setImminentPeril(imminentPeril: boolean): void;
-    isEmergencyState(): boolean;
-    isImminentPerilState(): boolean;
+    isEmergencyState(): Promise<boolean>;
+    isImminentPerilState(): Promise<boolean>;
 
     // Affiliation (Android only until the iOS xcframework is rebuilt).
     // requestsJson is a JSON-encoded McSdkAffiliateRequest[] (same pattern as

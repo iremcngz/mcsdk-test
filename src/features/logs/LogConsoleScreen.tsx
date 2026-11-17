@@ -5,37 +5,35 @@
  * truncates PJSIP message bodies, these lines do not — and a 200px box inside
  * Home's shared scroll view is not enough of it. Home has such a box again,
  * under its registration progress, but it holds the last 40 entries only; the
- * whole 5000-entry buffer is here, reached from Tools. Same `sdk.logs` buffer
+ * whole 5000-entry buffer is here, reached from Tools. Same LogContext buffer
  * behind both, so either Clear empties the other.
  *
  * Two views, as on Home: every entry, or **Listener only** — the SDK callbacks
- * and their payloads (`src/mcsdk/listenerLog.ts`). The filter matters because
- * the two share one 5000-entry buffer and the SDK emits ~450 lines/s, which
- * evicts a listener event in about 11 s.
+ * and their payloads (`src/mcsdk/listenerLog.ts`).
  *
- * The list is a `FlatList`, not the plain `ScrollView` Home used: at 5000
- * entries that mapped every one of them to its own mounted `<Text>`.
+ * The list is inverted, like the SDK Logs screen: index 0 is the newest line
+ * and sits at scroll offset 0, so the tail is followed with no `scrollToEnd` —
+ * which used to run on every content change and dragged a reader back to the
+ * bottom at every flush. A reader who has scrolled up now keeps their place
+ * (maintainVisibleContentPosition). The buffer is oldest-first, so it is
+ * reversed for the list; 5000 entries a few times a second is nothing next to
+ * what the scroll-to-end cost. No ListEmptyComponent: an inverted list draws
+ * it upside down, so the placeholder is rendered in the list's stead.
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { FlatList, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
-import { useSdkContext } from '../../contexts/SdkContext';
+import { useLogContext } from '../../contexts/LogContext';
 import { makeLogConsoleStyles } from './styles';
 import type { LogEntry } from '../../shared/types';
 
-export function LogConsoleScreen() {
-  const { c, tr }  = useAppContext();
-  const sdk        = useSdkContext();
-  const insets     = useSafeAreaInsets();
-  const s          = useMemo(() => makeLogConsoleStyles(c), [c]);
-  const listRef    = useRef<FlatList<LogEntry>>(null);
+type Styles = ReturnType<typeof makeLogConsoleStyles>;
 
-  const [listenerOnly, setListenerOnly] = useState(false);
-  const shownLogs = listenerOnly ? sdk.listenerLogs : sdk.logs;
-
-  const renderItem = useCallback(({ item }: { item: LogEntry }) => (
+/** One line. Memoised: each flush hands the list a new array, and only new rows should render. */
+const LogRow = memo(function LogRow({ item, s }: { item: LogEntry; s: Styles }) {
+  return (
     <Text
       style={[
         s.line,
@@ -46,7 +44,25 @@ export function LogConsoleScreen() {
       <Text style={s.time}>{item.time} </Text>
       {item.msg}
     </Text>
-  ), [s]);
+  );
+});
+
+export function LogConsoleScreen() {
+  const { c, tr }  = useAppContext();
+  const { logs, listenerLogs, clearLogs } = useLogContext();
+  const insets     = useSafeAreaInsets();
+  const s          = useMemo(() => makeLogConsoleStyles(c), [c]);
+
+  const [listenerOnly, setListenerOnly] = useState(false);
+  const shownLogs = listenerOnly ? listenerLogs : logs;
+  // Newest first, for the inverted list.
+  const rows = useMemo(() => shownLogs.slice().reverse(), [shownLogs]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: LogEntry }) => <LogRow item={item} s={s} />,
+    [s],
+  );
+  const keyExtractor = useCallback((entry: LogEntry) => String(entry.id), []);
 
   const filters: { key: boolean; label: string }[] = [
     { key: false, label: tr.btnLogsAll },
@@ -59,7 +75,7 @@ export function LogConsoleScreen() {
         <Text style={s.hint}>{tr.sdkLogHint(shownLogs.length)}</Text>
         <TouchableOpacity
           testID="log-console-clear"
-          onPress={sdk.clearLogs}
+          onPress={clearLogs}
           activeOpacity={0.7}>
           <Text style={s.clearBtn}>{tr.btnClear}</Text>
         </TouchableOpacity>
@@ -81,21 +97,26 @@ export function LogConsoleScreen() {
       </View>
 
       <View style={s.logBox}>
-        <FlatList
-          ref={listRef}
-          data={shownLogs}
-          keyExtractor={entry => String(entry.id)}
-          renderItem={renderItem}
-          contentContainerStyle={s.logContent}
-          // The newest line is what you are watching, so follow the tail. Only
-          // on a content-size change, not on every `logs` flush: the batched
-          // state update hands over a new array reference every 250 ms even
-          // when nothing was appended.
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-          ListEmptyComponent={
-            <Text style={s.placeholder}>{tr.logPlaceholder}</Text>
-          }
-        />
+        {rows.length === 0 ? (
+          <Text style={s.placeholder}>{tr.logPlaceholder}</Text>
+        ) : (
+          <FlatList
+            testID="log-console-list"
+            data={rows}
+            inverted
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            contentContainerStyle={s.logContent}
+            // A reader who scrolled back stays on the line they were reading as
+            // new ones are prepended; one within a few px of the newest end is
+            // carried along with it.
+            maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 20 }}
+            initialNumToRender={30}
+            maxToRenderPerBatch={30}
+            windowSize={7}
+            removeClippedSubviews
+          />
+        )}
       </View>
     </View>
   );

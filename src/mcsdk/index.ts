@@ -15,7 +15,8 @@ import type {
     SdsErrorEvent,
     AlarmEvent,
     SdkErrorEvent,
-    LogEvent,
+    SdkLogBatch,
+    McSdkLogLevel,
     RegistrationEvent,
     McSdkDocument,
     StoreDocumentsEvent,
@@ -41,6 +42,11 @@ export const McSdkEvents = {
     SdsError:        'McSdkSdsError',
     Alarm:           'McSdkAlarm',
     SdkError:        'McSdkSdkError',
+    /**
+     * The SDK's log stream. Android no longer emits it — the stream stays native
+     * and is read with getSdkLogs(); iOS still pushes it. Listed so onAnyEvent
+     * can keep it out of the listener log on either platform.
+     */
     Log:             'McSdkLog',
     Registration:    'McSdkRegistration',
     StoreDocuments:  'McSdkStoreDocuments',
@@ -229,13 +235,17 @@ export class McSdk {
         NativeMcSdk.resolveAlarm(name);
     }
 
-    listAlarms(): string {
+    // The readers (listAlarms, listMetrics, getData, exportData, the emergency
+    // flags) are Promise-based: a synchronous bridge method runs on the JS
+    // thread, where every touch is handled too, so the SDK's serialisation held
+    // up the UI for as long as it took. Now it runs on the native modules thread.
+    listAlarms(): Promise<string> {
         return NativeMcSdk.listAlarms();
     }
 
     // ── Metrics ────────────────────────────────────────────────────────────────
 
-    listMetrics(): string {
+    listMetrics(): Promise<string> {
         return NativeMcSdk.listMetrics();
     }
 
@@ -244,9 +254,9 @@ export class McSdk {
     createData(key: string, value: string): void { NativeMcSdk.createData(key, value); }
     updateData(key: string, value: string): void { NativeMcSdk.updateData(key, value); }
     deleteData(key: string): void { NativeMcSdk.deleteData(key); }
-    getData(key: string): string { return NativeMcSdk.getData(key); }
+    getData(key: string): Promise<string> { return NativeMcSdk.getData(key); }
     importData(data: string): void { NativeMcSdk.importData(data); }
-    exportData(): string { return NativeMcSdk.exportData(); }
+    exportData(): Promise<string> { return NativeMcSdk.exportData(); }
 
     // ── Messaging ──────────────────────────────────────────────────────────────
 
@@ -328,10 +338,10 @@ export class McSdk {
         NativeMcSdk.setImminentPeril(imminentPeril);
     }
     /** The state as the SDK holds it — survives a JS reload, which the app's does not. */
-    isEmergencyState(): boolean {
+    isEmergencyState(): Promise<boolean> {
         return NativeMcSdk.isEmergencyState();
     }
-    isImminentPerilState(): boolean {
+    isImminentPerilState(): Promise<boolean> {
         return NativeMcSdk.isImminentPerilState();
     }
 
@@ -430,13 +440,36 @@ export class McSdk {
         return emitter().addListener(McSdkEvents.Alarm, handler);
     }
 
-    onLog(handler: (e: LogEvent) => void) {
-        return emitter().addListener(McSdkEvents.Log, handler);
+    // ── The SDK's own log ──────────────────────────────────────────────────────
+    // Pulled, not pushed. With the default params the SDK writes ~450 lines a
+    // second; delivered one by one as events they kept the JS thread busy whether
+    // or not anybody was reading them (and every tap waits on that thread). The
+    // Android bridge keeps the stream in a process-level ring instead, and the
+    // SDK Logs screen asks for what is new while it is open. The ring outlives a
+    // JS reload, so the history is still there afterwards.
+
+    /**
+     * Lines newer than `sinceSeq` (exclusive; -1 for the newest tail) at
+     * `minLevel` or above, the newest `max` of them, oldest first. Pass the
+     * batch's `latestSeq` back as `sinceSeq` on the next call.
+     */
+    getSdkLogs(sinceSeq: number, max: number, minLevel: McSdkLogLevel = 0): Promise<SdkLogBatch> {
+        return NativeMcSdk.getSdkLogs(sinceSeq, max, minLevel) as Promise<SdkLogBatch>;
+    }
+
+    /** Empties the ring. The file log keeps every line. */
+    clearSdkLogs(): void {
+        NativeMcSdk.clearSdkLogs();
+    }
+
+    getSdkLogCount(): Promise<number> {
+        return NativeMcSdk.getSdkLogCount();
     }
 
     /**
      * Every listener event with its raw payload, for logging. McSdkLog is left
-     * out: it has onLog above, and at ~450/s it would bury everything else.
+     * out: it is the SDK's own log stream, read through getSdkLogs, and at
+     * ~450/s it would bury everything else.
      */
     onAnyEvent(handler: (event: string, payload: unknown) => void) {
         const subs = Object.values(McSdkEvents)

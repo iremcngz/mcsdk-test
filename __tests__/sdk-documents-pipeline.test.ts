@@ -131,7 +131,6 @@ jest.mock('../src/core/settings', () => ({
 jest.mock('../src/core/logger', () => ({
     configureLogger: jest.fn().mockResolvedValue(undefined),
     AppLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
-    SdkLogger:  { write: jest.fn() },
 }));
 
 jest.mock('../src/core/netMonitor', () => ({
@@ -164,6 +163,7 @@ import { renderHook, act } from '@testing-library/react-native';
 import { DocumentType, type McSdkDocument } from '../src/mcsdk/types';
 import NativeMcSdk from '../src/mcsdk/NativeMcSdk';
 import { SdkContextProvider, useSdkContext } from '../src/contexts/SdkContext';
+import { LogContextProvider } from '../src/contexts/LogContext';
 
 const MockNative = NativeMcSdk as jest.Mocked<typeof NativeMcSdk>;
 
@@ -186,8 +186,11 @@ const DOC_B: McSdkDocument = {
     fetchedAt: 1700000001000,
 };
 
+// SdkContext writes its console lines into LogContext, so the provider has to
+// be there — outside, as in App.tsx.
 const sdkWrapper = ({ children }: any) =>
-    React.createElement(SdkContextProvider, null, children);
+    React.createElement(LogContextProvider, null,
+        React.createElement(SdkContextProvider, null, children));
 
 // =============================================================================
 // 1.  onDocumentsUpdated pipeline

@@ -172,16 +172,49 @@ RCT_EXPORT_METHOD(init:(RCTPromiseResolveBlock)resolve
   });
 }
 
-RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(listMetrics) {
-  if (gSdk == nil) return @"";
+// Promise-returning rather than blocking-synchronous, as on Android: a
+// synchronous method runs on the JS thread and holds the UI for as long as the
+// SDK takes to serialise. Same for listAlarms, getData and exportData below.
+RCT_EXPORT_METHOD(listMetrics:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject) {
+  if (gSdk == nil) { resolve(@""); return; }
   NSString *result = [gSdk listMetrics];
-  return result ? result : @"";
+  resolve(result ? result : @"");
 }
 
-RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(listAlarms) {
-  if (gSdk == nil) return @"";
+RCT_EXPORT_METHOD(listAlarms:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject) {
+  if (gSdk == nil) { resolve(@""); return; }
   NSString *result = [gSdk listAlarms];
-  return result ? result : @"";
+  resolve(result ? result : @"");
+}
+
+// The SDK log store exists on Android only (SdkLogStore.kt): there the SDK's
+// log lines never reach JS one by one, and the SDK Logs screen pulls them in
+// batches. iOS still pushes McSdkLog events, which nothing on the JS side
+// subscribes to any more, so its SDK Logs screen is empty until the same store
+// is written here. These keep the spec satisfied meanwhile.
+RCT_EXPORT_METHOD(getSdkLogs:(double)sinceSeq
+                  max:(double)max
+                  minLevel:(double)minLevel
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject) {
+  resolve(@{
+    @"entries": @[],
+    @"latestSeq": @(-1),
+    @"total": @0,
+    @"skipped": @0,
+    @"evicted": @0,
+    @"fileDropped": @0,
+  });
+}
+
+RCT_EXPORT_METHOD(clearSdkLogs) {
+}
+
+RCT_EXPORT_METHOD(getSdkLogCount:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject) {
+  resolve(@0);
 }
 
 RCT_EXPORT_METHOD(raiseAlarm:(NSString *)name info:(NSString *)info severity:(double)severity) {
@@ -200,10 +233,12 @@ RCT_EXPORT_METHOD(sendSds:(NSString *)target body:(NSString *)body) {
   [gSdk sendSds:target body:body];
 }
 
-RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(getData:(NSString *)key) {
-  if (gSdk == nil) return @"";
+RCT_EXPORT_METHOD(getData:(NSString *)key
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject) {
+  if (gSdk == nil) { resolve(@""); return; }
   NSString *result = [gSdk getData:key];
-  return result ? result : @"";
+  resolve(result ? result : @"");
 }
 
 RCT_EXPORT_METHOD(createData:(NSString *)key value:(NSString *)value) {
@@ -226,10 +261,11 @@ RCT_EXPORT_METHOD(importData:(NSString *)data) {
   [gSdk importData:data];
 }
 
-RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(exportData) {
-  if (gSdk == nil) return @"";
+RCT_EXPORT_METHOD(exportData:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject) {
+  if (gSdk == nil) { resolve(@""); return; }
   NSString *result = [gSdk exportData];
-  return result ? result : @"";
+  resolve(result ? result : @"");
 }
 
 RCT_EXPORT_METHOD(fetchDocument:(NSString *)url) {

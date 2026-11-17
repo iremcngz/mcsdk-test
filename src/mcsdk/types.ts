@@ -301,9 +301,32 @@ export interface AlarmEvent {
     alarm: string;
 }
 
-export interface LogEvent {
+/**
+ * One line of the SDK's own log, as McSdk.getSdkLogs hands it over.
+ * `seq` is the store's running number: pass the batch's `latestSeq` back as
+ * `sinceSeq` to get only what came after.
+ */
+export interface SdkLogLine {
+    seq: number;
+    /** Local wall clock, HH:mm:ss.SSS. */
+    time: string;
     level: McSdkLogLevel;
-    log: string;
+    msg: string;
+}
+
+export interface SdkLogBatch {
+    /** Oldest first. */
+    entries: SdkLogLine[];
+    /** The newest seq in the store, filter or not; -1 while it is empty. */
+    latestSeq: number;
+    /** Lines in the store now. */
+    total: number;
+    /** Matching lines newer than sinceSeq that did not fit in `max`. */
+    skipped: number;
+    /** Lines newer than sinceSeq that left the store before the call — the reader fell behind. */
+    evicted: number;
+    /** Lines that never reached the file log because its writer queue was full. */
+    fileDropped: number;
 }
 
 export interface RegistrationEvent {

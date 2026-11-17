@@ -154,7 +154,6 @@ jest.mock('../src/core/settings', () => ({
 jest.mock('../src/core/logger', () => ({
     configureLogger: jest.fn().mockResolvedValue(undefined),
     AppLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
-    SdkLogger:  { write: jest.fn() },
 }));
 
 jest.mock('../src/core/netMonitor', () => ({
@@ -186,11 +185,15 @@ import React from 'react';
 import { renderHook, act } from '@testing-library/react-native';
 import NativeMcSdk from '../src/mcsdk/NativeMcSdk';
 import { SdkContextProvider, useSdkContext } from '../src/contexts/SdkContext';
+import { LogContextProvider, useLogContext } from '../src/contexts/LogContext';
 
 const MockNative = NativeMcSdk as jest.Mocked<typeof NativeMcSdk>;
 
+// SdkContext writes its console lines into LogContext, so the provider has to
+// be there — outside, as in App.tsx.
 const sdkWrapper = ({ children }: any) =>
-    React.createElement(SdkContextProvider, null, children);
+    React.createElement(LogContextProvider, null,
+        React.createElement(SdkContextProvider, null, children));
 
 describe('handleStartAll', () => {
     beforeEach(() => {
@@ -268,12 +271,19 @@ describe('handleStartAll', () => {
     });
 
     it('does not warn that parameters are unset — it just set them', async () => {
-        const { result } = renderHook(() => useSdkContext(), { wrapper: sdkWrapper });
-        await act(async () => { await result.current.handleStartAll(); });
+        // The lines land in LogContext, so read both contexts from one hook.
+        const { result } = renderHook(
+            () => ({ sdk: useSdkContext(), log: useLogContext() }),
+            { wrapper: sdkWrapper },
+        );
+        await act(async () => { await result.current.sdk.handleStartAll(); });
+        // The console is batched: give the flush its interval.
+        await act(async () => { await new Promise(r => setTimeout(r, 300)); });
 
         // `paramsSet` is React state and is still false inside this tick, so the
         // plain init() guard would accuse the press of skipping step 2.
-        const warned = result.current.logs.some(l => l.msg.includes('setParams() not called yet'));
+        expect(result.current.log.logs.length).toBeGreaterThan(0);
+        const warned = result.current.log.logs.some(l => l.msg.includes('setParams() not called yet'));
         expect(warned).toBe(false);
     });
 

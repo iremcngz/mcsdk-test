@@ -48,7 +48,9 @@ private const val EVENT_SDS_SENT        = "McSdkSdsSent"
 private const val EVENT_SDS_RECEIVED    = "McSdkSdsReceived"
 private const val EVENT_SDS_ERROR       = "McSdkSdsError"
 private const val EVENT_ALARM           = "McSdkAlarm"
-private const val EVENT_LOG             = "McSdkLog"
+// McSdkLog is no longer emitted on Android: the SDK's log stream stays native in
+// SdkLogStore and the SDK Logs screen pulls it. The name survives in McSdkEvents
+// for iOS, which still pushes it.
 private const val EVENT_REGISTRATION    = "McSdkRegistration"
 private const val EVENT_STORE_DOCUMENTS = "McSdkStoreDocuments"
 private const val EVENT_INCOMING_CALL   = "McSdkIncomingCall"
@@ -447,7 +449,7 @@ class McSdkModule(
                 } ?: continue
                 // Logged here on the pump, never in emit(): this thread is not
                 // the SDK's. Before the crossing, since the map is consumed by it.
-                if (e.name != EVENT_LOG) logEvent(e)
+                logEvent(e)
                 try {
                     context.emitDeviceEvent(e.name, e.body)
                 } catch (ex: Exception) {
@@ -698,24 +700,94 @@ class McSdkModule(
         sdk?.resolveAlarm(name)
     }
 
-    @ReactMethod(isBlockingSynchronousMethod = true)
-    fun listAlarms(): String = sdk?.listAlarms() ?: ""
+    // Promise-returning rather than isBlockingSynchronousMethod, here and for
+    // the other readers below (listMetrics, getData, exportData, the emergency
+    // flags): a synchronous method runs on the JS thread, which is also where
+    // every touch is handled, and the SDK's serialisation then holds up the UI
+    // for as long as it takes. As a Promise it runs on the native modules
+    // thread and JS gets the result when it is ready.
+    @ReactMethod
+    fun listAlarms(promise: com.facebook.react.bridge.Promise) {
+        promise.resolve(sdk?.listAlarms() ?: "")
+    }
 
     // ── Metrics ───────────────────────────────────────────────────────────────
 
-    @ReactMethod(isBlockingSynchronousMethod = true)
-    fun listMetrics(): String = sdk?.listMetrics() ?: ""
+    @ReactMethod
+    fun listMetrics(promise: com.facebook.react.bridge.Promise) {
+        try {
+            promise.resolve(sdk?.listMetrics() ?: "")
+        } catch (t: Throwable) {
+            promise.reject("metrics", t)
+        }
+    }
+
+    // ── SDK log store ─────────────────────────────────────────────────────────
+    //
+    // The SDK Logs screen's side of SdkLogStore. Promise-returning on purpose,
+    // never isBlockingSynchronousMethod: a synchronous method runs on the JS
+    // thread, and keeping the JS thread free of this stream is the whole point.
+    // Numbers arrive from JS as Double.
+
+    /**
+     * The log lines newer than `sinceSeq` (exclusive; -1 for the newest tail) at
+     * `minLevel` (0 VERBOSE .. 5 FATAL) or above, the newest `max` of them in
+     * chronological order. See SdkLogStore.since for the fields.
+     */
+    @ReactMethod
+    fun getSdkLogs(sinceSeq: Double, max: Double, minLevel: Double, promise: com.facebook.react.bridge.Promise) {
+        try {
+            val batch = SdkLogStore.since(
+                sinceSeq.toLong(),
+                max.toInt().coerceIn(1, SdkLogStore.MAX_ENTRIES),
+                minLevel.toInt().coerceIn(0, 5),
+            )
+            // Local wall clock to the millisecond, for reading the screen; the
+            // file carries the full UTC date.
+            val stamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US)
+            val entries = Arguments.createArray()
+            for (e in batch.entries) {
+                entries.pushMap(Arguments.createMap().apply {
+                    putDouble("seq", e.seq.toDouble())
+                    putString("time", stamp.format(java.util.Date(e.timeMs)))
+                    putInt("level", e.level)
+                    putString("msg", e.msg)
+                })
+            }
+            promise.resolve(Arguments.createMap().apply {
+                putArray("entries", entries)
+                putDouble("latestSeq", batch.latestSeq.toDouble())
+                putInt("total", batch.total)
+                putInt("skipped", batch.skipped)
+                putInt("evicted", batch.evicted)
+                putInt("fileDropped", batch.fileDropped)
+            })
+        } catch (t: Throwable) {
+            promise.reject("sdk_logs", t)
+        }
+    }
+
+    /** Empties the store's ring. The file log keeps everything. */
+    @ReactMethod
+    fun clearSdkLogs() { SdkLogStore.clear() }
+
+    @ReactMethod
+    fun getSdkLogCount(promise: com.facebook.react.bridge.Promise) {
+        promise.resolve(SdkLogStore.count())
+    }
 
     // ── DAO ───────────────────────────────────────────────────────────────────
 
     @ReactMethod fun createData(key: String, value: String) { sdk?.createData(key, value) }
     @ReactMethod fun updateData(key: String, value: String) { sdk?.updateData(key, value) }
     @ReactMethod fun deleteData(key: String)               { sdk?.deleteData(key) }
-    @ReactMethod(isBlockingSynchronousMethod = true)
-    fun getData(key: String): String = sdk?.getData(key) ?: ""
+    @ReactMethod fun getData(key: String, promise: com.facebook.react.bridge.Promise) {
+        promise.resolve(sdk?.getData(key) ?: "")
+    }
     @ReactMethod fun importData(data: String)              { sdk?.importData(data) }
-    @ReactMethod(isBlockingSynchronousMethod = true)
-    fun exportData(): String = sdk?.exportData() ?: ""
+    @ReactMethod fun exportData(promise: com.facebook.react.bridge.Promise) {
+        promise.resolve(sdk?.exportData() ?: "")
+    }
 
     // ── Messaging ─────────────────────────────────────────────────────────────
 
@@ -855,11 +927,15 @@ class McSdkModule(
     }
 
     /** The user's current emergency / imminent-peril state, as the SDK holds it. */
-    @ReactMethod(isBlockingSynchronousMethod = true)
-    fun isEmergencyState(): Boolean = sdk?.isEmergencyState ?: false
+    @ReactMethod
+    fun isEmergencyState(promise: com.facebook.react.bridge.Promise) {
+        promise.resolve(sdk?.isEmergencyState ?: false)
+    }
 
-    @ReactMethod(isBlockingSynchronousMethod = true)
-    fun isImminentPerilState(): Boolean = sdk?.isImminentPerilState ?: false
+    @ReactMethod
+    fun isImminentPerilState(promise: com.facebook.react.bridge.Promise) {
+        promise.resolve(sdk?.isImminentPerilState ?: false)
+    }
 
     // ── Affiliation ───────────────────────────────────────────────────────────
 
@@ -1529,11 +1605,15 @@ class McSdkModule(
 
     // ── LogListener ───────────────────────────────────────────────────────────
 
+    /**
+     * One SDK log line, on whichever SDK thread produced it. It goes to the
+     * process-level store and nowhere else: not to JS (the SDK Logs screen pulls
+     * from the store while it is open — see SdkLogStore for why), and not to
+     * logcat a second time (the SDK already wrote the whole line under the
+     * `SDK` tag from Logger.h; the 80-char copy this used to write under
+     * McSdkBridge was 450 more logcat writes a second on the SDK thread).
+     */
     override fun onLog(level: Int, log: String) {
-        Log.d("McSdkBridge", "onLog: level=$level log=${log.take(80)}")
-        emit(EVENT_LOG, Arguments.createMap().apply {
-            putInt("level", level)
-            putString("log", log)
-        })
+        SdkLogStore.append(level, log)
     }
 }

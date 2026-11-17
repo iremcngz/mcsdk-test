@@ -3,6 +3,7 @@ import { ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
 import { useSdkContext } from '../../contexts/SdkContext';
+import { useLogContext } from '../../contexts/LogContext';
 import { useNavigation } from '../../contexts/NavigationContext';
 import { makeCommonStyles } from '../../shared/commonStyles';
 
@@ -21,6 +22,7 @@ const HOME_LOG_TAIL   = 40;
 export function HomeScreen() {
   const { c, tr }  = useAppContext();
   const sdk        = useSdkContext();
+  const { logs, listenerLogs, clearLogs } = useLogContext();
   const { setScreen } = useNavigation();
   const insets     = useSafeAreaInsets();
   const s          = useMemo(() => makeCommonStyles(c), [c]);
@@ -53,8 +55,8 @@ export function HomeScreen() {
   // Sliced after the filter, so Listener only yields 40 events rather than
   // whatever few survive in the last 40 entries of the mixed stream.
   const homeLogs = useMemo(
-    () => (listenerOnly ? sdk.listenerLogs : sdk.logs).slice(-HOME_LOG_TAIL),
-    [listenerOnly, sdk.listenerLogs, sdk.logs],
+    () => (listenerOnly ? listenerLogs : logs).slice(-HOME_LOG_TAIL),
+    [listenerOnly, listenerLogs, logs],
   );
 
   // ── Render helpers ─────────────────────────────────────────────────────────
@@ -261,7 +263,7 @@ export function HomeScreen() {
         <Text style={s.sectionTitle}>{tr.sectionLogConsole}</Text>
         <TouchableOpacity
           testID="home-log-clear"
-          onPress={sdk.clearLogs}
+          onPress={clearLogs}
           activeOpacity={0.7}>
           <Text style={s.clearBtn}>{tr.btnClear}</Text>
         </TouchableOpacity>

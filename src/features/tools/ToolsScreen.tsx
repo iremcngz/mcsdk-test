@@ -12,11 +12,12 @@
  * Metrics deliberately stays a tab of its own.
  */
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
 import { useSdkContext } from '../../contexts/SdkContext';
+import { useLogContext } from '../../contexts/LogContext';
 import { useNavigation } from '../../contexts/NavigationContext';
 import { makeCommonStyles } from '../../shared/commonStyles';
 import { makeToolsStyles } from './styles';
@@ -24,13 +25,31 @@ import type { Screen } from '../../shared/types';
 
 export function ToolsScreen() {
   const { c, tr }         = useAppContext();
-  const { sdkLogs, logs } = useSdkContext();
+  const { sdkRef, created } = useSdkContext();
+  const { logs } = useLogContext();
   const { setScreen } = useNavigation();
   const insets      = useSafeAreaInsets();
   const s  = useMemo(() => makeCommonStyles(c), [c]);
   const ts = useMemo(() => makeToolsStyles(c), [c]);
 
-  /** The rows, with the live count each log viewer would show. */
+  // The SDK's log lines live in the native ring, not in a context, so the count
+  // is asked for once when the menu opens — one crossing — rather than kept
+  // live. The menu is a stop on the way to a screen, not a place to watch it.
+  const [sdkLogCount, setSdkLogCount] = useState(0);
+  useEffect(() => {
+    const sdk = created ? sdkRef.current : null;
+    if (!sdk) {
+      setSdkLogCount(0);
+      return;
+    }
+    let cancelled = false;
+    sdk.getSdkLogCount()
+      .then(n => { if (!cancelled) setSdkLogCount(n); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [sdkRef, created]);
+
+  /** The rows, with the count each log viewer would show. */
   const items: { id: Screen; icon: string; title: string; desc: string; badge?: string }[] = [
     { id: 'audio',   icon: '🔊', title: tr.tabAudio,   desc: tr.toolsAudioDesc },
     { id: 'video',   icon: '🎥', title: tr.tabVideo,   desc: tr.toolsVideoDesc },
@@ -40,7 +59,7 @@ export function ToolsScreen() {
     },
     {
       id: 'sdklogs', icon: '📋', title: tr.tabSdkLogs, desc: tr.toolsSdkLogsDesc,
-      badge: sdkLogs.length > 0 ? String(sdkLogs.length) : undefined,
+      badge: sdkLogCount > 0 ? String(sdkLogCount) : undefined,
     },
     { id: 'mockcalls', icon: '🧪', title: tr.tabMockCalls, desc: tr.toolsMockCallsDesc },
   ];

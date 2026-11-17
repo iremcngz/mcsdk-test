@@ -1,9 +1,8 @@
 /**
  * logger.ts — File-based logger backed by react-native-file-logger.
  *
- * Two separate log instances:
  *   AppLogger — application events (lifecycle, UI actions, errors)
- *   SdkLogger — raw SDK C++ log events (from McSdkLog native events)
+ *   The SDK's own lines land in the same file, written natively (see below).
  *
  * Log file locations:
  *   Android: /data/data/<package>/files/logs/app/  and  .../sdk/
@@ -77,36 +76,13 @@ export const AppLogger = {
   error(msg: string): void   { _ensureReady(); FileLogger.error(msg); },
 } as const;
 
-// ── SdkLogger ─────────────────────────────────────────────────────────────────
-// Writes raw SDK C++ log events. Uses the same FileLogger instance but
-// marks messages with [SDK] prefix in the formatter output.
-// To separate SDK logs to a different physical file you would need a second
-// native module instance; react-native-file-logger supports a single instance.
-// SDK messages are therefore in the same file but visually tagged [SDK].
-
-const SDK_LEVEL_NAMES = ['VERBOSE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'];
-
-export const SdkLogger = {
-  /**
-   * Write a raw SDK log event.
-   * @param nativeLevel — numeric level received from C++ McSdkLog event (0–5)
-   * @param message     — log text
-   */
-  write(nativeLevel: number, message: string): void {
-    _ensureReady();
-    const label = SDK_LEVEL_NAMES[nativeLevel] ?? String(nativeLevel);
-    const text = `[SDK/${label}] ${message}`;
-    if (nativeLevel <= 1) {
-      FileLogger.debug(text);
-    } else if (nativeLevel === 2) {
-      FileLogger.info(text);
-    } else if (nativeLevel === 3) {
-      FileLogger.warn(text);
-    } else {
-      FileLogger.error(text);
-    }
-  },
-} as const;
+// ── The SDK's own log ─────────────────────────────────────────────────────────
+// Not written from here any more. The Android bridge (SdkLogStore.kt) puts each
+// SDK line into the same file this logger writes, with the same
+// `[time] [LEVEL] [APP] [SDK/NAME]` prefix the old JS path produced, through the
+// logback root logger react-native-file-logger configures — so the file layout
+// is unchanged while the ~450 lines a second never cross into JS. The size
+// limit and rotation configured above apply to those lines too.
 
 // ── File management helpers ────────────────────────────────────────────────────
 

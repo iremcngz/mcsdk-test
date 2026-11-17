@@ -40,15 +40,19 @@ export function MetricsScreen() {
   /** Ticked once a second so the age line counts up between fetches. */
   const [now,         setNow]         = useState(Date.now());
 
-  const fetchMetrics = useCallback(() => {
-    if (!sdkRef.current) {
+  // Async: listMetrics is a Promise-based bridge call, so the SDK serialises
+  // on the native modules thread while the JS thread stays free for touches.
+  // The spinner shows until the answer is in.
+  const fetchMetrics = useCallback(async () => {
+    const sdk = sdkRef.current;
+    if (!sdk) {
       setError(tr.metricsNoSdk);
       return;
     }
     setRefreshing(true);
     setError(null);
     try {
-      const raw = sdkRef.current.listMetrics();
+      const raw = await sdk.listMetrics();
       setRawText(raw);
       setFamilies(parsePrometheus(raw));
       setLastFetched(stamp());
