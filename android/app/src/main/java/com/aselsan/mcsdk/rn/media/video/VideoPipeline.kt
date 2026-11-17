@@ -137,6 +137,60 @@ class VideoPipeline(context: Context) {
         setTransmitEnabled(callId != null)
     }
 
+    /**
+     * Switches between the back and front camera while a call's camera is running.
+     *
+     * A CameraDevice is one physical camera, so this is a restart: the encoder, the
+     * rotator and the sink all go and come back, because the new camera can offer a
+     * different capture size and a different sensor orientation. What it keeps is the
+     * call being sent to and whether frames were going out, so a flip mid-transmission
+     * carries on sending from the other camera.
+     *
+     * A receiver sees a brief gap and then a key frame, which [start] asks for.
+     *
+     * @return false when there is no second camera, or the new one did not start; in
+     *         the latter case stats().error says why and the pipeline is left stopped.
+     */
+    @Synchronized
+    fun flipCamera(): Boolean {
+        if (encoder == null) {
+            startError = "the camera is not running"
+            return false
+        }
+        if (capture.cameraCount() < 2) {
+            startError = "this device has only one camera"
+            return false
+        }
+        // Kept across the restart: teardown() clears callSink, and a flip must not
+        // silently stop sending.
+        val callId = callSink?.callId
+        val wasSending = assembler?.transmitEnabled == true
+
+        teardown()
+        capture.useFrontCamera = !capture.useFrontCamera
+        if (!openCallSink()) {
+            // Back to the camera that was working, so a failed flip is not a dead view.
+            capture.useFrontCamera = !capture.useFrontCamera
+            Log.w(TAG, "flip failed; going back to the other camera")
+            if (!openCallSink()) return false
+            setCallTarget(callId)
+            setTransmitEnabled(wasSending && callId != null)
+            rotator?.setPreview(LocalVideoSurface.peek())
+            return false
+        }
+        setCallTarget(callId)
+        setTransmitEnabled(wasSending && callId != null)
+        // The new rotator draws nothing until it is given the view. Read rather than
+        // re-registered: setListener calls back holding LocalVideoSurface's lock, and
+        // this method holds ours, so asking for its lock here crosses the two orders.
+        rotator?.setPreview(LocalVideoSurface.peek())
+        Log.d(TAG, "flipped: front=${capture.useFrontCamera} call=$callId sending=$wasSending")
+        return true
+    }
+
+    /** True when there is a camera to flip to. */
+    fun hasMultipleCameras(): Boolean = capture.cameraCount() >= 2
+
     /** Safe when not running. */
     fun stopCall() {
         LocalVideoSurface.setListener(null)
@@ -206,6 +260,7 @@ class VideoPipeline(context: Context) {
             sensorOrientation = capture.sensorOrientation,
             deviceAngle = { orientation.angle },
             displayAngle = ::displayAngle,
+            mirror = capture.isFront,
         )
 
         try {

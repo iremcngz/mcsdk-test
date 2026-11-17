@@ -23,7 +23,8 @@ import java.util.concurrent.TimeUnit
  * No frame passes through this class: once the repeating request runs, the
  * camera fills the Surfaces directly and all that is left here is its lifecycle.
  *
- * Frames come out at the sensor's fixed orientation; VideoRotator turns them.
+ * Frames come out at the sensor's fixed orientation; VideoRotator turns them, and
+ * mirrors them when [isFront] says the camera faces the user.
  */
 class VideoCapture(context: Context) {
 
@@ -41,6 +42,18 @@ class VideoCapture(context: Context) {
     private var cameraId: String? = null
     private var fpsRange: Pair<Int, Int>? = null
     private var closed: CountDownLatch? = null
+
+    /**
+     * Which camera [resolve] picks. The transmit view's flip button sets it, and the
+     * pipeline then restarts capture: a CameraDevice is one physical camera, so
+     * switching means closing this one and opening the other.
+     */
+    @Volatile
+    var useFrontCamera = false
+
+    /** True when the camera in use faces the user, so the preview has to be mirrored. */
+    var isFront = false
+        private set
 
     @Volatile
     var lastError: String? = null
@@ -60,7 +73,13 @@ class VideoCapture(context: Context) {
         lastError = null
         try {
             val ids = manager.cameraIdList
+            val wantedFacing = if (useFrontCamera) CameraCharacteristics.LENS_FACING_FRONT
+                               else CameraCharacteristics.LENS_FACING_BACK
+            // Falls back to the other side, then to anything: a phone with only one
+            // camera must still send, rather than failing because the flip was on.
             val id = ids.firstOrNull {
+                manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == wantedFacing
+            } ?: ids.firstOrNull {
                 manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) ==
                     CameraCharacteristics.LENS_FACING_BACK
             } ?: ids.firstOrNull()
@@ -80,7 +99,10 @@ class VideoCapture(context: Context) {
             fpsRange = VideoCaptureChoice.chooseFpsRange(ranges, wanted.frameRate)
             cameraId = id
             sensorOrientation = traits.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-            Log.d(TAG, "resolve: camera=$id size=$size fps=$fpsRange sensor=$sensorOrientation° of $ranges")
+            isFront = traits.get(CameraCharacteristics.LENS_FACING) ==
+                CameraCharacteristics.LENS_FACING_FRONT
+            Log.d(TAG, "resolve: camera=$id front=$isFront size=$size fps=$fpsRange " +
+                       "sensor=$sensorOrientation° of $ranges")
             return wanted.copy(width = size.first, height = size.second)
         } catch (e: CameraAccessException) {
             return fail("camera: ${e.message}")
@@ -198,6 +220,14 @@ class VideoCapture(context: Context) {
         device = null
         thread?.quitSafely()
         thread = null
+    }
+
+    /** How many cameras this device has, for a flip button that should not be offered. */
+    fun cameraCount(): Int = try {
+        manager.cameraIdList.size
+    } catch (e: CameraAccessException) {
+        Log.w(TAG, "cameraIdList: ${e.message}")
+        0
     }
 
     private fun fail(message: String): VideoConfig? {

@@ -294,7 +294,20 @@ Do not assume a screen is wired just because it renders convincingly.
   view closes or the server closes it. These calls stay out of `sdkGroupCalls`, which holds
   one call per group. The view's picture is drawn by `VideoRotator`, since an app can open a
   camera only once; so `BroadcastScreen` no longer uses VisionCamera. Still mock on that
-  screen: its PTT button and the camera flip button.
+  screen: its PTT button only — the camera flip (↺) is real.
+
+  **The flip is a camera restart, not a setting.** A `CameraDevice` is one physical camera,
+  so `VideoPipeline.flipCamera()` tears the pipeline down and brings it back on the other
+  one: the new camera can offer a different capture size and sensor orientation, which the
+  encoder and the rotator are built from. What it carries across is the call being sent to
+  and whether frames were going out, so a flip mid-transmission keeps sending; the receiver
+  sees a brief gap and then a key frame. A failed flip goes back to the camera that was
+  working rather than leaving a dead view, and `hasMultipleCameras()` disables the button on
+  a one-camera device. The preview is re-attached with `LocalVideoSurface.peek()`, not
+  `setListener`: the latter calls back holding the slot's lock while `flipCamera` holds the
+  pipeline's, and the two orders would cross. A front camera's picture is laterally reversed,
+  so `VideoRotator` mirrors it (`quadMatrix(mirror = …)`, flipping x in the source before the
+  rotation, which keeps the flip with the picture when the phone is turned).
 - **An incoming group call is placed by a guess, until the SDK reports its group.** Its
   `groupId` is who started it (`sip:mcptt.<user>@…`, `CallMachine::OnInviteReceived`), so
   `incomingCallGroup` puts a call naming none of the user's groups under the group on the Talk

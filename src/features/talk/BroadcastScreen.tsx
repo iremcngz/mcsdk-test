@@ -3,6 +3,7 @@ import { Animated, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'r
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../../contexts/AppContext';
 import { LocalVideoView } from '../video/LocalVideoView';
+import { VideoSession } from '../../core/videoSession';
 import type { VideoSendNotice } from './useGroupVideoSend';
 
 interface BroadcastScreenProps {
@@ -26,8 +27,10 @@ export function BroadcastScreen({ group, requested, isTransmitting, notice, onTo
     : null;
 
   const [isPttPressed, setIsPttPressed] = useState(false);
-  // The video sender has the back camera; it cannot switch yet, so this changes nothing.
-  const [, setIsFrontCamera] = useState(false);
+  // The flip reopens the camera natively, which takes a moment: the button is held
+  // disabled until it comes back, so a second press cannot land mid-restart.
+  const [flipping, setFlipping] = useState(false);
+  const [canFlip] = useState(() => VideoSession.hasMultipleCameras());
   const [elapsed, setElapsed] = useState(0);
   const [pttElapsed, setPttElapsed] = useState(0);
   const [isSomeoneElseTalking, setIsSomeoneElseTalking] = useState(false); // gerçek uygulamada socket/context'ten gelecek
@@ -69,6 +72,20 @@ export function BroadcastScreen({ group, requested, isTransmitting, notice, onTo
   const handlePttOut = () => {
     setIsPttPressed(false);
     Animated.spring(pttScale, { toValue: 1, friction: 6, useNativeDriver: true }).start();
+  };
+
+  const flipCamera = async () => {
+    if (flipping || !canFlip) return;
+    setFlipping(true);
+    try {
+      await VideoSession.flipCallCamera();
+    } catch (err) {
+      // No second camera, or the new one refused. The pipeline has already gone back
+      // to the one that was working, so the view keeps its picture and says nothing.
+      console.warn('[BroadcastScreen] the camera did not switch:', err);
+    } finally {
+      setFlipping(false);
+    }
   };
 
   const formatTime = (sec: number) => {
@@ -123,6 +140,9 @@ export function BroadcastScreen({ group, requested, isTransmitting, notice, onTo
     },
     sideButtonActive: {
       backgroundColor: c.error,
+    },
+    sideButtonDisabled: {
+      opacity: 0.35,
     },
     sideButtonIcon: {
       fontSize: 22,
@@ -214,10 +234,12 @@ export function BroadcastScreen({ group, requested, isTransmitting, notice, onTo
         </View>
 
         <TouchableOpacity
-          style={s.sideButton}
-          onPress={() => setIsFrontCamera(prev => !prev)}
+          style={[s.sideButton, (!canFlip || flipping) && s.sideButtonDisabled]}
+          disabled={!canFlip || flipping}
+          onPress={flipCamera}
           onLongPress={() => setIsSomeoneElseTalking(prev => !prev)}
-          activeOpacity={0.7}>
+          activeOpacity={0.7}
+          testID="talk-broadcast-flip">
           <Text style={s.sideButtonIcon}>↺</Text>
         </TouchableOpacity>
       </View>

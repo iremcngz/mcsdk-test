@@ -110,6 +110,32 @@ class VideoBridgeModule(context: ReactApplicationContext) : ReactContextBaseJava
     }
 
     /**
+     * Switches the call camera between back and front, keeping the call it sends to
+     * and whether it was sending. Runs on the native modules thread, like
+     * [startCallCamera], because it reopens the camera and that blocks.
+     *
+     * Rejects when there is no second camera or the new one would not start; in the
+     * latter case it has already gone back to the one that was working.
+     */
+    @ReactMethod
+    fun flipCallCamera(promise: Promise) {
+        try {
+            if (sender.flipCamera()) {
+                promise.resolve(null)
+            } else {
+                promise.reject("video_send", sender.stats().error ?: "could not switch camera")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "flipCallCamera failed: ${e.message}", e)
+            promise.reject("video_send", e)
+        }
+    }
+
+    /** True when this device has a camera to flip to, so the button is worth showing. */
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    fun hasMultipleCameras(): Boolean = sender.hasMultipleCameras()
+
+    /**
      * Starts showing a call's received video in any mounted McSdkVideoView, from the
      * call [setCallReceiveSource] names.
      */

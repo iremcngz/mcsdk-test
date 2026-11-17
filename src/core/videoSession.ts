@@ -122,6 +122,31 @@ export const VideoSession = {
   },
 
   /**
+   * Switches the call camera between back and front, keeping the call it sends to and
+   * whether frames were going out — a flip mid-transmission carries on sending.
+   *
+   * It reopens the camera, so the picture goes for a moment and the receiver gets a
+   * key frame after the gap. Resolves false where there is no pipeline (iOS, tests),
+   * and rejects when there is no second camera or the new one would not start.
+   */
+  async flipCallCamera(): Promise<boolean> {
+    if (!isSupported) return false;
+    await Native.flipCallCamera();
+    return true;
+  },
+
+  /** True when the device has a camera to flip to, so the button is worth showing. */
+  hasMultipleCameras(): boolean {
+    if (!isSupported) return false;
+    // Synchronous on the native side; a throw here must not stop the view opening.
+    try {
+      return Native.hasMultipleCameras() === true;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
    * Starts showing a call's received video in a mounted RemoteVideoView, from the
    * call setCallReceiveSource names; stopReceive ends it. Resolves false where there
    * is no pipeline (iOS, tests); rejects with the reason on failure.

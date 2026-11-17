@@ -71,6 +71,7 @@ object VideoRotation {
         rotation: Int,
         out: FloatArray,
         cover: Boolean = false,
+        mirror: Boolean = false,
     ) {
         val (cos, sin) = when (rotation) {
             90 -> 0f to 1f
@@ -89,9 +90,14 @@ object VideoRotation {
         val sy = scale * contentHeight / outHeight
         val tx = scale * contentWidth / outHeight
         val ty = scale * contentHeight / outWidth
+        // A front camera's sensor faces the user, so its picture comes out laterally
+        // reversed: the user sees themselves raise the wrong hand. Flipping x in the
+        // source, before the rotation, is what a camera preview does, and it keeps
+        // the flip with the picture when the phone is turned.
+        val mx = if (mirror) -1f else 1f
         // x' =  cos*x + sin*y, y' = -sin*x + cos*y: clockwise, with y pointing up.
-        out[0] = cos * sx
-        out[1] = -sin * tx
+        out[0] = cos * sx * mx
+        out[1] = -sin * tx * mx
         out[2] = sin * ty
         out[3] = cos * sy
     }

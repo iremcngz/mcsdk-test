@@ -47,6 +47,8 @@ class VideoRotator(
     private val sensorOrientation: Int,
     private val deviceAngle: () -> Int,
     private val displayAngle: () -> Int = { 0 },
+    /** A front camera's picture is laterally reversed and has to be flipped back. */
+    private val mirror: Boolean = false,
 ) {
 
     private companion object {
@@ -277,7 +279,9 @@ class VideoRotator(
         val (rotation, contentWidth, contentHeight) = VideoRotation.picture(
             cameraWidth, cameraHeight, sensorOrientation, angle, swapsAxes,
         )
-        VideoRotation.quadMatrix(contentWidth, contentHeight, width, height, rotation, quadMatrix, cover)
+        VideoRotation.quadMatrix(
+            contentWidth, contentHeight, width, height, rotation, quadMatrix, cover, mirror,
+        )
 
         GLES20.glViewport(0, 0, width, height)
         GLES20.glClearColor(0f, 0f, 0f, 1f)

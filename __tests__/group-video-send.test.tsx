@@ -7,12 +7,28 @@
 
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, screen } from '@testing-library/react-native';
 import {
   SEND_NOTICE_MS,
   useGroupVideoReceive,
   useGroupVideoSend,
   type GroupVideoSend,
 } from '../src/features/talk/useGroupVideoSend';
+import { BroadcastScreen } from '../src/features/talk/BroadcastScreen';
+
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
+
+jest.mock('../src/features/video/LocalVideoView', () => ({
+  LocalVideoView: () => null,
+}));
+
+jest.mock('../src/contexts/AppContext', () => {
+  const { getTranslation } = require('../src/core/i18n');
+  const { getThemePalette } = require('../src/core/theme');
+  return { useAppContext: () => ({ c: getThemePalette('dark'), tr: getTranslation('en') }) };
+});
 
 type Handler = (e: any) => void;
 
@@ -50,8 +66,13 @@ jest.mock('../src/core/videoSession', () => ({
     startCallReceive: () => mockStartReceive(),
     stopReceive: () => mockStopReceive(),
     setCallReceiveSource: (id: string | null) => mockSetSource(id),
+    flipCallCamera: () => mockFlipCamera(),
+    hasMultipleCameras: () => mockHasMultipleCameras(),
   },
 }));
+
+const mockFlipCamera = jest.fn(() => Promise.resolve(true));
+let mockHasMultipleCameras = () => true;
 
 let mockPermission = 'granted';
 jest.mock('../src/core/permissions', () => ({
@@ -501,5 +522,71 @@ describe('useGroupVideoReceive', () => {
     expect(ended).toBe(true);
     view.rerender(<Watcher watching={false} callId="v1" />);
     expect(ended).toBe(false);
+  });
+});
+
+/**
+ * The transmit view's flip button. It used to toggle a state nothing read; what is
+ * guarded here is that it reaches the pipeline, and that it cannot be pressed twice
+ * over one restart — the camera is reopened natively, and a second press landing
+ * mid-restart is what the disabled state is for.
+ */
+describe('BroadcastScreen — the camera flip button', () => {
+  const props = {
+    group: 'group1',
+    requested: false,
+    isTransmitting: false,
+    notice: null,
+    onToggleTransmit: () => {},
+    onStop: () => {},
+  };
+
+  beforeEach(() => {
+    mockFlipCamera.mockClear();
+    mockFlipCamera.mockImplementation(() => Promise.resolve(true));
+    mockHasMultipleCameras = () => true;
+  });
+
+  it('switches the camera when pressed', async () => {
+    render(<BroadcastScreen {...props} />);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('talk-broadcast-flip'));
+    });
+    expect(mockFlipCamera).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled on a device with one camera', () => {
+    mockHasMultipleCameras = () => false;
+    render(<BroadcastScreen {...props} />);
+    expect(screen.getByTestId('talk-broadcast-flip')).toBeDisabled();
+    fireEvent.press(screen.getByTestId('talk-broadcast-flip'));
+    expect(mockFlipCamera).not.toHaveBeenCalled();
+  });
+
+  // The camera is gone while it reopens: a second press would land mid-restart.
+  it('takes no second press until the first has come back', async () => {
+    let release: (v: boolean) => void = () => {};
+    mockFlipCamera.mockImplementation(() => new Promise<boolean>(r => { release = r; }));
+    render(<BroadcastScreen {...props} />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('talk-broadcast-flip'));
+    });
+    expect(screen.getByTestId('talk-broadcast-flip')).toBeDisabled();
+    fireEvent.press(screen.getByTestId('talk-broadcast-flip'));
+    expect(mockFlipCamera).toHaveBeenCalledTimes(1);
+
+    await act(async () => { release(true); });
+    expect(screen.getByTestId('talk-broadcast-flip')).not.toBeDisabled();
+  });
+
+  // The pipeline goes back to the camera that was working, so the view carries on.
+  it('stays usable when the switch fails', async () => {
+    mockFlipCamera.mockImplementation(() => Promise.reject(new Error('no second camera')));
+    render(<BroadcastScreen {...props} />);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('talk-broadcast-flip'));
+    });
+    expect(screen.getByTestId('talk-broadcast-flip')).not.toBeDisabled();
   });
 });

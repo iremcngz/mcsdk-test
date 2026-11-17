@@ -27,6 +27,16 @@ open class VideoSurfaceSlot {
         l?.invoke(current)
     }
 
+    /**
+     * The Surface as it stands, without registering anything.
+     *
+     * For a caller that already holds its own lock and so must not call [setListener],
+     * which calls back while holding this one: the orders would cross. VideoPipeline's
+     * camera flip reads it this way to give the new rotator the view it already had.
+     */
+    @Synchronized
+    fun peek(): Surface? = current
+
     @Synchronized
     fun onCreated(surface: Surface) {
         current = surface
