@@ -308,11 +308,17 @@ Do not assume a screen is wired just because it renders convincingly.
   pipeline's, and the two orders would cross. A front camera's picture is laterally reversed,
   so `VideoRotator` mirrors it (`quadMatrix(mirror = …)`, flipping x in the source before the
   rotation, which keeps the flip with the picture when the phone is turned).
-- **An incoming group call is placed by a guess, until the SDK reports its group.** Its
-  `groupId` is who started it (`sip:mcptt.<user>@…`, `CallMachine::OnInviteReceived`), so
-  `incomingCallGroup` puts a call naming none of the user's groups under the group on the Talk
-  screen, or else the first free affiliated one. Right with one group; with several, a call can
-  show under the wrong one. Remove it when the SDK is fixed.
+- **An incoming group call names its own group.** The SDK reads it off
+  `<mcptt-calling-group-id>` (`CallModule.cpp` → `McpttInfo::ParseCallingGroupId` →
+  `CallMachine::OnInviteReceived` → `call.SetGroupId`), so `CallInfoEvent.groupId` is the
+  group and both call maps key on it directly. The old `incomingCallGroup` guess — the
+  `groupId` used to carry the *calling user*, so a call was placed under the group on the
+  Talk screen or the first free affiliated one — is gone, along with `GroupHints`; nothing
+  about the group is inferred any more, and a call on a group the user is not affiliated to
+  no longer hides under one of theirs. Where an invite carried no group the SDK warns
+  ("group call without `<calling-group-id>`") and leaves `groupId` empty: both maps drop
+  such a call rather than keying it on `''`, which would put it under a group that does not
+  exist.
 - **Receiving a group's video is wired, not yet verified on a call.** Talk's Receive opens
   `ReceiveScreen`; `useGroupVideoReceive` runs `VideoReceiver` on `SdkVideoFrameSource` for the
   group's MCVideo call while it is open, and when the server says the last transmitter finished

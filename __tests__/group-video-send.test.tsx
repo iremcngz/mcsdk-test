@@ -81,7 +81,6 @@ jest.mock('../src/core/permissions', () => ({
 
 const GROUP = 'sip:group1@example.org';
 
-let mockHints = { known: new Set<string>(), candidates: [] as (string | null)[] };
 
 let send: GroupVideoSend;
 
@@ -90,7 +89,6 @@ function Probe({ groupId }: { groupId: string | null }) {
     sdkRef: { current: mockSdk as any },
     created: true,
     groupId,
-    groupHintsRef: { current: mockHints },
   });
   return null;
 }
@@ -129,7 +127,6 @@ beforeEach(() => {
   Object.keys(handlers).forEach(k => delete handlers[k]);
   jest.clearAllMocks();
   mockPermission = 'granted';
-  mockHints = { known: new Set(), candidates: [] };
 });
 
 describe('useGroupVideoSend', () => {
@@ -216,16 +213,25 @@ describe('useGroupVideoSend', () => {
     expect(mockSdk.requestTransmission).toHaveBeenCalledWith('v1');
   });
 
-  // An incoming call names who started it, not the group: see incomingCallGroup.
-  it('finds the group\'s existing call though it names the caller', async () => {
-    mockHints = { known: new Set([GROUP]), candidates: [GROUP] };
+  // The SDK names the group on an incoming call (<mcptt-calling-group-id>), so it is
+  // matched directly; it used to carry the calling user and the app guessed the group.
+  it('finds the group\'s existing call from the group the SDK names', async () => {
     const view = render(<Probe groupId={null} />);
-    fire('incoming', videoCall({ outgoing: false, groupId: 'sip:mcvideo.mcuser-111@example.org' }));
+    fire('incoming', videoCall({ outgoing: false, groupId: GROUP }));
     await openOnExistingCall(view);
 
     rec();
     expect(mockSdk.startVideoGroupCall).not.toHaveBeenCalled();
     expect(mockSdk.requestTransmission).toHaveBeenCalledWith('v1');
+  });
+
+  // The SDK warns and leaves groupId empty when the invite carried no group; keyed on
+  // '' the call would sit under a group that does not exist.
+  it('ignores a call the SDK could not name a group for', async () => {
+    render(<Probe groupId={null} />);
+    fire('incoming', videoCall({ outgoing: false, groupId: '' }));
+    rec();
+    expect(mockSdk.requestTransmission).not.toHaveBeenCalled();
   });
 
   it('leaves a call it placed when the view closes', async () => {

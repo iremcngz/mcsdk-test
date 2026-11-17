@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { VideoSession } from '../../core/videoSession';
 import { ensureCameraPermission } from '../../core/permissions';
-import { incomingCallGroup, isGroupCall, mapCallState, type GroupHints } from '../calls/sdkCall';
+import { isGroupCall, mapCallState } from '../calls/sdkCall';
 import type {
   CallInfoEvent,
   McSdkTransmissionStatus,
@@ -44,8 +44,6 @@ export interface GroupVideoSendOptions {
   created: boolean;
   /** The group to send to, or null while the transmit view is closed. */
   groupId: string | null;
-  /** For placing an incoming call under its group: see incomingCallGroup. */
-  groupHintsRef: { current: GroupHints };
 }
 
 /** Why a transmission we wanted is over: the server's limit, its decision, or never begun. */
@@ -100,7 +98,6 @@ export function useGroupVideoSend({
   sdkRef,
   created,
   groupId,
-  groupHintsRef,
 }: GroupVideoSendOptions): GroupVideoSend {
   const [calls, setCalls] = useState<Record<string, GroupVideoCall>>({});
   const [cameraReady, setCameraReady] = useState(false);
@@ -142,8 +139,13 @@ export function useGroupVideoSend({
       // What is ending says nothing new: onCallTerminated takes it out.
       if (state !== 'ringing' && state !== 'connecting' && state !== 'active') return;
       setCalls(prev => {
-        const group = Object.keys(prev).find(g => prev[g].callId === e.callId)
-          ?? incomingCallGroup(e, groupHintsRef.current, g => !!prev[g]);
+        // The SDK names the group on an incoming call too (<mcptt-calling-group-id>),
+        // so a call we did not place still lands under the right one.
+        const group = Object.keys(prev).find(g => prev[g].callId === e.callId) ?? e.groupId;
+        // An invite whose body carried no <calling-group-id>: the SDK logs that its
+        // group is unknown and leaves it empty. Keyed on '' it would sit under a group
+        // that does not exist, so it is left out rather than shown in the wrong place.
+        if (!group) return prev;
         const known = prev[group]?.callId === e.callId ? prev[group] : undefined;
         return {
           ...prev,

@@ -21,11 +21,9 @@ import {
   CALL_AUDIO_CODEC,
   USER_FACING_AUDIO_ERRORS,
   floorFieldsAfter,
-  incomingCallGroup,
   isGroupCall,
   mapCallState,
   type FloorFields,
-  type GroupHints,
 } from '../features/calls/sdkCall';
 import type { CallState } from '../features/calls/types';
 
@@ -207,15 +205,16 @@ const CALL_START_ERRORS: ReadonlySet<McSdkError> = new Set<McSdkError>([
  * group replaces the old entry: that call has ended (its termination may still
  * be on its way) and its floor state must not leak into this one.
  *
- * A call stays under the group it was first placed in, wherever the screen has
- * moved to since: see incomingCallGroup for how that is chosen.
+ * The group comes from the event: the SDK reads it off <mcptt-calling-group-id>
+ * (CallModule → CallMachine::OnInviteReceived), so an incoming call names its own
+ * group and nothing has to be inferred. A call already placed keeps its group, so a
+ * later update cannot move it.
  */
 function withCall(
   calls: Record<string, SdkGroupCall>,
   e: CallInfoEvent,
-  hints: GroupHints,
 ): Record<string, SdkGroupCall> {
-  const groupId = groupOfCall(calls, e.callId) ?? incomingCallGroup(e, hints, g => !!calls[g]);
+  const groupId = groupOfCall(calls, e.callId) ?? e.groupId;
   const state = mapCallState(e.state);
   if (!groupId || !state) return calls;
   const prev = calls[groupId]?.sdkCallId === e.callId ? calls[groupId] : undefined;
@@ -268,14 +267,6 @@ export function TalkContextProvider({ children }: { children: React.ReactNode })
   const [focusedGroup, setFocusedGroup] = useState<string | null>(null);
   const [mutedGroups, setMutedGroups] = useState<Record<string, boolean>>({});
 
-  // Read when a call event arrives. The group on screen comes first; before Talk has
-  // been opened there is none, and the first affiliated group is the best guess.
-  const groupHintsRef = useRef<GroupHints>({ known: new Set(), candidates: [] });
-  groupHintsRef.current = {
-    known: new Set([...groups, ...affiliatedGroups].map(g => g.groupId)),
-    candidates: [focusedGroup, ...affiliatedGroups.map(g => g.groupId)],
-  };
-
   // The SDK pushes both lists — there is no getter. They arrive once registration
   // completes, so before that the Talk screen legitimately has no groups to show.
   //
@@ -305,12 +296,12 @@ export function TalkContextProvider({ children }: { children: React.ReactNode })
       // one, and taken here it would replace it, there being one call per group.
       sdk.onIncomingCall((e: CallInfoEvent) => {
         if (isGroupCall(e) && !isGroupVideoCall(e)) {
-          setSdkGroupCalls(prev => withCall(prev, e, groupHintsRef.current));
+          setSdkGroupCalls(prev => withCall(prev, e));
         }
       }),
       sdk.onCallUpdated((e: CallInfoEvent) => {
         if (isGroupCall(e) && !isGroupVideoCall(e)) {
-          setSdkGroupCalls(prev => withCall(prev, e, groupHintsRef.current));
+          setSdkGroupCalls(prev => withCall(prev, e));
         }
       }),
       sdk.onCallTerminated((e: CallTerminatedEvent) => {
@@ -483,7 +474,6 @@ export function TalkContextProvider({ children }: { children: React.ReactNode })
     // Released in the same commit as the private call takes it, so the group's
     // stop always reaches the native pipeline before the private call's start.
     groupId: isBroadcasting && !privateVideoCall ? focusedGroup : null,
-    groupHintsRef,
   });
 
   // The receive view shows the same group's video call.

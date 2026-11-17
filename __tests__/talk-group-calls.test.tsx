@@ -178,10 +178,17 @@ describe('TalkContext — SDK group calls', () => {
   });
 });
 
-// The SDK reports who started an incoming group call where the group should be.
-describe('TalkContext — an incoming call that names no group of ours', () => {
+/**
+ * An incoming group call's own group.
+ *
+ * The SDK reads it off <mcptt-calling-group-id> (CallModule → ParseCallingGroupId →
+ * CallMachine::OnInviteReceived), so the event names the group and the app places the
+ * call on it directly. It used to arrive as the *calling user* instead, and the app
+ * guessed the group from the one on screen and the affiliated list; that guess, and
+ * the tests for it, are gone.
+ */
+describe('TalkContext — where an incoming group call is placed', () => {
   const G3 = 'sip:group.other@ims.mnc001.mcc001.3gppnetwork.org';
-  const CALLER = 'sip:mcptt.mcuser-111@ims.mnc001.mcc001.3gppnetwork.org';
   const group = (groupId: string) => ({ groupId, name: groupId, isPtt: true, isVideo: true, isData: false });
 
   const withGroups = (...ids: string[]) => {
@@ -190,52 +197,61 @@ describe('TalkContext — an incoming call that names no group of ours', () => {
     act(() => { affiliationHandlers.forEach(h => h({ groups })); });
   };
 
-  it('goes under the group on screen', () => {
+  it('goes under the group the SDK names, not the one on screen', () => {
     withGroups(G2, G3);
-    act(() => ctx.setFocusedGroup(G3));
-    fire(incoming, groupCall({ groupId: CALLER }));
+    act(() => ctx.setFocusedGroup(G2));
+    fire(incoming, groupCall({ groupId: G3 }));
     expect(ctx.sdkGroupCalls[G3].sdkCallId).toBe('grp-1');
-    expect(ctx.sdkGroupCalls[CALLER]).toBeUndefined();
+    expect(ctx.sdkGroupCalls[G2]).toBeUndefined();
   });
 
-  it('goes under the first affiliated group before Talk has been opened', () => {
-    withGroups(G2, G3);
-    fire(incoming, groupCall({ groupId: CALLER }));
-    expect(ctx.sdkGroupCalls[G2].sdkCallId).toBe('grp-1');
+  // No list is consulted any more, so a call arriving before the groups do lands right.
+  it('places it before the SDK has reported any groups', () => {
+    fire(incoming, groupCall({ groupId: G3 }));
+    expect(ctx.sdkGroupCalls[G3].sdkCallId).toBe('grp-1');
+  });
+
+  // A group the user is not affiliated to is still the group the call is on; hiding it
+  // under one of ours is what the guess used to do wrong.
+  it('places it on a group of its own even when we have none like it', () => {
+    withGroups(G2);
+    fire(incoming, groupCall({ groupId: G3 }));
+    expect(ctx.sdkGroupCalls[G3].sdkCallId).toBe('grp-1');
+    expect(ctx.sdkGroupCalls[G2]).toBeUndefined();
   });
 
   it('stays under its group when the screen moves on', () => {
     withGroups(G2, G3);
+    fire(incoming, groupCall({ groupId: G3 }));
     act(() => ctx.setFocusedGroup(G2));
-    fire(incoming, groupCall({ groupId: CALLER }));
-    act(() => ctx.setFocusedGroup(G3));
-    fire(updated, groupCall({ groupId: CALLER, state: 'ACTIVE' }));
+    fire(updated, groupCall({ groupId: G3, state: 'ACTIVE' }));
 
-    expect(ctx.sdkGroupCalls[G2].state).toBe('active');
-    expect(ctx.sdkGroupCalls[G3]).toBeUndefined();
+    expect(ctx.sdkGroupCalls[G3].state).toBe('active');
+    expect(ctx.sdkGroupCalls[G2]).toBeUndefined();
   });
 
-  it('does not take over a group that already has a call', () => {
+  // Two calls on two groups: neither displaces the other, since neither is a guess.
+  it('keeps an incoming call beside a call of our own on another group', () => {
     withGroups(G2, G3);
-    act(() => ctx.setFocusedGroup(G2));
     fire(updated, groupCall({ callId: 'mine', state: 'ACTIVE', outgoing: true }));
-    fire(incoming, groupCall({ groupId: CALLER }));
+    fire(incoming, groupCall({ groupId: G3 }));
 
     expect(ctx.sdkGroupCalls[G2].sdkCallId).toBe('mine');
     expect(ctx.sdkGroupCalls[G3].sdkCallId).toBe('grp-1');
   });
 
-  it('leaves a call that names one of our groups where it says', () => {
-    withGroups(G2, G3);
-    act(() => ctx.setFocusedGroup(G3));
-    fire(incoming, groupCall());
-    expect(ctx.sdkGroupCalls[G2].sdkCallId).toBe('grp-1');
+  // An invite whose body carried no <calling-group-id>: the SDK warns and leaves it
+  // empty. Keyed on '' the call would sit under a group that does not exist.
+  it('leaves out a call the SDK could not name a group for', () => {
+    withGroups(G2);
+    fire(incoming, groupCall({ groupId: '' }));
+    expect(Object.keys(ctx.sdkGroupCalls)).toEqual([]);
   });
 
   it('leaves the MCVideo call beside the group\'s MCPTT one out of this', () => {
     withGroups(G2);
     fire(updated, groupCall({ state: 'ACTIVE' }));
-    fire(incoming, groupCall({ callId: 'vid-1', groupId: CALLER, isVideo: true }));
+    fire(incoming, groupCall({ callId: 'vid-1', groupId: G2, isVideo: true }));
     expect(ctx.sdkGroupCalls[G2].sdkCallId).toBe('grp-1');
   });
 });
